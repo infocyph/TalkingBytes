@@ -95,30 +95,24 @@ class Emailer
 
     public function send()
     {
-        // Instantiate the builder
-        $builder = new EmailBuilder();
-
-        // Build headers using the user-provided input
-        $headers = $builder->buildHeaders(
-            $this->from,
-            $this->cc,
-            $this->bcc,
-            $this->replyTo,
-            $this->attachments
-        );
-
-        // Build the email body (plaintext will be auto-generated if not provided)
-        $message = $builder->buildBody(
-            $this->plainText,
-            $this->htmlContent,
-            $this->attachments
-        );
+        $builder = new EmailBuilder($this->from);
+        $builder->setCommonHeaders($this->to, $this->subject, $this->cc, $this->bcc, $this->replyTo);
+//        $builder->setIdHeaders();
 
         // Choose the appropriate sender method (SMTP or generic)
         if ($this->smtpConfigured) {
-            return (new SMTPSender($this->from, $this->smtpConfig))->send($this->to, $message, $headers);
+            return (new SMTPSender($this->from, $this->smtpConfig))->send(
+                $this->to,
+                $builder->setBody($this->htmlContent, $this->plainText, $this->attachments),
+                $builder->getHeaders()
+            );
         }
-        return (new GenericSender())->send($this->to, $this->subject, $message, $headers);
+        return (new GenericSender())->send(
+            $this->to,
+            $this->subject,
+            $builder->setBody($this->htmlContent, $this->plainText, $this->attachments),
+            $builder->getHeaders()
+        );
     }
 
 

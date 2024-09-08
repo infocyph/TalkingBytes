@@ -4,103 +4,108 @@ namespace Infocyph\TakingBytes\Email\System;
 
 class EmailBuilder
 {
-    private $boundaryAlternative;
-    private $boundaryMixed = null;
+    private string $boundaryAlternative;
+    private ?string $boundaryMixed = null;
 
-    public function __construct()
+    private array $headers = [];
+
+    public function __construct(private array $from)
     {
         $this->boundaryAlternative = sha1(uniqid(time(), true));
     }
 
-    public function buildHeaders($from, $cc = [], $bcc = [], $replyTo = '', $attachments = [])
+    public function setCommonHeaders(array $to, string $subject, array $cc = [], $bcc = [], $replyTo = '')
     {
-        return $this->formatFromHeader($from)
-            . $this->formatReplyToHeader($replyTo)
-            . $this->formatCcBccHeaders($cc, $bcc)
-            . $this->formatMimeHeader($attachments);
-    }
-
-    private function formatFromHeader($from)
-    {
-        return "From: =?UTF-8?B?" . base64_encode($from['name']) . "?= <{$from['email']}>\r\n";
-    }
-
-    private function formatReplyToHeader($replyTo)
-    {
-        return "Reply-To: {$replyTo}\r\n";
-    }
-
-    private function formatCcBccHeaders($cc, $bcc)
-    {
-        $headers = "";
+        $this->headers = [
+            'Date: ' . date('r'),
+            'From: =?UTF-8?B?' . base64_encode($this->from['name']) . '?= <' . $this->from['email'] . '>',
+            'To: ' . implode(',', $to),
+            'Reply-To: ' . $replyTo,
+            'Subject: ' . $subject
+        ];
         if (!empty($cc)) {
-            $headers .= "Cc: " . implode(',', $cc) . "\r\n";
+            $this->headers[] = "Cc: " . implode(',', $cc);
         }
         if (!empty($bcc)) {
-            $headers .= "Bcc: " . implode(',', $bcc) . "\r\n";
+            $this->headers[] = "Bcc: " . implode(',', $bcc);
         }
-        return $headers;
+        return $this;
     }
 
-    private function formatMimeHeader($attachments)
+    public function setIdHeaders(string $messageId, string $inReplyTo = '', array $references = [])
     {
-        if (!empty($attachments)) {
-            $this->boundaryMixed = sha1(uniqid(time(), true));
-            return "MIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\"{$this->boundaryMixed}\"\r\n";
-        } else {
-            return "MIME-Version: 1.0\r\nContent-Type: multipart/alternative; boundary=\"{$this->boundaryAlternative}\"\r\n";
+        $domain = substr(strrchr($this->from['email'], "@"), 1);
+
+        $this->headers[] = "Message-ID: <$messageId>";
+
+        if (!empty($inReplyTo)) {
+            $this->headers[] = "In-Reply-To: <$inReplyTo@$domain>";
         }
+        if (!empty($references)) {
+            $this->headers[] = 'References: ' . implode(
+                    ' ',
+                    array_map(function ($ref) use ($domain) {
+                        return "<$ref@$domain>";
+                    }, $references)
+                );
+        }
+        return $this;
     }
 
-    public function buildBody($plainText, $htmlContent = '', $attachments = [])
+    public function setBody($htmlContent, $plainText = '', $attachments = [])
     {
         if (empty($plainText) && !empty($htmlContent)) {
             $plainText = strip_tags($htmlContent);
         }
-
+        $this->headers[] = 'MIME-Version: 1.0';
         $message = $this->buildAlternativeBody($plainText, $htmlContent);
         if (!empty($attachments)) {
-            $message = $this->wrapWithMixedBoundary($message, $attachments);
+            $this->boundaryMixed = sha1(uniqid(time(), true));
+            $this->headers[] = "Content-Type: multipart/mixed; boundary=\"$this->boundaryMixed\"";
+            return $this->wrapWithMixedBoundary($message, $attachments);
         }
-
+        $this->headers[] = "Content-Type: multipart/alternative; boundary=\"$this->boundaryAlternative\"";
         return $message;
+    }
+
+    public function getHeaders()
+    {
+        return implode("\r\n", $this->headers);
     }
 
     private function buildAlternativeBody($plainText, $htmlContent)
     {
-        $message = "";
-        $message .= $this->buildPlainTextPart($plainText);
+        $message = $this->buildPlainTextPart($plainText);
         if (!empty($htmlContent)) {
             $message .= $this->buildHtmlPart($htmlContent);
         }
-        $message .= "--{$this->boundaryAlternative}--\r\n";
+        $message .= "--$this->boundaryAlternative--\r\n";
         return $message;
     }
 
     private function wrapWithMixedBoundary($message, $attachments)
     {
-        $wrappedMessage = "--{$this->boundaryMixed}\r\n";
-        $wrappedMessage .= "Content-Type: multipart/alternative; boundary=\"{$this->boundaryAlternative}\"\r\n\r\n";
-        $wrappedMessage .= $message;
-        $wrappedMessage .= $this->buildAttachmentsPart($attachments);
-        $wrappedMessage .= "--{$this->boundaryMixed}--\r\n";
-        return $wrappedMessage;
+        return "--$this->boundaryMixed\r\n"
+            . "Content-Type: multipart/alternative; boundary=\"$this->boundaryAlternative\"\r\n\r\n"
+            . $message
+            . $this->buildAttachmentsPart($attachments)
+            . "--$this->boundaryMixed--\r\n";
     }
 
     private function buildPlainTextPart($plainText)
     {
-        return "--{$this->boundaryAlternative}\r\n"
+        return "--$this->boundaryAlternative\r\n"
             . "Content-Type: text/plain; charset=UTF-8\r\n"
             . "Content-Transfer-Encoding: 7bit\r\n\r\n"
-            . "{$plainText}\r\n\r\n";
+            . "$plainText\r\n\r\n";
     }
 
     private function buildHtmlPart($htmlContent)
     {
-        return "--{$this->boundaryAlternative}\r\n"
+        return "--$this->boundaryAlternative\r\n"
             . "Content-Type: text/html; charset=UTF-8\r\n"
             . "Content-Transfer-Encoding: quoted-printable\r\n\r\n"
-            . $this->encodeQuotedPrintable($htmlContent) . "\r\n\r\n";
+            . quoted_printable_encode($htmlContent) . "\r\n\r\n";
     }
 
     private function buildAttachmentsPart($attachments)
@@ -108,21 +113,16 @@ class EmailBuilder
         $attachmentsPart = "";
         foreach ($attachments as $attachment) {
             $filePath = $attachment['path'];
-            $fileName = $attachment['name'];
+            $fileName = rawurlencode($attachment['name']);
             $fileType = mime_content_type($filePath);
             $fileContent = chunk_split(base64_encode(file_get_contents($filePath)));
 
-            $attachmentsPart .= "--{$this->boundaryMixed}\r\n"
-                . "Content-Type: $fileType; name*=\"UTF-8''" . rawurlencode($fileName) . "\"\r\n"
-                . "Content-Disposition: attachment; filename*=\"UTF-8''" . rawurlencode($fileName) . "\"\r\n"
+            $attachmentsPart .= "--$this->boundaryMixed\r\n"
+                . "Content-Type: $fileType; name*=\"UTF-8''" . $fileName . "\"\r\n"
+                . "Content-Disposition: attachment; filename*=\"UTF-8''" . $fileName . "\"\r\n"
                 . "Content-Transfer-Encoding: base64\r\n\r\n"
                 . "$fileContent\r\n\r\n";
         }
         return $attachmentsPart;
-    }
-
-    private function encodeQuotedPrintable($string)
-    {
-        return quoted_printable_encode($string);
     }
 }

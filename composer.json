@@ -28,7 +28,8 @@
     }
   },
   "require": {
-    "php": ">=8.0"
+    "php": ">=8.0",
+    "ext-fileinfo": "*"
   },
   "require-dev": {
     "captainhook/captainhook": "^5.23",
