@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Infocyph\TalkingBytes\Resilience;
 
+use InvalidArgumentException;
 use RuntimeException;
 
 final class CircuitBreaker
@@ -15,7 +16,15 @@ final class CircuitBreaker
     public function __construct(
         private readonly int $failureThreshold = 5,
         private readonly int $coolDownSeconds = 30,
-    ) {}
+    ) {
+        if ($this->failureThreshold < 1) {
+            throw new InvalidArgumentException('failureThreshold must be at least 1.');
+        }
+
+        if ($this->coolDownSeconds < 1) {
+            throw new InvalidArgumentException('coolDownSeconds must be at least 1.');
+        }
+    }
 
     public function assertCanProceed(): void
     {

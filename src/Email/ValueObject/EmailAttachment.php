@@ -18,6 +18,7 @@ final readonly class EmailAttachment
         public string $name,
         public string $mimeType,
         public int $sizeBytes,
+        private int $maxSizeBytes,
         public string $disposition = 'attachment',
         public ?string $contentId = null,
         public ?string $path = null,
@@ -31,13 +32,26 @@ final readonly class EmailAttachment
         string $mimeType = 'application/octet-stream',
         string $disposition = 'attachment',
         ?string $contentId = null,
+        int $maxSizeBytes = self::DEFAULT_MAX_SIZE_BYTES,
     ): self {
         self::assertDisposition($disposition);
+        self::assertName($name);
+        self::assertMimeType($mimeType);
+        self::assertContentId($contentId);
+        self::assertMaxSize($maxSizeBytes);
+
+        $size = strlen($content);
+        if ($size > $maxSizeBytes) {
+            throw new AttachmentException(
+                sprintf('Attachment data exceeds max size (%d bytes): %s', $maxSizeBytes, $name),
+            );
+        }
 
         return new self(
             $name,
             $mimeType,
-            strlen($content),
+            $size,
+            $maxSizeBytes,
             $disposition,
             $contentId,
             null,
@@ -53,6 +67,7 @@ final readonly class EmailAttachment
         ?string $contentId = null,
     ): self {
         self::assertDisposition($disposition);
+        self::assertMaxSize($maxSizeBytes);
 
         if (!is_file($path)) {
             throw new AttachmentException(sprintf('Attachment file not found: %s', $path));
@@ -74,11 +89,17 @@ final readonly class EmailAttachment
         }
 
         $mimeType = mime_content_type($path);
+        $resolvedName = $name ?? basename($path);
+        self::assertName($resolvedName);
+        $resolvedMimeType = is_string($mimeType) && $mimeType !== '' ? $mimeType : 'application/octet-stream';
+        self::assertMimeType($resolvedMimeType);
+        self::assertContentId($contentId);
 
         return new self(
-            $name ?? basename($path),
-            is_string($mimeType) && $mimeType !== '' ? $mimeType : 'application/octet-stream',
+            $resolvedName,
+            $resolvedMimeType,
             $fileSize,
+            $maxSizeBytes,
             $disposition,
             $contentId,
             $path,
@@ -94,8 +115,13 @@ final readonly class EmailAttachment
         string $mimeType = 'application/octet-stream',
         string $disposition = 'attachment',
         ?string $contentId = null,
+        int $maxSizeBytes = self::DEFAULT_MAX_SIZE_BYTES,
     ): self {
         self::assertDisposition($disposition);
+        self::assertName($name);
+        self::assertMimeType($mimeType);
+        self::assertContentId($contentId);
+        self::assertMaxSize($maxSizeBytes);
 
         if (!is_resource($stream)) {
             throw new InvalidArgumentException('Attachment stream must be a valid resource.');
@@ -112,7 +138,13 @@ final readonly class EmailAttachment
             }
         }
 
-        return new self($name, $mimeType, $sizeBytes, $disposition, $contentId, null, null, $stream);
+        if ($sizeBytes > $maxSizeBytes) {
+            throw new AttachmentException(
+                sprintf('Attachment stream exceeds max size (%d bytes): %s', $maxSizeBytes, $name),
+            );
+        }
+
+        return new self($name, $mimeType, $sizeBytes, $maxSizeBytes, $disposition, $contentId, null, null, $stream);
     }
 
     public function isInline(): bool
@@ -123,6 +155,8 @@ final readonly class EmailAttachment
     public function readContent(): string
     {
         if ($this->content !== null) {
+            $this->assertReadSizeWithinLimit(strlen($this->content));
+
             return $this->content;
         }
 
@@ -131,6 +165,8 @@ final readonly class EmailAttachment
             if ($fileContent === false) {
                 throw new AttachmentException(sprintf('Unable to read attachment file: %s', $this->path));
             }
+
+            $this->assertReadSizeWithinLimit(strlen($fileContent));
 
             return $fileContent;
         }
@@ -147,10 +183,23 @@ final readonly class EmailAttachment
                 throw new AttachmentException(sprintf('Unable to read attachment stream: %s', $this->name));
             }
 
+            $this->assertReadSizeWithinLimit(strlen($data));
+
             return $data;
         }
 
         throw new AttachmentException(sprintf('Attachment source unavailable: %s', $this->name));
+    }
+
+    private static function assertContentId(?string $contentId): void
+    {
+        if ($contentId === null) {
+            return;
+        }
+
+        if ($contentId === '' || str_contains($contentId, "\r") || str_contains($contentId, "\n") || str_contains($contentId, "\0")) {
+            throw new InvalidArgumentException('Attachment contentId must not be empty or contain control characters.');
+        }
     }
 
     private static function assertDisposition(string $disposition): void
@@ -158,5 +207,37 @@ final readonly class EmailAttachment
         if (!in_array($disposition, ['attachment', 'inline'], true)) {
             throw new InvalidArgumentException(sprintf('Invalid attachment disposition: %s', $disposition));
         }
+    }
+
+    private static function assertMaxSize(int $maxSizeBytes): void
+    {
+        if ($maxSizeBytes < 1) {
+            throw new InvalidArgumentException('Attachment max size must be greater than zero.');
+        }
+    }
+
+    private static function assertMimeType(string $mimeType): void
+    {
+        if (preg_match('/^[A-Za-z0-9!#$&^_.+-]+\/[A-Za-z0-9!#$&^_.+-]+$/', $mimeType) !== 1) {
+            throw new InvalidArgumentException(sprintf('Invalid attachment MIME type: %s', $mimeType));
+        }
+    }
+
+    private static function assertName(string $name): void
+    {
+        if ($name === '' || str_contains($name, "\r") || str_contains($name, "\n") || str_contains($name, "\0")) {
+            throw new InvalidArgumentException('Attachment name must not be empty or contain control characters.');
+        }
+    }
+
+    private function assertReadSizeWithinLimit(int $size): void
+    {
+        if ($size <= $this->maxSizeBytes) {
+            return;
+        }
+
+        throw new AttachmentException(
+            sprintf('Attachment exceeds max size (%d bytes): %s', $this->maxSizeBytes, $this->name),
+        );
     }
 }

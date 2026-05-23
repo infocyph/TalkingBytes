@@ -9,6 +9,7 @@ use Infocyph\TalkingBytes\Email\Enum\ContentTransferEncoding;
 use Infocyph\TalkingBytes\Email\Exception\AttachmentException;
 use Infocyph\TalkingBytes\Email\Exception\InvalidHeaderValueException;
 use Infocyph\TalkingBytes\Email\System\EmailHeaderBuilder;
+use Infocyph\TalkingBytes\Email\System\RawEmailBuilder;
 use Infocyph\TalkingBytes\Email\System\MimeMessageBuilder;
 
 it('builds headers without exposing bcc and generates message id when missing', function (): void {
@@ -135,4 +136,86 @@ it('validates smtp config values', function (): void {
 it('validates smtp credentials values', function (): void {
     expect(fn() => new SmtpCredentials('', 'password'))->toThrow(InvalidArgumentException::class);
     expect(fn() => new SmtpCredentials('username', ''))->toThrow(InvalidArgumentException::class);
+});
+
+it('allows clearing nullable email headers', function (): void {
+    $message = EmailMessage::new()
+        ->from('sender@example.com')
+        ->to('alice@example.com')
+        ->subject('Reset headers')
+        ->text('body')
+        ->replyTo('reply@example.com')
+        ->sender('mailer@example.com')
+        ->listHeaders('list.example.com', 'https://example.com/unsub', 'https://example.com/sub', 'https://example.com/archive')
+        ->withoutReplyTo()
+        ->withoutSender()
+        ->withoutListHeaders();
+
+    $mime = (new MimeMessageBuilder())->build($message);
+    $headers = (new EmailHeaderBuilder())->build($message, $mime, includeSubject: true);
+
+    expect($headers)->not->toContain('Reply-To:');
+    expect($headers)->not->toContain('Sender:');
+    expect($headers)->not->toContain('List-Id:');
+    expect($headers)->not->toContain('List-Unsubscribe:');
+});
+
+it('normalizes raw email line endings to crlf', function (): void {
+    $message = EmailMessage::new()
+        ->from('sender@example.com')
+        ->to('alice@example.com')
+        ->subject('Line endings')
+        ->text("Hello\nWorld\r\nDone\r");
+
+    $raw = (new RawEmailBuilder())->build($message, includeSubject: true);
+
+    expect($raw->raw)->toContain("\r\n\r\n");
+    expect($raw->raw)->not->toContain("\n\n");
+    expect(str_contains(str_replace("\r\n", '', $raw->raw), "\n"))->toBeFalse();
+});
+
+it('validates attachment data limits and identifiers', function (): void {
+    expect(fn() => EmailMessage::new()->attachData(str_repeat('x', 6), 'file.txt', maxSizeBytes: 5))
+        ->toThrow(AttachmentException::class);
+
+    expect(fn() => EmailMessage::new()->attachData('ok', "bad\r\nname.txt"))
+        ->toThrow(InvalidArgumentException::class);
+
+    expect(fn() => EmailMessage::new()->attachInlineData('ok', 'file.txt', "bad\r\ncid"))
+        ->toThrow(InvalidArgumentException::class);
+
+    expect(fn() => EmailMessage::new()->attachData('ok', 'file.txt', 'not/mime@type'))
+        ->toThrow(InvalidArgumentException::class);
+});
+
+it('enforces stream attachment max size when content is read', function (): void {
+    $stream = fopen('php://temp', 'rb+');
+    fwrite($stream, str_repeat('x', 8));
+    rewind($stream);
+
+    $message = EmailMessage::new()
+        ->from('sender@example.com')
+        ->to('alice@example.com')
+        ->subject('Stream size')
+        ->text('Body')
+        ->attachStream($stream, 'stream.bin', maxSizeBytes: 4);
+
+    expect(fn() => (new MimeMessageBuilder())->build($message))
+        ->toThrow(AttachmentException::class, 'exceeds max size');
+
+    fclose($stream);
+});
+
+it('provides embed helper that returns cid and inline attachment', function (): void {
+    $path = sys_get_temp_dir() . '/talkingbytes-embed-' . bin2hex(random_bytes(4)) . '.txt';
+    file_put_contents($path, 'logo');
+
+    [$message, $cid] = EmailMessage::new()->embed($path);
+
+    expect($cid)->toBeString();
+    expect($message->attachments())->toHaveCount(1);
+    expect($message->attachments()[0]->isInline())->toBeTrue();
+    expect($message->attachments()[0]->contentId)->toBe($cid);
+
+    unlink($path);
 });

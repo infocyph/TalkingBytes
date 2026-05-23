@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Infocyph\TalkingBytes\Resilience;
 
+use InvalidArgumentException;
 use RuntimeException;
 
 final class RateLimiter
@@ -14,7 +15,15 @@ final class RateLimiter
     public function __construct(
         private readonly int $maxRequests,
         private readonly int $perSeconds,
-    ) {}
+    ) {
+        if ($this->maxRequests < 1) {
+            throw new InvalidArgumentException('maxRequests must be at least 1.');
+        }
+
+        if ($this->perSeconds < 1) {
+            throw new InvalidArgumentException('perSeconds must be at least 1.');
+        }
+    }
 
     public function assertCanProceed(): void
     {

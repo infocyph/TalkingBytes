@@ -95,7 +95,7 @@ final readonly class CurlMultiTransport
             try {
                 $prepared = $configurator->configure($handle, $prepared, $collector);
             } catch (InvalidArgumentException $exception) {
-                curl_close($handle);
+                unset($handle);
                 $results[$index] = CommunicationResult::failure($exception->getMessage());
 
                 continue;
@@ -132,7 +132,6 @@ final readonly class CurlMultiTransport
 
         foreach ($contexts as $context) {
             curl_multi_remove_handle($multiHandle, $context['handle']);
-            curl_close($context['handle']);
         }
 
         curl_multi_close($multiHandle);

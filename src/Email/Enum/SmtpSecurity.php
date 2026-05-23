@@ -10,8 +10,6 @@ enum SmtpSecurity: string
 
     case Ssl = 'ssl';
 
-    case StartTls = 'starttls';
-
     case StartTlsOptional = 'starttls-optional';
 
     case StartTlsRequired = 'starttls-required';

@@ -52,9 +52,10 @@ final readonly class EmailMessage
         string $content,
         string $name,
         string $mimeType = 'application/octet-stream',
+        int $maxSizeBytes = 26214400,
     ): self {
         $attachments = $this->attachments;
-        $attachments[] = EmailAttachment::fromData($content, $name, $mimeType);
+        $attachments[] = EmailAttachment::fromData($content, $name, $mimeType, maxSizeBytes: $maxSizeBytes);
 
         return new self($this->envelope, $this->headers, $this->htmlBody, $this->textBody, $attachments, $this->metadata);
     }
@@ -72,9 +73,17 @@ final readonly class EmailMessage
         string $name,
         string $contentId,
         string $mimeType = 'application/octet-stream',
+        int $maxSizeBytes = 26214400,
     ): self {
         $attachments = $this->attachments;
-        $attachments[] = EmailAttachment::fromData($content, $name, $mimeType, 'inline', $contentId);
+        $attachments[] = EmailAttachment::fromData(
+            $content,
+            $name,
+            $mimeType,
+            'inline',
+            $contentId,
+            $maxSizeBytes,
+        );
 
         return new self($this->envelope, $this->headers, $this->htmlBody, $this->textBody, $attachments, $this->metadata);
     }
@@ -87,9 +96,10 @@ final readonly class EmailMessage
         string $name,
         string $contentId,
         string $mimeType = 'application/octet-stream',
+        int $maxSizeBytes = 26214400,
     ): self {
         $attachments = $this->attachments;
-        $attachments[] = EmailAttachment::fromStream($stream, $name, $mimeType, 'inline', $contentId);
+        $attachments[] = EmailAttachment::fromStream($stream, $name, $mimeType, 'inline', $contentId, $maxSizeBytes);
 
         return new self($this->envelope, $this->headers, $this->htmlBody, $this->textBody, $attachments, $this->metadata);
     }
@@ -109,9 +119,10 @@ final readonly class EmailMessage
         mixed $stream,
         string $name,
         string $mimeType = 'application/octet-stream',
+        int $maxSizeBytes = 26214400,
     ): self {
         $attachments = $this->attachments;
-        $attachments[] = EmailAttachment::fromStream($stream, $name, $mimeType);
+        $attachments[] = EmailAttachment::fromStream($stream, $name, $mimeType, maxSizeBytes: $maxSizeBytes);
 
         return new self($this->envelope, $this->headers, $this->htmlBody, $this->textBody, $attachments, $this->metadata);
     }
@@ -158,6 +169,23 @@ final readonly class EmailMessage
             $this->attachments,
             $this->metadata,
         );
+    }
+
+    /**
+     * @return array{0:self,1:string}
+     */
+    public function embed(
+        string $filePath,
+        ?string $contentId = null,
+        ?string $filename = null,
+        int $maxSizeBytes = 26214400,
+    ): array {
+        $resolvedContentId = trim($contentId ?? bin2hex(random_bytes(8)), '<>');
+
+        return [
+            $this->attachInline($filePath, $resolvedContentId, $filename, $maxSizeBytes),
+            $resolvedContentId,
+        ];
     }
 
     public function envelope(): EmailEnvelope
@@ -445,11 +473,83 @@ final readonly class EmailMessage
         );
     }
 
+    public function withoutDeliveryNotification(): self
+    {
+        return new self(
+            $this->envelope,
+            $this->headers->withDeliveryNotification(success: false, failure: false, delay: false, returnFull: true),
+            $this->htmlBody,
+            $this->textBody,
+            $this->attachments,
+            $this->metadata,
+        );
+    }
+
     public function withoutHeader(string $name): self
     {
         return new self(
             $this->envelope,
             $this->headers->withoutCustomHeader($name),
+            $this->htmlBody,
+            $this->textBody,
+            $this->attachments,
+            $this->metadata,
+        );
+    }
+
+    public function withoutListHeaders(): self
+    {
+        return new self(
+            $this->envelope,
+            $this->headers->withoutListHeaders(),
+            $this->htmlBody,
+            $this->textBody,
+            $this->attachments,
+            $this->metadata,
+        );
+    }
+
+    public function withoutReadReceipt(): self
+    {
+        return new self(
+            $this->envelope,
+            $this->headers->withReadReceiptTo(null),
+            $this->htmlBody,
+            $this->textBody,
+            $this->attachments,
+            $this->metadata,
+        );
+    }
+
+    public function withoutReplyTo(): self
+    {
+        return new self(
+            $this->envelope,
+            $this->headers->withoutReplyTo(),
+            $this->htmlBody,
+            $this->textBody,
+            $this->attachments,
+            $this->metadata,
+        );
+    }
+
+    public function withoutReturnPath(): self
+    {
+        return new self(
+            $this->envelope->withReturnPath(null),
+            $this->headers,
+            $this->htmlBody,
+            $this->textBody,
+            $this->attachments,
+            $this->metadata,
+        );
+    }
+
+    public function withoutSender(): self
+    {
+        return new self(
+            $this->envelope,
+            $this->headers->withoutSender(),
             $this->htmlBody,
             $this->textBody,
             $this->attachments,

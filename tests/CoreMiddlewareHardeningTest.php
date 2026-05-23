@@ -6,6 +6,8 @@ use Infocyph\TalkingBytes\Core\Contract\TransportInterface;
 use Infocyph\TalkingBytes\Core\Message\CommunicationRequest;
 use Infocyph\TalkingBytes\Core\Middleware\CircuitBreakerMiddleware;
 use Infocyph\TalkingBytes\Core\Middleware\HeaderMiddleware;
+use Infocyph\TalkingBytes\Core\Middleware\IdempotencyMiddleware;
+use Infocyph\TalkingBytes\Core\Middleware\LoggingMiddleware;
 use Infocyph\TalkingBytes\Core\Middleware\RateLimitMiddleware;
 use Infocyph\TalkingBytes\Core\Middleware\RetryMiddleware;
 use Infocyph\TalkingBytes\Core\Middleware\TimeoutMiddleware;
@@ -164,4 +166,67 @@ it('circuit breaker middleware opens after failures', function (): void {
     expect($first->successful)->toBeFalse();
     expect(fn() => $pipeline->send(new CommunicationRequest('test', null)))
         ->toThrow(\RuntimeException::class, 'Circuit breaker is open.');
+});
+
+it('applies idempotency key to both communication headers and http payload headers', function (): void {
+    $requestHeaders = [];
+    $httpHeader = null;
+
+    $transport = new class($requestHeaders, $httpHeader) implements TransportInterface {
+        /**
+         * @param array<string, string|string[]> $requestHeaders
+         */
+        public function __construct(
+            private array &$requestHeaders,
+            private string|array|null &$httpHeader,
+        ) {}
+
+        public function send(CommunicationRequest $request): CommunicationResult
+        {
+            expect($request->payload)->toBeInstanceOf(HttpRequest::class);
+
+            $this->requestHeaders = $request->headers;
+
+            /** @var HttpRequest $httpRequest */
+            $httpRequest = $request->payload;
+            $this->httpHeader = $httpRequest->headers->get('Idempotency-Key');
+
+            return CommunicationResult::success(200);
+        }
+    };
+
+    $pipeline = new MiddlewarePipeline($transport, [new IdempotencyMiddleware()]);
+    $pipeline->send(new CommunicationRequest('http', HttpRequest::post('https://example.com')->json(['a' => 1])));
+
+    expect($requestHeaders)->toHaveKey('Idempotency-Key');
+    expect($requestHeaders['Idempotency-Key'])->toMatch('/^[a-f0-9]{32}$/');
+    expect($httpHeader)->toBe($requestHeaders['Idempotency-Key']);
+});
+
+it('logging middleware logs request end on transport exception', function (): void {
+    $events = [];
+
+    $transport = new class implements TransportInterface {
+        public function send(CommunicationRequest $request): CommunicationResult
+        {
+            unset($request);
+
+            throw new RuntimeException('boom');
+        }
+    };
+
+    $logger = function (string $event, array $context) use (&$events): void {
+        $events[] = ['event' => $event, 'context' => $context];
+    };
+
+    $pipeline = new MiddlewarePipeline($transport, [new LoggingMiddleware($logger)]);
+
+    expect(fn() => $pipeline->send(new CommunicationRequest('test', null)))
+        ->toThrow(RuntimeException::class, 'boom');
+
+    expect($events)->toHaveCount(2);
+    expect($events[0]['event'])->toBe('request.start');
+    expect($events[1]['event'])->toBe('request.end');
+    expect($events[1]['context']['successful'])->toBeFalse();
+    expect($events[1]['context']['error'])->toBe('boom');
 });

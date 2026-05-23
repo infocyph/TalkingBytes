@@ -6,6 +6,7 @@ namespace Infocyph\TalkingBytes\Email\Transport;
 
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
 use Infocyph\TalkingBytes\Email\EmailMessage;
+use Throwable;
 
 final readonly class LoggingEmailTransport implements EmailTransport
 {
@@ -26,7 +27,17 @@ final readonly class LoggingEmailTransport implements EmailTransport
             'subject' => $message->headersData()->subject,
         ]);
 
-        $result = $this->innerTransport->send($message);
+        try {
+            $result = $this->innerTransport->send($message);
+        } catch (Throwable $throwable) {
+            ($this->logger)('email.send.finish', [
+                'successful' => false,
+                'error' => $throwable->getMessage(),
+                'metadata' => [],
+            ]);
+
+            throw $throwable;
+        }
 
         ($this->logger)('email.send.finish', [
             'successful' => $result->successful,

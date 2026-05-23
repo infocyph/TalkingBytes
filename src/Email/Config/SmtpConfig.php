@@ -13,7 +13,7 @@ final readonly class SmtpConfig
     public function __construct(
         public string $host,
         public int $port = 587,
-        public SmtpSecurity $security = SmtpSecurity::StartTls,
+        public SmtpSecurity $security = SmtpSecurity::StartTlsRequired,
         public ?SmtpCredentials $credentials = null,
         public int $timeoutSeconds = 10,
         public string $localDomain = 'localhost',

@@ -8,6 +8,7 @@ use Closure;
 use Infocyph\TalkingBytes\Core\Contract\MiddlewareInterface;
 use Infocyph\TalkingBytes\Core\Message\CommunicationRequest;
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
+use Throwable;
 
 final readonly class LoggingMiddleware implements MiddlewareInterface
 {
@@ -20,7 +21,18 @@ final readonly class LoggingMiddleware implements MiddlewareInterface
     {
         ($this->logger)('request.start', ['transport' => $request->transport, 'metadata' => $request->metadata]);
 
-        $result = $next($request);
+        try {
+            $result = $next($request);
+        } catch (Throwable $throwable) {
+            ($this->logger)('request.end', [
+                'transport' => $request->transport,
+                'successful' => false,
+                'status_code' => null,
+                'error' => $throwable->getMessage(),
+            ]);
+
+            throw $throwable;
+        }
 
         ($this->logger)('request.end', [
             'transport' => $request->transport,

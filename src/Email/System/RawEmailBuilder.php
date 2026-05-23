@@ -16,9 +16,15 @@ final readonly class RawEmailBuilder
     public function build(EmailMessage $message, bool $includeSubject = true): RawEmailMessage
     {
         $mimeMessage = $this->mimeMessageBuilder->build($message);
-        $headers = $this->headerBuilder->build($message, $mimeMessage, $includeSubject);
-        $raw = $headers . "\r\n\r\n" . $mimeMessage->body;
+        $headers = $this->normalizeLineEndings($this->headerBuilder->build($message, $mimeMessage, $includeSubject));
+        $body = $this->normalizeLineEndings($mimeMessage->body);
+        $raw = $headers . "\r\n\r\n" . $body;
 
-        return new RawEmailMessage($headers, $mimeMessage->body, $raw, strlen($raw));
+        return new RawEmailMessage($headers, $body, $raw, strlen($raw));
+    }
+
+    private function normalizeLineEndings(string $value): string
+    {
+        return str_replace("\n", "\r\n", str_replace(["\r\n", "\r"], "\n", $value));
     }
 }

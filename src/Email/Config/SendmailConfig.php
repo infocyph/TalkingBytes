@@ -28,6 +28,14 @@ final readonly class SendmailConfig
             if (trim($argument) === '') {
                 throw new InvalidArgumentException('Sendmail arguments must not contain empty values.');
             }
+
+            if (preg_match('/[\x00\r\n]/', $argument) === 1) {
+                throw new InvalidArgumentException('Sendmail arguments must not contain control characters.');
+            }
+
+            if (preg_match('/\s/', $argument) === 1) {
+                throw new InvalidArgumentException('Sendmail arguments must not contain whitespace. Split composite values into separate arguments.');
+            }
         }
     }
 }

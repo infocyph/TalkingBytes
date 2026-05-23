@@ -17,6 +17,22 @@ final readonly class ReceivedEmail
         public array $metadata = [],
     ) {}
 
+    public static function fromParsedEmail(ParsedEmail $parsedEmail): self
+    {
+        $headers = [];
+
+        foreach ($parsedEmail->headers as $name => $values) {
+            $headers[$name] = $values[0] ?? '';
+        }
+
+        return new self(
+            $headers,
+            $parsedEmail->textBody ?? $parsedEmail->htmlBody ?? '',
+            $parsedEmail->raw,
+            $parsedEmail->metadata,
+        );
+    }
+
     public function header(string $name): ?string
     {
         $normalized = strtolower($name);

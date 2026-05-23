@@ -67,7 +67,7 @@ final readonly class MailFunctionTransport implements EmailTransport
             return '';
         }
 
-        return sprintf('-f%s', escapeshellarg($sender->email));
+        return sprintf('-f %s', escapeshellarg($sender->email));
     }
 
     private function extractMessageId(string $headers): ?string

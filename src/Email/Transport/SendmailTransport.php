@@ -61,7 +61,10 @@ final readonly class SendmailTransport implements EmailTransport
         return CommunicationResult::success(response: $result, metadata: $result->metadata);
     }
 
-    private function executeSendmail(EmailMessage $message, string $rawEmail): void
+    /**
+     * @return list<string>
+     */
+    private function buildCommand(EmailMessage $message): array
     {
         $command = [$this->config->path, ...$this->config->extraArguments];
 
@@ -70,27 +73,77 @@ final readonly class SendmailTransport implements EmailTransport
             $command[] = sprintf('-f%s', $sender->email);
         }
 
-        $descriptorSpec = [
+        return $command;
+    }
+
+    /**
+     * @param array<int, resource|null> $pipes
+     */
+    private function closePipes(array $pipes): void
+    {
+        foreach ($pipes as $pipe) {
+            if (!is_resource($pipe)) {
+                continue;
+            }
+
+            fclose($pipe);
+        }
+    }
+
+    /**
+     * @param resource $process
+     */
+    private function closeProcess($process, bool $alreadyClosed): void
+    {
+        if ($alreadyClosed || !is_resource($process)) {
+            return;
+        }
+
+        proc_terminate($process);
+        proc_close($process);
+    }
+
+    /**
+     * @return array<int, array{0:string,1:string}>
+     */
+    private function descriptorSpec(): array
+    {
+        return [
             0 => ['pipe', 'w'],
             1 => ['pipe', 'w'],
             2 => ['pipe', 'w'],
         ];
+    }
 
-        $process = proc_open($command, $descriptorSpec, $pipes);
+    private function executeSendmail(EmailMessage $message, string $rawEmail): void
+    {
+        $process = proc_open($this->buildCommand($message), $this->descriptorSpec(), $pipes);
 
         if (!is_resource($process)) {
             throw new RuntimeException('Unable to open sendmail process.');
         }
 
-        fwrite($pipes[0], $rawEmail);
-        fclose($pipes[0]);
+        $processClosed = false;
 
-        $stdout = stream_get_contents($pipes[1]);
-        $stderr = stream_get_contents($pipes[2]);
-        fclose($pipes[1]);
-        fclose($pipes[2]);
+        try {
+            $this->writeToStdin($pipes[0], $rawEmail);
+            fclose($pipes[0]);
 
-        $exitCode = proc_close($process);
+            stream_set_blocking($pipes[1], false);
+            stream_set_blocking($pipes[2], false);
+
+            [$exitCode, $stdout, $stderr] = $this->readProcessOutputUntilExit(
+                $process,
+                $pipes[1],
+                $pipes[2],
+                $this->config->timeoutSeconds,
+            );
+            $processClosed = true;
+        } finally {
+            $this->closePipes($pipes);
+            $this->closeProcess($process, $processClosed);
+        }
+
         if ($exitCode !== 0) {
             $detail = trim(($stderr ?: $stdout) ?: 'unknown error');
 
@@ -105,5 +158,71 @@ final readonly class SendmailTransport implements EmailTransport
         }
 
         return trim($matches[1]);
+    }
+
+    /**
+     * @param resource $process
+     * @param resource $stdout
+     * @param resource $stderr
+     *
+     * @return array{0:int,1:string,2:string}
+     */
+    private function readProcessOutputUntilExit($process, $stdout, $stderr, int $timeoutSeconds): array
+    {
+        $start = microtime(true);
+        $stdoutBuffer = '';
+        $stderrBuffer = '';
+        $terminated = false;
+
+        while (true) {
+            $status = proc_get_status($process);
+            $stdoutBuffer .= stream_get_contents($stdout) ?: '';
+            $stderrBuffer .= stream_get_contents($stderr) ?: '';
+
+            if ($status['running'] !== true) {
+                break;
+            }
+
+            if ((microtime(true) - $start) > $timeoutSeconds) {
+                $terminated = true;
+                proc_terminate($process);
+                usleep(100000);
+
+                break;
+            }
+
+            usleep(10000);
+        }
+
+        $stdoutBuffer .= stream_get_contents($stdout) ?: '';
+        $stderrBuffer .= stream_get_contents($stderr) ?: '';
+
+        $exitCode = proc_close($process);
+
+        if ($terminated) {
+            throw new RuntimeException(sprintf('Sendmail process timed out after %d seconds.', $timeoutSeconds));
+        }
+
+        return [$exitCode, $stdoutBuffer, $stderrBuffer];
+    }
+
+    /**
+     * @param resource $stdin
+     */
+    private function writeToStdin($stdin, string $rawEmail): void
+    {
+        $length = strlen($rawEmail);
+        $written = 0;
+
+        while ($written < $length) {
+            $chunk = substr($rawEmail, $written);
+            $current = fwrite($stdin, $chunk);
+
+            if ($current === false || $current === 0) {
+                throw new RuntimeException('Unable to write email payload to sendmail process.');
+            }
+
+            $written += $current;
+        }
     }
 }

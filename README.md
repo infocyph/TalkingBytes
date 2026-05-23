@@ -1,1 +1,3 @@
 # TalkingBytes
+
+displayDetailsOnTestsThatTriggerWarnings="true"

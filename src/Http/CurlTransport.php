@@ -38,7 +38,7 @@ final class CurlTransport implements TransportInterface
             $configurator = new CurlHandleConfigurator();
             $resolvedRequest = $configurator->configure($handle, $resolvedRequest, $headerCollector);
         } catch (InvalidArgumentException $exception) {
-            curl_close($handle);
+            unset($handle);
 
             return CommunicationResult::failure($exception->getMessage());
         }
@@ -48,7 +48,7 @@ final class CurlTransport implements TransportInterface
         $error = curl_error($handle);
         $info = curl_getinfo($handle);
 
-        curl_close($handle);
+        unset($handle);
 
         if (!is_string($rawBody)) {
             return CommunicationResult::failure(

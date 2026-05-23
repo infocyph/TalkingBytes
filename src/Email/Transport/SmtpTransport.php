@@ -33,10 +33,15 @@ final readonly class SmtpTransport implements EmailTransport
         $connection = null;
         $capabilities = new SmtpCapabilities();
         $start = microtime(true);
+        $serverGreeting = null;
+        $authMechanism = null;
+        $sessionStarted = false;
+        $report = null;
 
         try {
             $connection = $this->openConnection();
             [, $serverGreeting] = $this->expect($connection, [220], 'server greeting');
+            $sessionStarted = true;
 
             $capabilities = $this->initializeSession($connection);
             $authMechanism = $this->authenticate($connection, $capabilities);
@@ -50,10 +55,14 @@ final readonly class SmtpTransport implements EmailTransport
             );
             $this->write($connection, "QUIT\r\n");
 
-            $metadata = $report->metadata;
-            $metadata['duration_ms'] = (int) round((microtime(true) - $start) * 1000);
-            $metadata['auth_mechanism'] = $authMechanism;
-            $metadata['server_greeting'] = trim($serverGreeting);
+            $metadata = $this->buildRuntimeMetadata(
+                $messageId,
+                $capabilities,
+                $start,
+                $serverGreeting,
+                $authMechanism,
+                $report->metadata,
+            );
 
             if (!$report->successful) {
                 return CommunicationResult::failure(
@@ -65,6 +74,15 @@ final readonly class SmtpTransport implements EmailTransport
 
             return CommunicationResult::success(response: $report, metadata: $metadata);
         } catch (RuntimeException $exception) {
+            $metadata = $this->buildRuntimeMetadata(
+                $messageId,
+                $capabilities,
+                $start,
+                $serverGreeting,
+                $authMechanism,
+                ['error_stage' => 'smtp-send'],
+            );
+
             return CommunicationResult::failure(
                 $exception->getMessage(),
                 response: new EmailDeliveryReport(
@@ -73,24 +91,16 @@ final readonly class SmtpTransport implements EmailTransport
                     [],
                     $messageId,
                     $exception->getMessage(),
-                    [
-                        'transport' => 'smtp',
-                        'smtp_host' => $this->config->host,
-                        'smtp_port' => $this->config->port,
-                        'security' => $this->config->security->value,
-                        'ehlo_capabilities' => array_keys($capabilities->values),
-                    ],
+                    $metadata,
                 ),
-                metadata: [
-                    'transport' => 'smtp',
-                    'smtp_host' => $this->config->host,
-                    'smtp_port' => $this->config->port,
-                    'security' => $this->config->security->value,
-                    'error_stage' => 'smtp-send',
-                ],
+                metadata: $metadata,
             );
         } finally {
             if (is_resource($connection)) {
+                if ($report === null) {
+                    $this->gracefulClose($connection, $sessionStarted);
+                }
+
                 fclose($connection);
             }
         }
@@ -142,6 +152,34 @@ final readonly class SmtpTransport implements EmailTransport
         $this->expect($connection, [235], 'AUTH success');
 
         return SmtpAuthMechanism::Login->value;
+    }
+
+    /**
+     * @param array<string, mixed> $metadata
+     *
+     * @return array<string, mixed>
+     */
+    private function buildRuntimeMetadata(
+        ?string $messageId,
+        SmtpCapabilities $capabilities,
+        float $startedAt,
+        ?string $serverGreeting,
+        ?string $authMechanism,
+        array $metadata = [],
+    ): array {
+        $base = [
+            'transport' => 'smtp',
+            'smtp_host' => $this->config->host,
+            'smtp_port' => $this->config->port,
+            'security' => $this->config->security->value,
+            'ehlo_capabilities' => array_keys($capabilities->values),
+            'duration_ms' => (int) round((microtime(true) - $startedAt) * 1000),
+            'message_id' => $messageId,
+            'auth_mechanism' => $authMechanism,
+            'server_greeting' => $serverGreeting !== null ? trim($serverGreeting) : null,
+        ];
+
+        return array_merge($base, $metadata);
     }
 
     private function dotStuff(string $payload): string
@@ -207,6 +245,19 @@ final readonly class SmtpTransport implements EmailTransport
         }
 
         return trim($matches[1]);
+    }
+
+    /**
+     * @param resource $connection
+     */
+    private function gracefulClose($connection, bool $sessionStarted): void
+    {
+        if (!$sessionStarted) {
+            return;
+        }
+
+        $this->tryWriteAndDrain($connection, "RSET\r\n");
+        $this->tryWriteAndDrain($connection, "QUIT\r\n");
     }
 
     /**
@@ -317,12 +368,19 @@ final readonly class SmtpTransport implements EmailTransport
 
     private function requiresStartTls(): bool
     {
-        return in_array($this->config->security, [SmtpSecurity::StartTls, SmtpSecurity::StartTlsRequired], true);
+        return $this->config->security === SmtpSecurity::StartTlsRequired;
     }
 
     private function resolveAuthMechanism(SmtpCapabilities $capabilities): SmtpAuthMechanism
     {
         if ($this->config->authMechanism !== SmtpAuthMechanism::Auto) {
+            if ($capabilities->authMechanisms !== [] && !in_array(strtoupper($this->config->authMechanism->value), $capabilities->authMechanisms, true)) {
+                throw new RuntimeException(sprintf(
+                    'SMTP server does not advertise AUTH %s.',
+                    strtoupper($this->config->authMechanism->value),
+                ));
+            }
+
             return $this->config->authMechanism;
         }
 
@@ -403,6 +461,7 @@ final readonly class SmtpTransport implements EmailTransport
                 'message_size_bytes' => $messageSizeBytes,
                 'accepted_count' => count($acceptedRecipients),
                 'rejected_count' => count($rejectedRecipients),
+                'partial_success' => $rejectedRecipients !== [],
                 'final_response' => trim($messageResponse),
             ],
         );
@@ -482,9 +541,22 @@ final readonly class SmtpTransport implements EmailTransport
     {
         return in_array(
             $this->config->security,
-            [SmtpSecurity::StartTls, SmtpSecurity::StartTlsRequired, SmtpSecurity::StartTlsOptional],
+            [SmtpSecurity::StartTlsRequired, SmtpSecurity::StartTlsOptional],
             true,
         );
+    }
+
+    /**
+     * @param resource $connection
+     */
+    private function tryWriteAndDrain($connection, string $command): void
+    {
+        try {
+            $this->write($connection, $command);
+            $this->readResponse($connection);
+        } catch (\Throwable) {
+            // Best-effort close path; do not override root SMTP error.
+        }
     }
 
     /**

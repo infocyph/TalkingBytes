@@ -14,9 +14,19 @@ use Infocyph\TalkingBytes\Grpc\GrpcClient;
 use Infocyph\TalkingBytes\Grpc\GrpcRequest;
 use Infocyph\TalkingBytes\Grpc\GrpcResponse;
 use Infocyph\TalkingBytes\Grpc\GrpcStatus;
+use Infocyph\TalkingBytes\Email\Config\SendmailConfig;
+use Infocyph\TalkingBytes\Email\Config\SmtpConfig;
+use Infocyph\TalkingBytes\Email\Config\SmtpCredentials;
+use Infocyph\TalkingBytes\Email\EmailMessage;
+use Infocyph\TalkingBytes\Email\Enum\SmtpAuthMechanism;
+use Infocyph\TalkingBytes\Email\Transport\MailFunctionTransport;
+use Infocyph\TalkingBytes\Email\Transport\SmtpTransport;
+use Infocyph\TalkingBytes\Email\System\SmtpCapabilityParser;
 use Infocyph\TalkingBytes\Http\HeaderBag;
 use Infocyph\TalkingBytes\Http\HttpRequest;
 use Infocyph\TalkingBytes\Http\Internal\CurlResultFactory;
+use Infocyph\TalkingBytes\Resilience\CircuitBreaker;
+use Infocyph\TalkingBytes\Resilience\RateLimiter;
 use Infocyph\TalkingBytes\Retry\ExponentialBackoffRetryPolicy;
 use Infocyph\TalkingBytes\Retry\FixedDelayRetryPolicy;
 use Infocyph\TalkingBytes\Retry\JitterBackoffRetryPolicy;
@@ -106,4 +116,51 @@ it('webhook verifier rejects malformed timestamp and signature values', function
 
     expect($verifier->verify('{"x":1}', 't=abc,v1=abcdef'))->toBeFalse();
     expect($verifier->verify('{"x":1}', 't=1,v1=nothex'))->toBeFalse();
+});
+
+it('validates resilience constructor arguments', function (): void {
+    expect(fn() => new RateLimiter(0, 60))->toThrow(\InvalidArgumentException::class);
+    expect(fn() => new RateLimiter(1, 0))->toThrow(\InvalidArgumentException::class);
+    expect(fn() => new CircuitBreaker(failureThreshold: 0, coolDownSeconds: 60))->toThrow(\InvalidArgumentException::class);
+    expect(fn() => new CircuitBreaker(failureThreshold: 1, coolDownSeconds: 0))->toThrow(\InvalidArgumentException::class);
+});
+
+it('validates sendmail argument control characters', function (): void {
+    expect(fn() => new SendmailConfig('/usr/sbin/sendmail', ["-t\r\n"], 10))
+        ->toThrow(\InvalidArgumentException::class);
+
+    expect(fn() => new SendmailConfig('/usr/sbin/sendmail', ['-X /tmp/sendmail.log'], 10))
+        ->toThrow(\InvalidArgumentException::class, 'must not contain whitespace');
+});
+
+it('validates explicit smtp auth mechanism against advertised capabilities', function (): void {
+    $config = new SmtpConfig(
+        host: 'smtp.example.com',
+        credentials: new SmtpCredentials('user', 'pass'),
+        authMechanism: SmtpAuthMechanism::Login,
+    );
+
+    $transport = new SmtpTransport($config);
+    $capabilities = (new SmtpCapabilityParser())->parse([
+        '250-mail.example.com',
+        '250 AUTH PLAIN',
+    ]);
+
+    $reflection = new ReflectionMethod($transport, 'resolveAuthMechanism');
+
+    expect(fn() => $reflection->invoke($transport, $capabilities))
+        ->toThrow(RuntimeException::class, 'does not advertise AUTH LOGIN');
+});
+
+it('formats mail() envelope sender with spaced -f parameter', function (): void {
+    $transport = new MailFunctionTransport();
+    $message = EmailMessage::new()
+        ->from('sender@example.com')
+        ->returnPath('bounce@example.com');
+
+    $reflection = new ReflectionMethod($transport, 'envelopeSenderParameter');
+    $value = $reflection->invoke($transport, $message);
+
+    expect($value)->toStartWith('-f ');
+    expect($value)->toContain('bounce@example.com');
 });

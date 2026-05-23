@@ -25,7 +25,13 @@ final readonly class DkimSigner
                 continue;
             }
 
-            $value = $headerMap[$normalized];
+            $values = $headerMap[$normalized];
+            $lastIndex = array_key_last($values);
+            if ($lastIndex === null) {
+                continue;
+            }
+
+            $value = $values[$lastIndex];
             $signedHeaders[] = $normalized;
             $canonicalizedSignedHeaders[] = $this->canonicalizer->canonicalizeHeader($normalized, $value);
         }
@@ -51,11 +57,11 @@ final readonly class DkimSigner
     }
 
     /**
-     * @return array<string, string>
+     * @return array<string, list<string>>
      */
     private function parseHeaders(string $headers): array
     {
-        $lines = preg_split('/\r\n/', $headers) ?: [];
+        $lines = $this->unfoldHeaderLines($headers);
         $parsed = [];
 
         foreach ($lines as $line) {
@@ -64,7 +70,13 @@ final readonly class DkimSigner
             }
 
             [$name, $value] = explode(':', $line, 2);
-            $parsed[strtolower(trim($name))] = ltrim($value);
+            $normalizedName = strtolower(trim($name));
+
+            if (!array_key_exists($normalizedName, $parsed)) {
+                $parsed[$normalizedName] = [];
+            }
+
+            $parsed[$normalizedName][] = ltrim($value);
         }
 
         return $parsed;
@@ -90,5 +102,29 @@ final readonly class DkimSigner
         }
 
         return base64_encode($signature);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function unfoldHeaderLines(string $headers): array
+    {
+        $lines = preg_split('/\r\n/', $headers) ?: [];
+        $unfolded = [];
+
+        foreach ($lines as $line) {
+            if (($line[0] ?? '') === ' ' || ($line[0] ?? '') === "\t") {
+                $last = array_key_last($unfolded);
+                if ($last !== null) {
+                    $unfolded[$last] .= ' ' . ltrim($line);
+                }
+
+                continue;
+            }
+
+            $unfolded[] = $line;
+        }
+
+        return $unfolded;
     }
 }
