@@ -1,64 +1,55 @@
 {
-  "name": "infocyph/talkingbytes",
-  "description": "Communication solution in PHP!",
-  "type": "library",
-  "license": "MIT",
-  "authors": [
-    {
-      "name": "abmmhasan",
-      "email": "abmmhasan@gmail.com"
-    }
-  ],
-  "keywords": [
-    "email",
-    "smtp"
-  ],
-  "autoload": {
-    "psr-4": {
-      "Infocyph\\TakingBytes\\": "src/"
-    }
-  },
-  "minimum-stability": "stable",
-  "prefer-stable": true,
-  "config": {
-    "sort-packages": true,
-    "optimize-autoloader": true,
-    "allow-plugins": {
-      "pestphp/pest-plugin": true
-    }
-  },
-  "require": {
-    "php": ">=8.0",
-    "ext-fileinfo": "*"
-  },
-  "require-dev": {
-    "captainhook/captainhook": "^5.23",
-    "laravel/pint": "^1.15",
-    "pestphp/pest": "^2.34",
-    "rector/rector": "^1.0",
-    "symfony/var-dumper": "^7.0"
-  },
-  "scripts": {
-    "test:code": "pest --parallel --processes=10",
-    "test:refactor": "rector process --dry-run",
-    "test:lint": "pint --test",
-    "test:hook": [
-      "captainhook hook:post-checkout",
-      "captainhook hook:pre-commit",
-      "captainhook hook:post-commit",
-      "captainhook hook:post-merge",
-      "captainhook hook:post-rewrite",
-      "captainhook hook:pre-push"
+    "name": "infocyph/talkingbytes",
+    "description": "Transport-agnostic communication toolkit for PHP.",
+    "license": "MIT",
+    "type": "library",
+    "keywords": [
+        "communication",
+        "email",
+        "smtp",
+        "http",
+        "curl",
+        "grpc",
+        "webhook",
+        "api-client",
+        "transport"
     ],
-    "tests": [
-      "@test:code",
-      "@test:lint",
-      "@test:refactor"
+    "authors": [
+        {
+            "name": "Infocyph",
+            "email": "infocyph@gmail.com"
+        },
+        {
+            "name": "abmmhasan",
+            "email": "abmmhasan@gmail.com"
+        }
     ],
-    "git:hook": "captainhook install --only-enabled -nf",
-    "test": "pest",
-    "refactor": "rector process",
-    "lint": "pint",
-    "post-autoload-dump": "@git:hook"
-  }
+    "require": {
+        "php": ">=8.4",
+        "ext-curl": "*",
+        "ext-fileinfo": "*"
+    },
+    "require-dev": {
+        "infocyph/phpforge": "dev-main"
+    },
+    "suggest": {
+        "ext-grpc": "Required for native gRPC transport.",
+        "grpc/grpc": "Required for generated PHP gRPC clients."
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true,
+    "autoload": {
+        "psr-4": {
+            "Infocyph\\TalkingBytes\\": "src/"
+        }
+    },
+    "config": {
+        "allow-plugins": {
+            "ergebnis/composer-normalize": true,
+            "infocyph/phpforge": true,
+            "pestphp/pest-plugin": true
+        },
+        "optimize-autoloader": true,
+        "sort-packages": true
+    }
 }
