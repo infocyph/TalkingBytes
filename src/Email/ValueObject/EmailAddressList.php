@@ -31,6 +31,11 @@ final readonly class EmailAddressList implements Countable, IteratorAggregate
         return count($this->addresses);
     }
 
+    public function first(): ?InboundEmailAddress
+    {
+        return $this->addresses[0] ?? null;
+    }
+
     /**
      * @return Traversable<int, InboundEmailAddress>
      */

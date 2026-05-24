@@ -37,7 +37,6 @@ final readonly class HeaderMiddleware implements MiddlewareInterface
 
     /**
      * @param array<string, string|string[]> $headers
-     *
      * @return array<string, string|list<string>>
      */
     private function normalizeHeaders(array $headers): array

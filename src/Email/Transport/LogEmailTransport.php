@@ -8,24 +8,33 @@ use DateTimeImmutable;
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
 use Infocyph\TalkingBytes\Email\Config\LogEmailConfig;
 use Infocyph\TalkingBytes\Email\EmailMessage;
-use Infocyph\TalkingBytes\Email\Result\EmailSendResult;
 use Infocyph\TalkingBytes\Email\System\EmailHeaderBuilder;
 use Infocyph\TalkingBytes\Email\System\RawEmailBuilder;
 use RuntimeException;
 
-final readonly class LogEmailTransport implements EmailTransport
+final class LogEmailTransport extends AbstractRawEmailTransport implements EmailTransport
 {
-    public function __construct(
-        private LogEmailConfig $config,
-        private RawEmailBuilder $rawEmailBuilder = new RawEmailBuilder(),
-        private EmailHeaderBuilder $headerBuilder = new EmailHeaderBuilder(),
-    ) {}
+    public function __construct(private readonly LogEmailConfig $config, EmailHeaderBuilder $headerBuilder = new EmailHeaderBuilder(), RawEmailBuilder $rawEmailBuilder = new RawEmailBuilder())
+    {
+        parent::__construct($rawEmailBuilder, $headerBuilder);
+    }
 
     public function send(EmailMessage $message): CommunicationResult
     {
         $message->assertReadyToSend();
 
         $rawEmail = $this->rawEmailBuilder->build($message, includeSubject: true);
+        if (
+            $this->config->maxMessageBytes !== null
+            && $rawEmail->sizeBytes > $this->config->maxMessageBytes
+        ) {
+            return CommunicationResult::failure(sprintf(
+                'Email size %d bytes exceeds configured log max message size %d bytes.',
+                $rawEmail->sizeBytes,
+                $this->config->maxMessageBytes,
+            ));
+        }
+
         $messageId = $this->extractMessageId($rawEmail->headers) ?? $this->headerBuilder->resolveMessageId($message);
         $path = '';
         $written = false;
@@ -36,46 +45,29 @@ final readonly class LogEmailTransport implements EmailTransport
             $path = $this->resolvePath();
             $written = $this->writeLog($path, $rawEmail->raw);
         } catch (RuntimeException $exception) {
-            $result = new EmailSendResult(
+            return EmailTransportResultFactory::failure(
                 'log-email',
                 $messageId,
-                [],
-                array_fill_keys($recipients, $exception->getMessage()),
-                ['transport' => 'log-email', 'log_path' => $path],
-            );
-
-            return CommunicationResult::failure(
                 $exception->getMessage(),
-                response: $result,
-                metadata: $result->metadata,
+                $recipients,
+                ['log_path' => $path],
             );
         }
 
         if (!$written) {
-            $result = new EmailSendResult(
+            return EmailTransportResultFactory::failure(
                 'log-email',
                 $messageId,
-                [],
-                array_fill_keys($recipients, sprintf('Unable to write email log file: %s', $path)),
-                ['transport' => 'log-email', 'log_path' => $path],
-            );
-
-            return CommunicationResult::failure(
                 sprintf('Unable to write email log file: %s', $path),
-                response: $result,
-                metadata: $result->metadata,
+                $recipients,
+                ['log_path' => $path],
             );
         }
 
-        $result = new EmailSendResult(
-            'log-email',
-            $messageId,
-            $recipients,
-            [],
-            ['transport' => 'log-email', 'log_path' => $path, 'size_bytes' => $rawEmail->sizeBytes],
-        );
-
-        return CommunicationResult::success(response: $result, metadata: $result->metadata);
+        return EmailTransportResultFactory::success('log-email', $messageId, $recipients, [
+            'log_path' => $path,
+            'size_bytes' => $rawEmail->sizeBytes,
+        ]);
     }
 
     private function extractMessageId(string $headers): ?string

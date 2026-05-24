@@ -2,15 +2,15 @@
 
 declare(strict_types=1);
 
-use Infocyph\TalkingBytes\Email\EmailMessage;
 use Infocyph\TalkingBytes\Email\Config\SmtpConfig;
 use Infocyph\TalkingBytes\Email\Config\SmtpCredentials;
+use Infocyph\TalkingBytes\Email\EmailMessage;
 use Infocyph\TalkingBytes\Email\Enum\ContentTransferEncoding;
 use Infocyph\TalkingBytes\Email\Exception\AttachmentException;
 use Infocyph\TalkingBytes\Email\Exception\InvalidHeaderValueException;
 use Infocyph\TalkingBytes\Email\System\EmailHeaderBuilder;
-use Infocyph\TalkingBytes\Email\System\RawEmailBuilder;
 use Infocyph\TalkingBytes\Email\System\MimeMessageBuilder;
+use Infocyph\TalkingBytes\Email\System\RawEmailBuilder;
 
 it('builds headers without exposing bcc and generates message id when missing', function (): void {
     $message = EmailMessage::new()
@@ -21,8 +21,8 @@ it('builds headers without exposing bcc and generates message id when missing', 
         ->subject('Welcome')
         ->text('Hello');
 
-    $mime = (new MimeMessageBuilder())->build($message);
-    $headers = (new EmailHeaderBuilder())->build($message, $mime, includeSubject: true);
+    $mime = (new MimeMessageBuilder)->build($message);
+    $headers = (new EmailHeaderBuilder)->build($message, $mime, includeSubject: true);
 
     expect($headers)->toContain('To: alice@example.com');
     expect($headers)->toContain('Cc: bob@example.com');
@@ -31,15 +31,15 @@ it('builds headers without exposing bcc and generates message id when missing', 
 });
 
 it('validates header injection attempts', function (): void {
-    expect(fn() => EmailMessage::new()->subject("Hello\r\nBcc: x@example.com"))
+    expect(fn () => EmailMessage::new()->subject("Hello\r\nBcc: x@example.com"))
         ->toThrow(InvalidHeaderValueException::class);
 
-    expect(fn() => EmailMessage::new()->subject("Hello\x00World"))
+    expect(fn () => EmailMessage::new()->subject("Hello\x00World"))
         ->toThrow(InvalidHeaderValueException::class);
 });
 
 it('throws on missing attachment file', function (): void {
-    expect(fn() => EmailMessage::new()->attach('/tmp/does-not-exist-file.txt'))
+    expect(fn () => EmailMessage::new()->attach('/tmp/does-not-exist-file.txt'))
         ->toThrow(AttachmentException::class);
 });
 
@@ -50,8 +50,8 @@ it('encodes utf8 plain text as quoted printable', function (): void {
         ->subject('utf8')
         ->text('Cafe élan');
 
-    $mime = (new MimeMessageBuilder())->build($message);
-    $headers = (new EmailHeaderBuilder())->build($message, $mime, includeSubject: true);
+    $mime = (new MimeMessageBuilder)->build($message);
+    $headers = (new EmailHeaderBuilder)->build($message, $mime, includeSubject: true);
 
     expect($mime->contentType)->toBe('text/plain; charset=UTF-8');
     expect($mime->contentTransferEncoding)->toBe(ContentTransferEncoding::QuotedPrintable);
@@ -71,8 +71,8 @@ it('keeps explicit in-reply-to and references message ids intact', function (): 
             references: ['<first@example.net>', 'second@example.org'],
         );
 
-    $mime = (new MimeMessageBuilder())->build($message);
-    $headers = (new EmailHeaderBuilder())->build($message, $mime, includeSubject: true);
+    $mime = (new MimeMessageBuilder)->build($message);
+    $headers = (new EmailHeaderBuilder)->build($message, $mime, includeSubject: true);
 
     expect($headers)->toContain('Message-ID: <custom@example.com>');
     expect($headers)->toContain('In-Reply-To: <reply@example.net>');
@@ -86,8 +86,8 @@ it('uses undisclosed recipients when to list is empty', function (): void {
         ->subject('notice')
         ->text('Hello');
 
-    $mime = (new MimeMessageBuilder())->build($message);
-    $headers = (new EmailHeaderBuilder())->build($message, $mime, includeSubject: true);
+    $mime = (new MimeMessageBuilder)->build($message);
+    $headers = (new EmailHeaderBuilder)->build($message, $mime, includeSubject: true);
 
     expect($headers)->toContain('To: undisclosed-recipients:;');
     expect($headers)->toContain('Cc: bob@example.com');
@@ -128,14 +128,37 @@ it('deduplicates recipients case-insensitively for envelope delivery', function 
 });
 
 it('validates smtp config values', function (): void {
-    expect(fn() => new SmtpConfig(''))->toThrow(InvalidArgumentException::class);
-    expect(fn() => new SmtpConfig('smtp.example.com', 0))->toThrow(InvalidArgumentException::class);
-    expect(fn() => new SmtpConfig('smtp.example.com', 587, timeoutSeconds: 0))->toThrow(InvalidArgumentException::class);
+    expect(fn () => new SmtpConfig(''))->toThrow(InvalidArgumentException::class);
+    expect(fn () => new SmtpConfig('smtp.example.com', 0))->toThrow(InvalidArgumentException::class);
+    expect(fn () => new SmtpConfig('smtp.example.com', 587, timeoutSeconds: 0))->toThrow(InvalidArgumentException::class);
 });
 
 it('validates smtp credentials values', function (): void {
-    expect(fn() => new SmtpCredentials('', 'password'))->toThrow(InvalidArgumentException::class);
-    expect(fn() => new SmtpCredentials('username', ''))->toThrow(InvalidArgumentException::class);
+    expect(fn () => new SmtpCredentials('', 'password'))->toThrow(InvalidArgumentException::class);
+    expect(fn () => new SmtpCredentials('username', ''))->toThrow(InvalidArgumentException::class);
+});
+
+it('supports bounce alias and dsn envelope id customization', function (): void {
+    $message = EmailMessage::new()
+        ->from('sender@example.com')
+        ->to('alice@example.com')
+        ->subject('DSN')
+        ->text('Body')
+        ->bounceTo('bounces@example.com')
+        ->deliveryNotification(envelopeId: 'envid-123');
+
+    expect($message->envelope()->returnPath?->email)->toBe('bounces@example.com');
+    expect($message->headersData()->dsnEnvelopeId)->toBe('envid-123');
+});
+
+it('validates dsn envelope id format', function (): void {
+    expect(fn () => EmailMessage::new()
+        ->from('sender@example.com')
+        ->to('alice@example.com')
+        ->subject('DSN')
+        ->text('Body')
+        ->deliveryNotification(envelopeId: 'bad id!'))
+        ->toThrow(InvalidArgumentException::class);
 });
 
 it('allows clearing nullable email headers', function (): void {
@@ -151,8 +174,8 @@ it('allows clearing nullable email headers', function (): void {
         ->withoutSender()
         ->withoutListHeaders();
 
-    $mime = (new MimeMessageBuilder())->build($message);
-    $headers = (new EmailHeaderBuilder())->build($message, $mime, includeSubject: true);
+    $mime = (new MimeMessageBuilder)->build($message);
+    $headers = (new EmailHeaderBuilder)->build($message, $mime, includeSubject: true);
 
     expect($headers)->not->toContain('Reply-To:');
     expect($headers)->not->toContain('Sender:');
@@ -167,7 +190,7 @@ it('normalizes raw email line endings to crlf', function (): void {
         ->subject('Line endings')
         ->text("Hello\nWorld\r\nDone\r");
 
-    $raw = (new RawEmailBuilder())->build($message, includeSubject: true);
+    $raw = (new RawEmailBuilder)->build($message, includeSubject: true);
 
     expect($raw->raw)->toContain("\r\n\r\n");
     expect($raw->raw)->not->toContain("\n\n");
@@ -175,16 +198,16 @@ it('normalizes raw email line endings to crlf', function (): void {
 });
 
 it('validates attachment data limits and identifiers', function (): void {
-    expect(fn() => EmailMessage::new()->attachData(str_repeat('x', 6), 'file.txt', maxSizeBytes: 5))
+    expect(fn () => EmailMessage::new()->attachData(str_repeat('x', 6), 'file.txt', maxSizeBytes: 5))
         ->toThrow(AttachmentException::class);
 
-    expect(fn() => EmailMessage::new()->attachData('ok', "bad\r\nname.txt"))
+    expect(fn () => EmailMessage::new()->attachData('ok', "bad\r\nname.txt"))
         ->toThrow(InvalidArgumentException::class);
 
-    expect(fn() => EmailMessage::new()->attachInlineData('ok', 'file.txt', "bad\r\ncid"))
+    expect(fn () => EmailMessage::new()->attachInlineData('ok', 'file.txt', "bad\r\ncid"))
         ->toThrow(InvalidArgumentException::class);
 
-    expect(fn() => EmailMessage::new()->attachData('ok', 'file.txt', 'not/mime@type'))
+    expect(fn () => EmailMessage::new()->attachData('ok', 'file.txt', 'not/mime@type'))
         ->toThrow(InvalidArgumentException::class);
 });
 
@@ -200,14 +223,31 @@ it('enforces stream attachment max size when content is read', function (): void
         ->text('Body')
         ->attachStream($stream, 'stream.bin', maxSizeBytes: 4);
 
-    expect(fn() => (new MimeMessageBuilder())->build($message))
+    expect(fn () => (new MimeMessageBuilder)->build($message))
         ->toThrow(AttachmentException::class, 'exceeds max size');
 
     fclose($stream);
 });
 
+it('normalizes idn domains to punycode for envelope addresses', function (): void {
+    if (! function_exists('idn_to_ascii')) {
+        expect(fn () => EmailMessage::new()->to('user@bücher.example'))->toThrow(InvalidArgumentException::class);
+
+        return;
+    }
+
+    $message = EmailMessage::new()
+        ->from('sender@bücher.example')
+        ->to('user@bücher.example')
+        ->subject('IDN')
+        ->text('Body');
+
+    expect($message->envelope()->from?->email)->toBe('sender@xn--bcher-kva.example');
+    expect($message->envelope()->to[0]->email)->toBe('user@xn--bcher-kva.example');
+});
+
 it('provides embed helper that returns cid and inline attachment', function (): void {
-    $path = sys_get_temp_dir() . '/talkingbytes-embed-' . bin2hex(random_bytes(4)) . '.txt';
+    $path = sys_get_temp_dir().'/talkingbytes-embed-'.bin2hex(random_bytes(4)).'.txt';
     file_put_contents($path, 'logo');
 
     [$message, $cid] = EmailMessage::new()->embed($path);
@@ -218,4 +258,12 @@ it('provides embed helper that returns cid and inline attachment', function (): 
     expect($message->attachments()[0]->contentId)->toBe($cid);
 
     unlink($path);
+});
+
+it('renders templates into html and text bodies', function (): void {
+    $html = EmailMessage::new()->template('<h1>Hello {{name}}</h1>', ['name' => 'Alice']);
+    $text = EmailMessage::new()->template('Hi {{name}}', ['name' => 'Bob'], asHtml: false);
+
+    expect($html->htmlBody())->toBe('<h1>Hello Alice</h1>');
+    expect($text->textBody())->toBe('Hi Bob');
 });

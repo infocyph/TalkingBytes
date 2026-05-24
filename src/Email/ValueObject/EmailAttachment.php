@@ -34,11 +34,7 @@ final readonly class EmailAttachment
         ?string $contentId = null,
         int $maxSizeBytes = self::DEFAULT_MAX_SIZE_BYTES,
     ): self {
-        self::assertDisposition($disposition);
-        self::assertName($name);
-        self::assertMimeType($mimeType);
-        self::assertContentId($contentId);
-        self::assertMaxSize($maxSizeBytes);
+        self::assertCommonFields($name, $mimeType, $disposition, $contentId, $maxSizeBytes);
 
         $size = strlen($content);
         if ($size > $maxSizeBytes) {
@@ -117,11 +113,7 @@ final readonly class EmailAttachment
         ?string $contentId = null,
         int $maxSizeBytes = self::DEFAULT_MAX_SIZE_BYTES,
     ): self {
-        self::assertDisposition($disposition);
-        self::assertName($name);
-        self::assertMimeType($mimeType);
-        self::assertContentId($contentId);
-        self::assertMaxSize($maxSizeBytes);
+        self::assertCommonFields($name, $mimeType, $disposition, $contentId, $maxSizeBytes);
 
         if (!is_resource($stream)) {
             throw new InvalidArgumentException('Attachment stream must be a valid resource.');
@@ -152,6 +144,11 @@ final readonly class EmailAttachment
         return $this->disposition === 'inline';
     }
 
+    public function maxSizeBytes(): int
+    {
+        return $this->maxSizeBytes;
+    }
+
     public function readContent(): string
     {
         if ($this->content !== null) {
@@ -161,14 +158,7 @@ final readonly class EmailAttachment
         }
 
         if ($this->path !== null) {
-            $fileContent = file_get_contents($this->path);
-            if ($fileContent === false) {
-                throw new AttachmentException(sprintf('Unable to read attachment file: %s', $this->path));
-            }
-
-            $this->assertReadSizeWithinLimit(strlen($fileContent));
-
-            return $fileContent;
+            return $this->readFileContent($this->path);
         }
 
         if (is_resource($this->stream)) {
@@ -189,6 +179,20 @@ final readonly class EmailAttachment
         }
 
         throw new AttachmentException(sprintf('Attachment source unavailable: %s', $this->name));
+    }
+
+    private static function assertCommonFields(
+        string $name,
+        string $mimeType,
+        string $disposition,
+        ?string $contentId,
+        int $maxSizeBytes,
+    ): void {
+        self::assertDisposition($disposition);
+        self::assertName($name);
+        self::assertMimeType($mimeType);
+        self::assertContentId($contentId);
+        self::assertMaxSize($maxSizeBytes);
     }
 
     private static function assertContentId(?string $contentId): void
@@ -239,5 +243,17 @@ final readonly class EmailAttachment
         throw new AttachmentException(
             sprintf('Attachment exceeds max size (%d bytes): %s', $this->maxSizeBytes, $this->name),
         );
+    }
+
+    private function readFileContent(string $path): string
+    {
+        $fileContent = file_get_contents($path);
+        if ($fileContent === false) {
+            throw new AttachmentException(sprintf('Unable to read attachment file: %s', $path));
+        }
+
+        $this->assertReadSizeWithinLimit(strlen($fileContent));
+
+        return $fileContent;
     }
 }

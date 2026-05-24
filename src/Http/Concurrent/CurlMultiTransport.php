@@ -63,7 +63,6 @@ final readonly class CurlMultiTransport
 
     /**
      * @param list<HttpRequest> $requests
-     *
      * @return list<CommunicationResult>
      */
     private function sendChunk(array $requests): array

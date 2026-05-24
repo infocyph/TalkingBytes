@@ -8,60 +8,47 @@ use DateTimeImmutable;
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
 use Infocyph\TalkingBytes\Email\Config\SpoolConfig;
 use Infocyph\TalkingBytes\Email\EmailMessage;
-use Infocyph\TalkingBytes\Email\Result\EmailSendResult;
 use Infocyph\TalkingBytes\Email\System\EmailHeaderBuilder;
 use Infocyph\TalkingBytes\Email\System\RawEmailBuilder;
 use RuntimeException;
 
-final readonly class SpoolEmailTransport implements EmailTransport
+final class SpoolEmailTransport extends AbstractRawEmailTransport implements EmailTransport
 {
     public function __construct(
-        private SpoolConfig $config,
-        private RawEmailBuilder $rawEmailBuilder = new RawEmailBuilder(),
-        private EmailHeaderBuilder $headerBuilder = new EmailHeaderBuilder(),
-    ) {}
+        private readonly SpoolConfig $config,
+        ?RawEmailBuilder $rawEmailBuilder = null,
+        ?EmailHeaderBuilder $headerBuilder = null,
+    ) {
+        parent::__construct(
+            $rawEmailBuilder ?? new RawEmailBuilder(),
+            $headerBuilder ?? new EmailHeaderBuilder(),
+        );
+    }
 
     public function send(EmailMessage $message): CommunicationResult
     {
         $message->assertReadyToSend();
 
-        $rawEmail = $this->rawEmailBuilder->build($message, includeSubject: true);
-        $messageId = $this->extractMessageId($rawEmail->headers) ?? $this->headerBuilder->resolveMessageId($message);
+        $messageId = $this->headerBuilder->resolveMessageId($message);
         $recipients = array_map(static fn($address): string => $address->email, $message->envelope()->recipients());
 
         try {
-            $spoolResult = $this->spool($message, $rawEmail->raw, $rawEmail->sizeBytes);
+            $spoolResult = $this->spool($message);
         } catch (RuntimeException $exception) {
-            $result = new EmailSendResult(
+            return EmailTransportResultFactory::failure(
                 'spool-email',
                 $messageId,
-                [],
-                array_fill_keys($recipients, $exception->getMessage()),
-                ['transport' => 'spool-email'],
-            );
-
-            return CommunicationResult::failure(
                 $exception->getMessage(),
-                response: $result,
-                metadata: $result->metadata,
+                $recipients,
             );
         }
 
-        $result = new EmailSendResult(
-            'spool-email',
-            $messageId,
-            $recipients,
-            [],
-            [
-                'transport' => 'spool-email',
-                'spool_path' => $spoolResult['path'],
-                'size_bytes' => $rawEmail->sizeBytes,
-                'metadata_write_failed' => $spoolResult['metadataError'] !== null,
-                'metadata_write_error' => $spoolResult['metadataError'],
-            ],
-        );
-
-        return CommunicationResult::success(response: $result, metadata: $result->metadata);
+        return EmailTransportResultFactory::success('spool-email', $messageId, $recipients, [
+            'spool_path' => $spoolResult['path'],
+            'size_bytes' => $spoolResult['sizeBytes'],
+            'metadata_write_failed' => $spoolResult['metadataError'] !== null,
+            'metadata_write_error' => $spoolResult['metadataError'],
+        ]);
     }
 
     private function ensureWritableDirectory(string $directory): void
@@ -73,15 +60,6 @@ final readonly class SpoolEmailTransport implements EmailTransport
         if (!is_writable($directory)) {
             throw new RuntimeException(sprintf('Spool directory is not writable: %s', $directory));
         }
-    }
-
-    private function extractMessageId(string $headers): ?string
-    {
-        if (preg_match('/^Message-ID:\s*(.+)$/mi', $headers, $matches) !== 1) {
-            return null;
-        }
-
-        return trim($matches[1]);
     }
 
     private function finalizeEmailFile(string $tempPath, string $finalPath): void
@@ -103,9 +81,9 @@ final readonly class SpoolEmailTransport implements EmailTransport
     }
 
     /**
-     * @return array{path:string,metadataError:?string}
+     * @return array{path:string,metadataError:?string,sizeBytes:int}
      */
-    private function spool(EmailMessage $message, string $rawEmail, int $sizeBytes): array
+    private function spool(EmailMessage $message): array
     {
         $directory = rtrim($this->config->directory, '/\\');
         $this->ensureWritableDirectory($directory);
@@ -114,7 +92,14 @@ final readonly class SpoolEmailTransport implements EmailTransport
         $finalPath = sprintf('%s/%s.eml', $directory, $id);
         $tempPath = sprintf('%s/.%s.tmp', $directory, $id);
 
-        $this->writeTempFile($tempPath, $rawEmail);
+        try {
+            $sizeBytes = $this->writeTempFile($tempPath, $message);
+        } catch (RuntimeException $exception) {
+            $this->removeFileIfExists($tempPath);
+
+            throw $exception;
+        }
+
         $this->finalizeEmailFile($tempPath, $finalPath);
 
         $metadataError = null;
@@ -126,7 +111,7 @@ final readonly class SpoolEmailTransport implements EmailTransport
             }
         }
 
-        return ['path' => $finalPath, 'metadataError' => $metadataError];
+        return ['path' => $finalPath, 'metadataError' => $metadataError, 'sizeBytes' => $sizeBytes];
     }
 
     private function writeMetadata(string $directory, string $id, EmailMessage $message, int $sizeBytes): void
@@ -150,10 +135,49 @@ final readonly class SpoolEmailTransport implements EmailTransport
         }
     }
 
-    private function writeTempFile(string $tempPath, string $rawEmail): void
+    /**
+     * @param resource $stream
+     */
+    private function writeStreamChunk($stream, string $chunk): void
     {
-        if (file_put_contents($tempPath, $rawEmail, LOCK_EX) === false) {
-            throw new RuntimeException(sprintf('Unable to write spool temp file: %s', $tempPath));
+        $length = strlen($chunk);
+        $written = 0;
+
+        while ($written < $length) {
+            $current = fwrite($stream, substr($chunk, $written));
+            if ($current === false || $current === 0) {
+                throw new RuntimeException('Unable to write spool temp file chunk.');
+            }
+
+            $written += $current;
+        }
+    }
+
+    private function writeTempFile(string $tempPath, EmailMessage $message): int
+    {
+        $stream = fopen($tempPath, 'w+b');
+        if (!is_resource($stream)) {
+            throw new RuntimeException(sprintf('Unable to open spool temp file for writing: %s', $tempPath));
+        }
+
+        if (!flock($stream, LOCK_EX)) {
+            fclose($stream);
+
+            throw new RuntimeException(sprintf('Unable to lock spool temp file: %s', $tempPath));
+        }
+
+        try {
+            return $this->rawEmailBuilder->buildToStream(
+                $message,
+                function (string $chunk) use ($stream): void {
+                    $this->writeStreamChunk($stream, $chunk);
+                },
+                includeSubject: true,
+                maxBytes: $this->config->maxMessageBytes,
+            );
+        } finally {
+            flock($stream, LOCK_UN);
+            fclose($stream);
         }
     }
 }

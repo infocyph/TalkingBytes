@@ -22,7 +22,8 @@ use Infocyph\TalkingBytes\Retry\FixedDelayRetryPolicy;
 it('retries when transport throws and policy allows retry', function (): void {
     $attempts = 0;
 
-    $transport = new class($attempts) implements TransportInterface {
+    $transport = new class($attempts) implements TransportInterface
+    {
         public function __construct(private int &$attempts) {}
 
         public function send(CommunicationRequest $request): CommunicationResult
@@ -32,7 +33,7 @@ it('retries when transport throws and policy allows retry', function (): void {
             $this->attempts++;
 
             if ($this->attempts === 1) {
-                throw new \RuntimeException('temporary failure');
+                throw new RuntimeException('temporary failure');
             }
 
             return CommunicationResult::success(200);
@@ -50,7 +51,8 @@ it('retries when transport throws and policy allows retry', function (): void {
 it('applies timeout middleware to http request payload', function (): void {
     $timeoutSeen = null;
 
-    $transport = new class($timeoutSeen) implements TransportInterface {
+    $transport = new class($timeoutSeen) implements TransportInterface
+    {
         public function __construct(private ?int &$timeoutSeen) {}
 
         public function send(CommunicationRequest $request): CommunicationResult
@@ -75,7 +77,8 @@ it('applies timeout middleware to http request payload', function (): void {
 it('applies timeout middleware to grpc request payload', function (): void {
     $deadlineSeen = null;
 
-    $transport = new class($deadlineSeen) implements TransportInterface {
+    $transport = new class($deadlineSeen) implements TransportInterface
+    {
         public function __construct(private ?float &$deadlineSeen) {}
 
         public function send(CommunicationRequest $request): CommunicationResult
@@ -100,7 +103,8 @@ it('applies timeout middleware to grpc request payload', function (): void {
 it('applies header middleware to http request payload', function (): void {
     $headerValue = null;
 
-    $transport = new class($headerValue) implements TransportInterface {
+    $transport = new class($headerValue) implements TransportInterface
+    {
         public function __construct(private ?string &$headerValue) {}
 
         public function send(CommunicationRequest $request): CommunicationResult
@@ -126,7 +130,8 @@ it('applies header middleware to http request payload', function (): void {
 });
 
 it('rate limit middleware blocks excess requests', function (): void {
-    $transport = new class implements TransportInterface {
+    $transport = new class implements TransportInterface
+    {
         public function send(CommunicationRequest $request): CommunicationResult
         {
             unset($request);
@@ -142,12 +147,13 @@ it('rate limit middleware blocks excess requests', function (): void {
 
     $pipeline->send(new CommunicationRequest('test', null));
 
-    expect(fn() => $pipeline->send(new CommunicationRequest('test', null)))
-        ->toThrow(\RuntimeException::class, 'Rate limit exceeded.');
+    expect(fn () => $pipeline->send(new CommunicationRequest('test', null)))
+        ->toThrow(RuntimeException::class, 'Rate limit exceeded.');
 });
 
 it('circuit breaker middleware opens after failures', function (): void {
-    $transport = new class implements TransportInterface {
+    $transport = new class implements TransportInterface
+    {
         public function send(CommunicationRequest $request): CommunicationResult
         {
             unset($request);
@@ -164,17 +170,18 @@ it('circuit breaker middleware opens after failures', function (): void {
     $first = $pipeline->send(new CommunicationRequest('test', null));
 
     expect($first->successful)->toBeFalse();
-    expect(fn() => $pipeline->send(new CommunicationRequest('test', null)))
-        ->toThrow(\RuntimeException::class, 'Circuit breaker is open.');
+    expect(fn () => $pipeline->send(new CommunicationRequest('test', null)))
+        ->toThrow(RuntimeException::class, 'Circuit breaker is open.');
 });
 
 it('applies idempotency key to both communication headers and http payload headers', function (): void {
     $requestHeaders = [];
     $httpHeader = null;
 
-    $transport = new class($requestHeaders, $httpHeader) implements TransportInterface {
+    $transport = new class($requestHeaders, $httpHeader) implements TransportInterface
+    {
         /**
-         * @param array<string, string|string[]> $requestHeaders
+         * @param  array<string, string|string[]>  $requestHeaders
          */
         public function __construct(
             private array &$requestHeaders,
@@ -195,7 +202,7 @@ it('applies idempotency key to both communication headers and http payload heade
         }
     };
 
-    $pipeline = new MiddlewarePipeline($transport, [new IdempotencyMiddleware()]);
+    $pipeline = new MiddlewarePipeline($transport, [new IdempotencyMiddleware]);
     $pipeline->send(new CommunicationRequest('http', HttpRequest::post('https://example.com')->json(['a' => 1])));
 
     expect($requestHeaders)->toHaveKey('Idempotency-Key');
@@ -206,7 +213,8 @@ it('applies idempotency key to both communication headers and http payload heade
 it('logging middleware logs request end on transport exception', function (): void {
     $events = [];
 
-    $transport = new class implements TransportInterface {
+    $transport = new class implements TransportInterface
+    {
         public function send(CommunicationRequest $request): CommunicationResult
         {
             unset($request);
@@ -221,7 +229,7 @@ it('logging middleware logs request end on transport exception', function (): vo
 
     $pipeline = new MiddlewarePipeline($transport, [new LoggingMiddleware($logger)]);
 
-    expect(fn() => $pipeline->send(new CommunicationRequest('test', null)))
+    expect(fn () => $pipeline->send(new CommunicationRequest('test', null)))
         ->toThrow(RuntimeException::class, 'boom');
 
     expect($events)->toHaveCount(2);

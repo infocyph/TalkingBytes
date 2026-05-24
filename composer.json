@@ -34,6 +34,10 @@
     },
     "suggest": {
         "ext-grpc": "Required for native gRPC transport.",
+        "ext-iconv": "Optional fallback for inbound charset conversion when mbstring is unavailable.",
+        "ext-imap": "Optional for imap_* address parsing and UTF7-IMAP fallback helpers.",
+        "ext-mbstring": "Recommended for robust charset conversion and encoded header handling.",
+        "ext-openssl": "Required for DKIM signing/verification and TLS-enabled SMTP/IMAP/POP3 sessions.",
         "grpc/grpc": "Required for generated PHP gRPC clients."
     },
     "minimum-stability": "stable",

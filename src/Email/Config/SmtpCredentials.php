@@ -20,4 +20,15 @@ final readonly class SmtpCredentials
             throw new InvalidArgumentException('SMTP password is required when credentials are provided.');
         }
     }
+
+    /**
+     * @param array<string, mixed> $config
+     */
+    public static function fromArray(array $config): self
+    {
+        return new self(
+            username: ConfigValue::string($config, 'username', ''),
+            password: ConfigValue::string($config, 'password', ''),
+        );
+    }
 }

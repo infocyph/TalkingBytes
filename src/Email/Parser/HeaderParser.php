@@ -5,18 +5,42 @@ declare(strict_types=1);
 namespace Infocyph\TalkingBytes\Email\Parser;
 
 use DateTimeImmutable;
+use Infocyph\TalkingBytes\Email\Exception\EmailParseException;
 use Infocyph\TalkingBytes\Email\ValueObject\HeaderBag;
 
-final class HeaderParser
+final readonly class HeaderParser
 {
-    public function parse(string $headerBlock): HeaderBag
+    public const string MODE_STRICT = 'strict';
+
+    public const string MODE_TOLERANT = 'tolerant';
+
+    public function __construct(private string $mode = self::MODE_TOLERANT)
     {
+        if (!in_array($this->mode, [self::MODE_STRICT, self::MODE_TOLERANT], true)) {
+            throw new EmailParseException(sprintf('Invalid header parser mode: %s', $this->mode));
+        }
+    }
+
+    public function parse(string $headerBlock, ?string $mode = null): HeaderBag
+    {
+        $mode ??= $this->mode;
         $lines = preg_split('/\r\n/', $this->normalizeLineEndings($headerBlock)) ?: [];
-        $unfolded = $this->unfold($lines);
+        $unfolded = $this->unfold($lines, $mode);
         $headers = [];
 
         foreach ($unfolded as $line) {
-            if ($line === '' || !str_contains($line, ':')) {
+            if ($line === '') {
+                continue;
+            }
+
+            if (!str_contains($line, ':')) {
+                if ($mode === self::MODE_STRICT) {
+                    throw new EmailParseException(sprintf('Malformed header line: %s', $line));
+                }
+
+                $headers['x-invalid-header'] ??= [];
+                $headers['x-invalid-header'][] = $line;
+
                 continue;
             }
 
@@ -73,15 +97,57 @@ final class HeaderParser
         return $normalized;
     }
 
+    private static function convertToUtf8(string $charset, string $value): string|false
+    {
+        set_error_handler(
+            static fn() => true,
+        );
+
+        try {
+            return iconv($charset, 'UTF-8//IGNORE', $value);
+        } finally {
+            restore_error_handler();
+        }
+    }
+
+    private function decodeEncodedWordsFallback(string $value): string
+    {
+        return (string) preg_replace_callback(
+            '/=\?([^?]+)\?([bqBQ])\?([^?]+)\?=/',
+            static function (array $matches): string {
+                $charset = strtoupper($matches[1]);
+                $encoding = strtoupper($matches[2]);
+                $payload = $matches[3];
+
+                $decoded = $encoding === 'B'
+                    ? base64_decode($payload, true)
+                    : quoted_printable_decode(str_replace('_', ' ', $payload));
+
+                if ($decoded === false) {
+                    return $matches[0];
+                }
+
+                if ($charset === 'UTF-8' || $charset === 'US-ASCII') {
+                    return $decoded;
+                }
+
+                $converted = self::convertToUtf8($charset, $decoded);
+
+                return is_string($converted) && $converted !== '' ? $converted : $decoded;
+            },
+            $value,
+        );
+    }
+
     private function decodeHeaderValue(string $value): string
     {
         $decoded = iconv_mime_decode($value, ICONV_MIME_DECODE_CONTINUE_ON_ERROR, 'UTF-8');
 
-        if ($decoded === false) {
-            return $value;
+        if ($decoded !== false) {
+            return $decoded;
         }
 
-        return $decoded;
+        return $this->decodeEncodedWordsFallback($value);
     }
 
     private function normalizeLineEndings(string $value): string
@@ -91,10 +157,9 @@ final class HeaderParser
 
     /**
      * @param list<string> $lines
-     *
      * @return list<string>
      */
-    private function unfold(array $lines): array
+    private function unfold(array $lines, string $mode): array
     {
         $unfolded = [];
 
@@ -103,6 +168,10 @@ final class HeaderParser
                 $last = array_key_last($unfolded);
                 if ($last !== null) {
                     $unfolded[$last] .= ' ' . ltrim($line);
+                } elseif ($mode === self::MODE_STRICT) {
+                    throw new EmailParseException(sprintf('Malformed folded header line: %s', $line));
+                } else {
+                    $unfolded[] = ltrim($line);
                 }
 
                 continue;

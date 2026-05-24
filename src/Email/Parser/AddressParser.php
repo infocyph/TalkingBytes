@@ -43,7 +43,7 @@ final class AddressParser
         }
 
         $personal = $this->readObjectString($mailbox, 'personal');
-        $raw = $this->readObjectString($mailbox, 'adl') ?? $rawHeader;
+        $raw = $rawHeader;
 
         return new InboundEmailAddress($email, $personal, $raw);
     }
@@ -84,11 +84,12 @@ final class AddressParser
      */
     private function parseWithoutImap(string $headerValue): array
     {
-        $tokens = preg_split('/,(?=(?:[^"]*"[^"]*")*[^"]*$)/', $headerValue) ?: [];
+        $normalized = $this->stripGroups($headerValue);
+        $tokens = preg_split('/,(?=(?:[^"]*"[^"]*")*[^"]*$)/', $normalized) ?: [];
         $addresses = [];
 
         foreach ($tokens as $token) {
-            $token = trim($token);
+            $token = $this->stripComments(trim($token));
             if ($token === '') {
                 continue;
             }
@@ -96,7 +97,11 @@ final class AddressParser
             if (preg_match('/^(?:"?([^"]*)"?\s*)?<([^>]+)>$/', $token, $matches) === 1) {
                 $name = trim($matches[1]);
                 $email = trim($matches[2]);
-                $addresses[] = new InboundEmailAddress($email !== '' ? $email : null, $name !== '' ? $name : null, $token);
+                $addresses[] = new InboundEmailAddress(
+                    $this->validEmailOrNull($email),
+                    $name !== '' ? trim($name, '"') : null,
+                    $token,
+                );
 
                 continue;
             }
@@ -116,5 +121,25 @@ final class AddressParser
         $value = $mailbox->{$property};
 
         return is_string($value) ? $value : null;
+    }
+
+    private function stripComments(string $value): string
+    {
+        return trim((string) preg_replace('/\s*\([^()]*\)\s*/', ' ', $value));
+    }
+
+    private function stripGroups(string $value): string
+    {
+        return (string) preg_replace('/[^:;,]+:\s*([^;]*);/m', '$1', $value);
+    }
+
+    private function validEmailOrNull(string $value): ?string
+    {
+        $normalized = trim($value);
+        if ($normalized === '') {
+            return null;
+        }
+
+        return filter_var($normalized, FILTER_VALIDATE_EMAIL) !== false ? $normalized : null;
     }
 }

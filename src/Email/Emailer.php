@@ -10,6 +10,8 @@ use Infocyph\TalkingBytes\Email\Config\LogEmailConfig;
 use Infocyph\TalkingBytes\Email\Config\SendmailConfig;
 use Infocyph\TalkingBytes\Email\Config\SmtpConfig;
 use Infocyph\TalkingBytes\Email\Config\SpoolConfig;
+use Infocyph\TalkingBytes\Email\Event\EmailEventBus;
+use Infocyph\TalkingBytes\Email\Logging\Psr3LoggerAdapter;
 use Infocyph\TalkingBytes\Email\Testing\AssertableEmailTransport;
 use Infocyph\TalkingBytes\Email\Testing\FakeEmailTransport;
 use Infocyph\TalkingBytes\Email\Transport\DkimSigningTransport;
@@ -77,7 +79,24 @@ final readonly class Emailer
 
     public function send(EmailMessage $message): CommunicationResult
     {
-        return $this->transport->send($message);
+        EmailEventBus::dispatch('email.send.start', [
+            'subject' => $message->headersData()->subject,
+            'to_count' => count($message->envelope()->to),
+            'cc_count' => count($message->envelope()->cc),
+            'bcc_count' => count($message->envelope()->bcc),
+        ]);
+
+        $startedAt = microtime(true);
+        $result = $this->transport->send($message);
+
+        EmailEventBus::dispatch('email.send.finish', [
+            'successful' => $result->successful,
+            'error' => $result->error,
+            'duration_ms' => (int) round((microtime(true) - $startedAt) * 1000),
+            'metadata' => $result->metadata,
+        ]);
+
+        return $result;
     }
 
     public function transport(): EmailTransport
@@ -104,6 +123,11 @@ final readonly class Emailer
     public function withLogging(callable $logger): self
     {
         return new self(new LoggingEmailTransport($this->transport, $logger));
+    }
+
+    public function withPsrLogger(object $logger, string $level = 'info'): self
+    {
+        return $this->withLogging(new Psr3LoggerAdapter($logger)->toCallable($level));
     }
 
     public function withRateLimit(RateLimiter $rateLimiter): self

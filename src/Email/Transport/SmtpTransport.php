@@ -10,9 +10,11 @@ use Infocyph\TalkingBytes\Email\EmailMessage;
 use Infocyph\TalkingBytes\Email\Enum\SmtpAuthMechanism;
 use Infocyph\TalkingBytes\Email\Enum\SmtpSecurity;
 use Infocyph\TalkingBytes\Email\Result\EmailDeliveryReport;
+use Infocyph\TalkingBytes\Email\Result\EmailRecipientResult;
 use Infocyph\TalkingBytes\Email\System\RawEmailBuilder;
 use Infocyph\TalkingBytes\Email\System\SmtpCapabilities;
 use Infocyph\TalkingBytes\Email\System\SmtpCapabilityParser;
+use Infocyph\TalkingBytes\Email\System\SmtpEnvelopePlanner;
 use Infocyph\TalkingBytes\Email\ValueObject\EmailHeaders;
 use RuntimeException;
 
@@ -22,14 +24,26 @@ final readonly class SmtpTransport implements EmailTransport
         private SmtpConfig $config,
         private RawEmailBuilder $rawEmailBuilder = new RawEmailBuilder(),
         private SmtpCapabilityParser $capabilityParser = new SmtpCapabilityParser(),
+        private ?SmtpEnvelopePlanner $envelopePlanner = null,
     ) {}
 
     public function send(EmailMessage $message): CommunicationResult
     {
         $message->assertReadyToSend();
 
-        $rawEmail = $this->rawEmailBuilder->build($message, includeSubject: true);
-        $messageId = $this->extractMessageId($rawEmail->headers);
+        $inspection = $this->rawEmailBuilder->inspect($message, includeSubject: true);
+        if (
+            $this->config->maxMessageBytes !== null
+            && $inspection['sizeBytes'] > $this->config->maxMessageBytes
+        ) {
+            return CommunicationResult::failure(sprintf(
+                'Email size %d bytes exceeds configured SMTP max message size %d bytes.',
+                $inspection['sizeBytes'],
+                $this->config->maxMessageBytes,
+            ));
+        }
+
+        $messageId = $inspection['messageId'];
         $connection = null;
         $capabilities = new SmtpCapabilities();
         $start = microtime(true);
@@ -37,23 +51,25 @@ final readonly class SmtpTransport implements EmailTransport
         $authMechanism = null;
         $sessionStarted = false;
         $report = null;
+        $transcript = [];
 
         try {
             $connection = $this->openConnection();
-            [, $serverGreeting] = $this->expect($connection, [220], 'server greeting');
+            [, $serverGreeting] = $this->expect($connection, [220], 'server greeting', $transcript);
             $sessionStarted = true;
 
-            $capabilities = $this->initializeSession($connection);
-            $authMechanism = $this->authenticate($connection, $capabilities);
+            $capabilities = $this->initializeSession($connection, $transcript);
+            $authMechanism = $this->authenticate($connection, $capabilities, $transcript);
             $report = $this->sendEmailData(
                 $connection,
                 $message,
-                $rawEmail->raw,
-                $rawEmail->sizeBytes,
+                $inspection['sizeBytes'],
+                $inspection['containsNonAscii'],
                 $capabilities,
                 $messageId,
+                $transcript,
             );
-            $this->write($connection, "QUIT\r\n");
+            $this->write($connection, "QUIT\r\n", $transcript);
 
             $metadata = $this->buildRuntimeMetadata(
                 $messageId,
@@ -62,6 +78,7 @@ final readonly class SmtpTransport implements EmailTransport
                 $serverGreeting,
                 $authMechanism,
                 $report->metadata,
+                $transcript,
             );
 
             if (!$report->successful) {
@@ -81,6 +98,7 @@ final readonly class SmtpTransport implements EmailTransport
                 $serverGreeting,
                 $authMechanism,
                 ['error_stage' => 'smtp-send'],
+                $transcript,
             );
 
             return CommunicationResult::failure(
@@ -91,6 +109,7 @@ final readonly class SmtpTransport implements EmailTransport
                     [],
                     $messageId,
                     $exception->getMessage(),
+                    [],
                     $metadata,
                 ),
                 metadata: $metadata,
@@ -98,7 +117,7 @@ final readonly class SmtpTransport implements EmailTransport
         } finally {
             if (is_resource($connection)) {
                 if ($report === null) {
-                    $this->gracefulClose($connection, $sessionStarted);
+                    $this->gracefulClose($connection, $sessionStarted, $transcript);
                 }
 
                 fclose($connection);
@@ -120,8 +139,9 @@ final readonly class SmtpTransport implements EmailTransport
 
     /**
      * @param resource $connection
+     * @param list<string> $transcript
      */
-    private function authenticate($connection, SmtpCapabilities $capabilities): ?string
+    private function authenticate($connection, SmtpCapabilities $capabilities, array &$transcript): ?string
     {
         if ($this->config->credentials === null) {
             return null;
@@ -136,27 +156,27 @@ final readonly class SmtpTransport implements EmailTransport
                 $this->config->credentials->password,
             );
 
-            $this->write($connection, 'AUTH PLAIN ' . base64_encode($payload) . "\r\n");
-            $this->expect($connection, [235], 'AUTH PLAIN success');
+            $this->write($connection, 'AUTH PLAIN ' . base64_encode($payload) . "\r\n", $transcript, sensitive: true);
+            $this->expect($connection, [235], 'AUTH PLAIN success', $transcript);
 
             return SmtpAuthMechanism::Plain->value;
         }
 
-        $this->write($connection, "AUTH LOGIN\r\n");
-        $this->expect($connection, [334], 'AUTH LOGIN challenge');
+        $this->write($connection, "AUTH LOGIN\r\n", $transcript);
+        $this->expect($connection, [334], 'AUTH LOGIN challenge', $transcript);
 
-        $this->write($connection, base64_encode($this->config->credentials->username) . "\r\n");
-        $this->expect($connection, [334], 'AUTH username challenge');
+        $this->write($connection, base64_encode($this->config->credentials->username) . "\r\n", $transcript, sensitive: true);
+        $this->expect($connection, [334], 'AUTH username challenge', $transcript);
 
-        $this->write($connection, base64_encode($this->config->credentials->password) . "\r\n");
-        $this->expect($connection, [235], 'AUTH success');
+        $this->write($connection, base64_encode($this->config->credentials->password) . "\r\n", $transcript, sensitive: true);
+        $this->expect($connection, [235], 'AUTH success', $transcript);
 
         return SmtpAuthMechanism::Login->value;
     }
 
     /**
      * @param array<string, mixed> $metadata
-     *
+     * @param list<string> $transcript
      * @return array<string, mixed>
      */
     private function buildRuntimeMetadata(
@@ -166,6 +186,7 @@ final readonly class SmtpTransport implements EmailTransport
         ?string $serverGreeting,
         ?string $authMechanism,
         array $metadata = [],
+        array $transcript = [],
     ): array {
         $base = [
             'transport' => 'smtp',
@@ -179,49 +200,22 @@ final readonly class SmtpTransport implements EmailTransport
             'server_greeting' => $serverGreeting !== null ? trim($serverGreeting) : null,
         ];
 
+        if ($this->config->captureTranscript) {
+            $base['smtp_transcript'] = $transcript;
+        }
+
         return array_merge($base, $metadata);
-    }
-
-    private function dotStuff(string $payload): string
-    {
-        $normalized = str_replace(["\r\n", "\r"], "\n", $payload);
-        $normalized = preg_replace('/^\./m', '..', $normalized) ?? $normalized;
-
-        return str_replace("\n", "\r\n", $normalized);
-    }
-
-    private function dsnNotifyDirective(EmailHeaders $headers): ?string
-    {
-        $notifyFlags = [];
-
-        if ($headers->dsnNotifySuccess) {
-            $notifyFlags[] = 'SUCCESS';
-        }
-
-        if ($headers->dsnNotifyFailure) {
-            $notifyFlags[] = 'FAILURE';
-        }
-
-        if ($headers->dsnNotifyDelay) {
-            $notifyFlags[] = 'DELAY';
-        }
-
-        if ($notifyFlags === []) {
-            return null;
-        }
-
-        return implode(',', $notifyFlags);
     }
 
     /**
      * @param resource $connection
      * @param list<int> $expectedCodes
-     *
+     * @param list<string> $transcript
      * @return array{0:int,1:string,2:list<string>}
      */
-    private function expect($connection, array $expectedCodes, string $stage): array
+    private function expect($connection, array $expectedCodes, string $stage, array &$transcript = []): array
     {
-        [$code, $response, $lines] = $this->readResponse($connection);
+        [$code, $response, $lines] = $this->readResponse($connection, $transcript);
 
         if (!in_array($code, $expectedCodes, true)) {
             throw new RuntimeException(
@@ -238,35 +232,28 @@ final readonly class SmtpTransport implements EmailTransport
         return [$code, $response, $lines];
     }
 
-    private function extractMessageId(string $headers): ?string
-    {
-        if (preg_match('/^Message-ID:\\s*(.+)$/mi', $headers, $matches) !== 1) {
-            return null;
-        }
-
-        return trim($matches[1]);
-    }
-
     /**
      * @param resource $connection
+     * @param list<string> $transcript
      */
-    private function gracefulClose($connection, bool $sessionStarted): void
+    private function gracefulClose($connection, bool $sessionStarted, array &$transcript): void
     {
         if (!$sessionStarted) {
             return;
         }
 
-        $this->tryWriteAndDrain($connection, "RSET\r\n");
-        $this->tryWriteAndDrain($connection, "QUIT\r\n");
+        $this->tryWriteAndDrain($connection, "RSET\r\n", $transcript);
+        $this->tryWriteAndDrain($connection, "QUIT\r\n", $transcript);
     }
 
     /**
      * @param resource $connection
+     * @param list<string> $transcript
      */
-    private function initializeSession($connection): SmtpCapabilities
+    private function initializeSession($connection, array &$transcript): SmtpCapabilities
     {
-        $this->write($connection, sprintf("EHLO %s\r\n", $this->config->localDomain));
-        [, , $ehloLines] = $this->expect($connection, [250], 'EHLO');
+        $this->write($connection, sprintf("EHLO %s\r\n", $this->config->localDomain), $transcript);
+        [, , $ehloLines] = $this->expect($connection, [250], 'EHLO', $transcript);
         $capabilities = $this->capabilityParser->parse($ehloLines);
 
         if (!$this->shouldAttemptStartTls()) {
@@ -282,15 +269,15 @@ final readonly class SmtpTransport implements EmailTransport
             return $capabilities;
         }
 
-        $this->write($connection, "STARTTLS\r\n");
-        $this->expect($connection, [220], 'STARTTLS');
+        $this->write($connection, "STARTTLS\r\n", $transcript);
+        $this->expect($connection, [220], 'STARTTLS', $transcript);
 
         if (!stream_socket_enable_crypto($connection, true, STREAM_CRYPTO_METHOD_TLS_CLIENT)) {
             throw new RuntimeException('STARTTLS negotiation failed.');
         }
 
-        $this->write($connection, sprintf("EHLO %s\r\n", $this->config->localDomain));
-        [, , $secureEhloLines] = $this->expect($connection, [250], 'EHLO after STARTTLS');
+        $this->write($connection, sprintf("EHLO %s\r\n", $this->config->localDomain), $transcript);
+        [, , $secureEhloLines] = $this->expect($connection, [250], 'EHLO after STARTTLS', $transcript);
 
         return $this->capabilityParser->parse($secureEhloLines);
     }
@@ -330,10 +317,10 @@ final readonly class SmtpTransport implements EmailTransport
 
     /**
      * @param resource $connection
-     *
+     * @param list<string> $transcript
      * @return array{0:int,1:string,2:list<string>}
      */
-    private function readResponse($connection): array
+    private function readResponse($connection, array &$transcript = []): array
     {
         $response = '';
         $lines = [];
@@ -351,6 +338,7 @@ final readonly class SmtpTransport implements EmailTransport
             }
 
             $response .= $line;
+            $this->recordTranscriptResponse($transcript, $line);
             $lines[] = rtrim($line, "\r\n");
 
             if (preg_match('/^(\d{3})([\s-])/', $line, $matches) !== 1) {
@@ -364,6 +352,52 @@ final readonly class SmtpTransport implements EmailTransport
         }
 
         return [$code, $response, $lines];
+    }
+
+    /**
+     * @param list<string> $transcript
+     */
+    private function recordTranscriptCommand(array &$transcript, string $command, bool $sensitive, bool $dataPayload): void
+    {
+        if (!$this->config->captureTranscript) {
+            return;
+        }
+
+        if ($dataPayload) {
+            $transcript[] = sprintf('C: [DATA %d bytes]', strlen($command));
+
+            return;
+        }
+
+        $line = trim(str_replace(["\r", "\n"], '', $command));
+        if ($line === '') {
+            return;
+        }
+
+        if ($sensitive || str_starts_with($line, 'AUTH ')) {
+            $transcript[] = 'C: [REDACTED]';
+
+            return;
+        }
+
+        $transcript[] = 'C: ' . $line;
+    }
+
+    /**
+     * @param list<string> $transcript
+     */
+    private function recordTranscriptResponse(array &$transcript, string $responseLine): void
+    {
+        if (!$this->config->captureTranscript) {
+            return;
+        }
+
+        $trimmed = trim($responseLine);
+        if ($trimmed === '') {
+            return;
+        }
+
+        $transcript[] = 'S: ' . $trimmed;
     }
 
     private function requiresStartTls(): bool
@@ -397,14 +431,16 @@ final readonly class SmtpTransport implements EmailTransport
 
     /**
      * @param resource $connection
+     * @param list<string> $transcript
      */
     private function sendEmailData(
         $connection,
         EmailMessage $message,
-        string $rawMessage,
         int $messageSizeBytes,
+        bool $messageContainsNonAscii,
         SmtpCapabilities $capabilities,
         ?string $messageId,
+        array &$transcript,
     ): EmailDeliveryReport {
         $envelopeSender = $message->envelope()->envelopeSender();
         if ($envelopeSender === null) {
@@ -413,13 +449,44 @@ final readonly class SmtpTransport implements EmailTransport
 
         $sizeLimit = $this->assertSizeWithinLimit($capabilities, $messageSizeBytes);
         $headers = $message->headersData();
-        $this->sendMailFrom($connection, $envelopeSender->email, $headers, $capabilities, $messageSizeBytes, $sizeLimit);
-        ['accepted' => $acceptedRecipients, 'rejected' => $rejectedRecipients] = $this->sendRecipients(
-            $connection,
-            $message,
-            $headers,
-            $capabilities,
-        );
+        $planner = $this->envelopePlanner ?? new SmtpEnvelopePlanner($this->config);
+        $requiresUtf8 = $planner->assertSmtpUtf8Policy($message, $capabilities);
+
+        if ($capabilities->has('PIPELINING')) {
+            ['accepted' => $acceptedRecipients, 'rejected' => $rejectedRecipients, 'results' => $recipientResults] = $this->sendMailFromAndRecipientsPipelined(
+                $connection,
+                $message,
+                $headers,
+                $capabilities,
+                $messageSizeBytes,
+                $sizeLimit,
+                $messageContainsNonAscii,
+                $requiresUtf8,
+                $planner,
+                $transcript,
+            );
+        } else {
+            $this->sendMailFrom(
+                $connection,
+                $envelopeSender->email,
+                $headers,
+                $capabilities,
+                $messageSizeBytes,
+                $sizeLimit,
+                $messageContainsNonAscii,
+                $requiresUtf8,
+                $planner,
+                $transcript,
+            );
+            ['accepted' => $acceptedRecipients, 'rejected' => $rejectedRecipients, 'results' => $recipientResults] = $this->sendRecipients(
+                $connection,
+                $message,
+                $headers,
+                $capabilities,
+                $planner,
+                $transcript,
+            );
+        }
 
         if ($acceptedRecipients === []) {
             return new EmailDeliveryReport(
@@ -428,6 +495,7 @@ final readonly class SmtpTransport implements EmailTransport
                 $rejectedRecipients,
                 $messageId,
                 'SMTP rejected all recipients.',
+                $recipientResults,
                 [
                     'transport' => 'smtp',
                     'smtp_host' => $this->config->host,
@@ -439,12 +507,11 @@ final readonly class SmtpTransport implements EmailTransport
             );
         }
 
-        $this->write($connection, "DATA\r\n");
-        $this->expect($connection, [354], 'DATA');
+        $this->write($connection, "DATA\r\n", $transcript);
+        $this->expect($connection, [354], 'DATA', $transcript);
 
-        $payload = $this->dotStuff($rawMessage);
-        $this->write($connection, $payload . "\r\n.\r\n");
-        [, $messageResponse] = $this->expect($connection, [250], 'message body');
+        $this->writeDataPayloadFromMessage($connection, $message, $messageSizeBytes, $transcript);
+        [, $messageResponse] = $this->expect($connection, [250], 'message body', $transcript);
 
         return new EmailDeliveryReport(
             $rejectedRecipients === [],
@@ -452,6 +519,7 @@ final readonly class SmtpTransport implements EmailTransport
             $rejectedRecipients,
             $messageId,
             $rejectedRecipients === [] ? null : 'One or more recipients were rejected.',
+            $recipientResults,
             [
                 'transport' => 'smtp',
                 'smtp_host' => $this->config->host,
@@ -469,6 +537,7 @@ final readonly class SmtpTransport implements EmailTransport
 
     /**
      * @param resource $connection
+     * @param list<string> $transcript
      */
     private function sendMailFrom(
         $connection,
@@ -477,64 +546,139 @@ final readonly class SmtpTransport implements EmailTransport
         SmtpCapabilities $capabilities,
         int $messageSizeBytes,
         ?int $sizeLimit,
+        bool $messageContainsNonAscii,
+        bool $requiresSmtpUtf8,
+        SmtpEnvelopePlanner $planner,
+        array &$transcript,
     ): void {
-        $mailFromArgs = [];
+        $mailFrom = $planner->buildMailFromCommand(
+            $senderEmail,
+            $headers,
+            $capabilities,
+            $messageSizeBytes,
+            $sizeLimit,
+            $messageContainsNonAscii,
+            $requiresSmtpUtf8,
+        );
 
-        if ($capabilities->has('DSN')) {
-            $mailFromArgs[] = 'RET=' . ($headers->dsnReturnFull ? 'FULL' : 'HDRS');
-            $mailFromArgs[] = 'ENVID=' . bin2hex(random_bytes(8));
-        }
-
-        if ($sizeLimit !== null) {
-            $mailFromArgs[] = 'SIZE=' . $messageSizeBytes;
-        }
-
-        $mailFrom = sprintf('MAIL FROM:<%s>', $senderEmail);
-        if ($mailFromArgs !== []) {
-            $mailFrom .= ' ' . implode(' ', $mailFromArgs);
-        }
-
-        $this->write($connection, $mailFrom . "\r\n");
-        $this->expect($connection, [250], 'MAIL FROM');
+        $this->write($connection, $mailFrom . "\r\n", $transcript);
+        $this->expect($connection, [250], 'MAIL FROM', $transcript);
     }
 
     /**
      * @param resource $connection
-     *
-     * @return array{accepted:list<string>,rejected:array<string,string>}
+     * @param list<string> $transcript
+     * @return array{accepted:list<string>,rejected:array<string,string>,results:list<EmailRecipientResult>}
+     */
+    private function sendMailFromAndRecipientsPipelined(
+        $connection,
+        EmailMessage $message,
+        EmailHeaders $headers,
+        SmtpCapabilities $capabilities,
+        int $messageSizeBytes,
+        ?int $sizeLimit,
+        bool $messageContainsNonAscii,
+        bool $requiresSmtpUtf8,
+        SmtpEnvelopePlanner $planner,
+        array &$transcript,
+    ): array {
+        $sender = $message->envelope()->envelopeSender();
+        if ($sender === null) {
+            throw new RuntimeException('Envelope sender is required for SMTP transport.');
+        }
+
+        $mailFromCommand = $planner->buildMailFromCommand(
+            $sender->email,
+            $headers,
+            $capabilities,
+            $messageSizeBytes,
+            $sizeLimit,
+            $messageContainsNonAscii,
+            $requiresSmtpUtf8,
+        );
+
+        $commands = [];
+        foreach ($message->envelope()->recipients() as $recipient) {
+            $commands[] = ['email' => $recipient->email, 'command' => $planner->buildRcptCommand($recipient->email, $headers, $capabilities)];
+        }
+
+        $this->write($connection, $mailFromCommand . "\r\n", $transcript);
+        foreach ($commands as $recipientCommand) {
+            $this->write($connection, $recipientCommand['command'] . "\r\n", $transcript);
+        }
+
+        [$mailFromCode, $mailFromResponse] = $this->readResponse($connection, $transcript);
+        if (!in_array($mailFromCode, [250], true)) {
+            throw new RuntimeException(sprintf('SMTP error at MAIL FROM. Expected 250, got %d: %s', $mailFromCode, trim($mailFromResponse)));
+        }
+
+        $acceptedRecipients = [];
+        $rejectedRecipients = [];
+        $recipientResults = [];
+
+        foreach ($commands as $recipientCommand) {
+            [$code, $response] = $this->readResponse($connection, $transcript);
+            $email = $recipientCommand['email'];
+
+            if (in_array($code, [250, 251], true)) {
+                $acceptedRecipients[] = $email;
+                $recipientResults[] = new EmailRecipientResult($email, true, $code, trim($response));
+
+                continue;
+            }
+
+            $rejectedRecipients[$email] = trim($response);
+            $recipientResults[] = new EmailRecipientResult($email, false, $code > 0 ? $code : null, trim($response));
+        }
+
+        return ['accepted' => $acceptedRecipients, 'rejected' => $rejectedRecipients, 'results' => $recipientResults];
+    }
+
+    /**
+     * @param resource $connection
+     * @param list<string> $transcript
+     * @return array{accepted:list<string>,rejected:array<string,string>,results:list<EmailRecipientResult>}
      */
     private function sendRecipients(
         $connection,
         EmailMessage $message,
         EmailHeaders $headers,
         SmtpCapabilities $capabilities,
+        SmtpEnvelopePlanner $planner,
+        array &$transcript,
     ): array {
         $acceptedRecipients = [];
         $rejectedRecipients = [];
+        $recipientResults = [];
 
         foreach ($message->envelope()->recipients() as $recipient) {
-            $rcptCommand = sprintf('RCPT TO:<%s>', $recipient->email);
+            $rcptCommand = $planner->buildRcptCommand($recipient->email, $headers, $capabilities);
 
-            if ($capabilities->has('DSN')) {
-                $notify = $this->dsnNotifyDirective($headers);
-                if ($notify !== null) {
-                    $rcptCommand .= ' NOTIFY=' . $notify;
-                }
-            }
-
-            $this->write($connection, $rcptCommand . "\r\n");
-            [$code, $response] = $this->readResponse($connection);
+            $this->write($connection, $rcptCommand . "\r\n", $transcript);
+            [$code, $response] = $this->readResponse($connection, $transcript);
 
             if (in_array($code, [250, 251], true)) {
                 $acceptedRecipients[] = $recipient->email;
+                $recipientResults[] = new EmailRecipientResult(
+                    $recipient->email,
+                    true,
+                    $code,
+                    trim($response),
+                );
 
                 continue;
             }
 
             $rejectedRecipients[$recipient->email] = trim($response);
+            $recipientResults[] = new EmailRecipientResult(
+                $recipient->email,
+                false,
+                $code > 0 ? $code : null,
+                trim($response),
+            );
         }
 
-        return ['accepted' => $acceptedRecipients, 'rejected' => $rejectedRecipients];
+        return ['accepted' => $acceptedRecipients, 'rejected' => $rejectedRecipients, 'results' => $recipientResults];
     }
 
     private function shouldAttemptStartTls(): bool
@@ -548,12 +692,13 @@ final readonly class SmtpTransport implements EmailTransport
 
     /**
      * @param resource $connection
+     * @param list<string> $transcript
      */
-    private function tryWriteAndDrain($connection, string $command): void
+    private function tryWriteAndDrain($connection, string $command, array &$transcript): void
     {
         try {
-            $this->write($connection, $command);
-            $this->readResponse($connection);
+            $this->write($connection, $command, $transcript);
+            $this->readResponse($connection, $transcript);
         } catch (\Throwable) {
             // Best-effort close path; do not override root SMTP error.
         }
@@ -561,9 +706,12 @@ final readonly class SmtpTransport implements EmailTransport
 
     /**
      * @param resource $connection
+     * @param list<string> $transcript
      */
-    private function write($connection, string $data): void
+    private function write($connection, string $data, array &$transcript = [], bool $sensitive = false, bool $dataPayload = false): void
     {
+        $this->recordTranscriptCommand($transcript, $data, $sensitive, $dataPayload);
+
         $dataLength = strlen($data);
         $bytesWritten = 0;
 
@@ -577,5 +725,46 @@ final readonly class SmtpTransport implements EmailTransport
 
             $bytesWritten += $written;
         }
+    }
+
+    /**
+     * @param resource $connection
+     * @param list<string> $transcript
+     */
+    private function writeDataPayloadFromMessage($connection, EmailMessage $message, int $messageSizeBytes, array &$transcript): void
+    {
+        if ($this->config->captureTranscript) {
+            $transcript[] = sprintf('C: [DATA %d bytes]', $messageSizeBytes);
+        }
+
+        $lineBuffer = '';
+        $this->rawEmailBuilder->buildToStream(
+            $message,
+            function (string $chunk) use (&$lineBuffer, $connection): void {
+                $lineBuffer .= str_replace(["\r\n", "\r"], "\n", $chunk);
+
+                while (($newlinePosition = strpos($lineBuffer, "\n")) !== false) {
+                    $line = substr($lineBuffer, 0, $newlinePosition);
+                    $lineBuffer = substr($lineBuffer, $newlinePosition + 1);
+
+                    if ($line !== '' && $line[0] === '.') {
+                        $line = '.' . $line;
+                    }
+
+                    $this->write($connection, $line . "\r\n");
+                }
+            },
+            includeSubject: true,
+        );
+
+        if ($lineBuffer !== '') {
+            if ($lineBuffer[0] === '.') {
+                $lineBuffer = '.' . $lineBuffer;
+            }
+
+            $this->write($connection, $lineBuffer . "\r\n");
+        }
+
+        $this->write($connection, ".\r\n");
     }
 }

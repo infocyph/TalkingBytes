@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Infocyph\TalkingBytes\Email;
 
 use Infocyph\TalkingBytes\Email\Enum\Priority;
+use Infocyph\TalkingBytes\Email\Template\ArrayVariableRenderer;
+use Infocyph\TalkingBytes\Email\Template\TemplateRendererInterface;
 use Infocyph\TalkingBytes\Email\ValueObject\EmailAddress;
 use Infocyph\TalkingBytes\Email\ValueObject\EmailAttachment;
 use Infocyph\TalkingBytes\Email\ValueObject\EmailEnvelope;
@@ -141,6 +143,11 @@ final readonly class EmailMessage
         );
     }
 
+    public function bounceTo(string $mailbox): self
+    {
+        return $this->returnPath($mailbox);
+    }
+
     public function cc(string ...$mailboxes): self
     {
         $cc = array_merge($this->envelope->cc, $this->parseMailboxes(...$mailboxes));
@@ -160,10 +167,23 @@ final readonly class EmailMessage
         bool $failure = true,
         bool $delay = true,
         bool $returnFull = true,
+        ?string $envelopeId = null,
     ): self {
         return new self(
             $this->envelope,
-            $this->headers->withDeliveryNotification($success, $failure, $delay, $returnFull),
+            $this->headers->withDeliveryNotification($success, $failure, $delay, $returnFull, $envelopeId),
+            $this->htmlBody,
+            $this->textBody,
+            $this->attachments,
+            $this->metadata,
+        );
+    }
+
+    public function dsnEnvelopeId(?string $envelopeId): self
+    {
+        return new self(
+            $this->envelope,
+            $this->headers->withDsnEnvelopeId($envelopeId),
             $this->htmlBody,
             $this->textBody,
             $this->attachments,
@@ -324,38 +344,17 @@ final readonly class EmailMessage
 
     public function oneClickUnsubscribe(string $url): self
     {
-        return new self(
-            $this->envelope,
-            $this->headers->withOneClickUnsubscribe($url),
-            $this->htmlBody,
-            $this->textBody,
-            $this->attachments,
-            $this->metadata,
-        );
+        return $this->withHeadersData($this->headers->withOneClickUnsubscribe($url));
     }
 
     public function readReceiptTo(string $mailbox): self
     {
-        return new self(
-            $this->envelope,
-            $this->headers->withReadReceiptTo(EmailAddress::fromMailbox($mailbox)),
-            $this->htmlBody,
-            $this->textBody,
-            $this->attachments,
-            $this->metadata,
-        );
+        return $this->withMailboxAddressHeader($mailbox, static fn(EmailHeaders $headers, EmailAddress $address): EmailHeaders => $headers->withReadReceiptTo($address));
     }
 
     public function replyTo(string $mailbox): self
     {
-        return new self(
-            $this->envelope,
-            $this->headers->withReplyTo(EmailAddress::fromMailbox($mailbox)),
-            $this->htmlBody,
-            $this->textBody,
-            $this->attachments,
-            $this->metadata,
-        );
+        return $this->withMailboxAddressHeader($mailbox, static fn(EmailHeaders $headers, EmailAddress $address): EmailHeaders => $headers->withReplyTo($address));
     }
 
     public function returnPath(string $mailbox): self
@@ -372,14 +371,7 @@ final readonly class EmailMessage
 
     public function sender(string $mailbox): self
     {
-        return new self(
-            $this->envelope,
-            $this->headers->withSender(EmailAddress::fromMailbox($mailbox)),
-            $this->htmlBody,
-            $this->textBody,
-            $this->attachments,
-            $this->metadata,
-        );
+        return $this->withMailboxAddressHeader($mailbox, static fn(EmailHeaders $headers, EmailAddress $address): EmailHeaders => $headers->withSender($address));
     }
 
     public function subject(string $subject): self
@@ -393,6 +385,24 @@ final readonly class EmailMessage
         $metadata[$key] = $value;
 
         return new self($this->envelope, $this->headers, $this->htmlBody, $this->textBody, $this->attachments, $metadata);
+    }
+
+    /**
+     * @param array<string, scalar|\Stringable|null> $variables
+     */
+    public function template(
+        string $template,
+        array $variables = [],
+        bool $asHtml = true,
+        TemplateRendererInterface $renderer = new ArrayVariableRenderer(),
+    ): self {
+        $rendered = $renderer->render($template, $variables);
+
+        if ($asHtml) {
+            return $this->html($rendered);
+        }
+
+        return $this->text($rendered);
     }
 
     public function text(string $text): self
@@ -571,7 +581,6 @@ final readonly class EmailMessage
 
     /**
      * @param string|list<string> $value
-     *
      * @return string|list<string>
      */
     private function normalizeHeaderValue(string|array $value): string|array
@@ -600,5 +609,27 @@ final readonly class EmailMessage
         }
 
         return $addresses;
+    }
+
+    private function withHeadersData(EmailHeaders $headers): self
+    {
+        return new self(
+            $this->envelope,
+            $headers,
+            $this->htmlBody,
+            $this->textBody,
+            $this->attachments,
+            $this->metadata,
+        );
+    }
+
+    /**
+     * @param callable(EmailHeaders, EmailAddress):EmailHeaders $apply
+     */
+    private function withMailboxAddressHeader(string $mailbox, callable $apply): self
+    {
+        $address = EmailAddress::fromMailbox($mailbox);
+
+        return $this->withHeadersData($apply($this->headers, $address));
     }
 }

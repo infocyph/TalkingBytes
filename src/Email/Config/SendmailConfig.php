@@ -15,6 +15,7 @@ final readonly class SendmailConfig
         public string $path = '/usr/sbin/sendmail',
         public array $extraArguments = ['-t', '-i'],
         public int $timeoutSeconds = 15,
+        public ?int $maxMessageBytes = null,
     ) {
         if (trim($this->path) === '') {
             throw new InvalidArgumentException('Sendmail path is required.');
@@ -22,6 +23,10 @@ final readonly class SendmailConfig
 
         if ($this->timeoutSeconds < 1) {
             throw new InvalidArgumentException('Sendmail timeout must be greater than zero.');
+        }
+
+        if ($this->maxMessageBytes !== null && $this->maxMessageBytes < 1) {
+            throw new InvalidArgumentException('Sendmail max message bytes must be greater than zero when provided.');
         }
 
         foreach ($this->extraArguments as $argument) {
@@ -37,5 +42,18 @@ final readonly class SendmailConfig
                 throw new InvalidArgumentException('Sendmail arguments must not contain whitespace. Split composite values into separate arguments.');
             }
         }
+    }
+
+    /**
+     * @param array<string, mixed> $config
+     */
+    public static function fromArray(array $config): self
+    {
+        return new self(
+            path: ConfigValue::string($config, 'path', '/usr/sbin/sendmail'),
+            extraArguments: ConfigValue::stringList($config, 'extraArguments', ['-t', '-i']),
+            timeoutSeconds: ConfigValue::int($config, 'timeoutSeconds', 15),
+            maxMessageBytes: ConfigValue::nullableInt($config, 'maxMessageBytes'),
+        );
     }
 }

@@ -7,7 +7,6 @@ namespace Infocyph\TalkingBytes\Email\Transport;
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
 use Infocyph\TalkingBytes\Email\Config\SendmailConfig;
 use Infocyph\TalkingBytes\Email\EmailMessage;
-use Infocyph\TalkingBytes\Email\Result\EmailSendResult;
 use Infocyph\TalkingBytes\Email\System\EmailHeaderBuilder;
 use Infocyph\TalkingBytes\Email\System\RawEmailBuilder;
 use RuntimeException;
@@ -28,37 +27,21 @@ final readonly class SendmailTransport implements EmailTransport
             return CommunicationResult::failure(sprintf('Sendmail binary is not executable: %s', $this->config->path));
         }
 
-        $rawEmail = $this->rawEmailBuilder->build($message, includeSubject: true);
         $recipients = array_map(static fn($address): string => $address->email, $message->envelope()->recipients());
-        $messageId = $this->extractMessageId($rawEmail->headers) ?? $this->headerBuilder->resolveMessageId($message);
+        $messageId = $this->headerBuilder->resolveMessageId($message);
 
         try {
-            $this->executeSendmail($message, $rawEmail->raw);
+            $sizeBytes = $this->executeSendmail($message);
         } catch (RuntimeException $exception) {
-            $result = new EmailSendResult(
+            return EmailTransportResultFactory::failure(
                 'sendmail',
                 $messageId,
-                [],
-                array_fill_keys($recipients, $exception->getMessage()),
-                ['transport' => 'sendmail', 'size_bytes' => $rawEmail->sizeBytes],
-            );
-
-            return CommunicationResult::failure(
                 $exception->getMessage(),
-                response: $result,
-                metadata: $result->metadata,
+                $recipients,
             );
         }
 
-        $result = new EmailSendResult(
-            'sendmail',
-            $messageId,
-            $recipients,
-            [],
-            ['transport' => 'sendmail', 'size_bytes' => $rawEmail->sizeBytes],
-        );
-
-        return CommunicationResult::success(response: $result, metadata: $result->metadata);
+        return EmailTransportResultFactory::success('sendmail', $messageId, $recipients, ['size_bytes' => $sizeBytes]);
     }
 
     /**
@@ -109,13 +92,13 @@ final readonly class SendmailTransport implements EmailTransport
     private function descriptorSpec(): array
     {
         return [
-            0 => ['pipe', 'w'],
+            0 => ['pipe', 'r'],
             1 => ['pipe', 'w'],
             2 => ['pipe', 'w'],
         ];
     }
 
-    private function executeSendmail(EmailMessage $message, string $rawEmail): void
+    private function executeSendmail(EmailMessage $message): int
     {
         $process = proc_open($this->buildCommand($message), $this->descriptorSpec(), $pipes);
 
@@ -124,9 +107,10 @@ final readonly class SendmailTransport implements EmailTransport
         }
 
         $processClosed = false;
+        $sizeBytes = 0;
 
         try {
-            $this->writeToStdin($pipes[0], $rawEmail);
+            $sizeBytes = $this->writeToStdin($pipes[0], $message);
             fclose($pipes[0]);
 
             stream_set_blocking($pipes[1], false);
@@ -149,22 +133,14 @@ final readonly class SendmailTransport implements EmailTransport
 
             throw new RuntimeException(sprintf('Sendmail exited with code %d: %s', $exitCode, $detail));
         }
-    }
 
-    private function extractMessageId(string $headers): ?string
-    {
-        if (preg_match('/^Message-ID:\s*(.+)$/mi', $headers, $matches) !== 1) {
-            return null;
-        }
-
-        return trim($matches[1]);
+        return $sizeBytes;
     }
 
     /**
      * @param resource $process
      * @param resource $stdout
      * @param resource $stderr
-     *
      * @return array{0:int,1:string,2:string}
      */
     private function readProcessOutputUntilExit($process, $stdout, $stderr, int $timeoutSeconds): array
@@ -209,14 +185,13 @@ final readonly class SendmailTransport implements EmailTransport
     /**
      * @param resource $stdin
      */
-    private function writeToStdin($stdin, string $rawEmail): void
+    private function writeChunk($stdin, string $chunk): void
     {
-        $length = strlen($rawEmail);
+        $length = strlen($chunk);
         $written = 0;
 
         while ($written < $length) {
-            $chunk = substr($rawEmail, $written);
-            $current = fwrite($stdin, $chunk);
+            $current = fwrite($stdin, substr($chunk, $written));
 
             if ($current === false || $current === 0) {
                 throw new RuntimeException('Unable to write email payload to sendmail process.');
@@ -224,5 +199,20 @@ final readonly class SendmailTransport implements EmailTransport
 
             $written += $current;
         }
+    }
+
+    /**
+     * @param resource $stdin
+     */
+    private function writeToStdin($stdin, EmailMessage $message): int
+    {
+        return $this->rawEmailBuilder->buildToStream(
+            $message,
+            function (string $chunk) use ($stdin): void {
+                $this->writeChunk($stdin, $chunk);
+            },
+            includeSubject: true,
+            maxBytes: $this->config->maxMessageBytes,
+        );
     }
 }

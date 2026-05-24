@@ -7,21 +7,33 @@ use Infocyph\TalkingBytes\Auth\BasicAuth;
 use Infocyph\TalkingBytes\Auth\BearerTokenAuth;
 use Infocyph\TalkingBytes\Auth\HeaderAuth;
 use Infocyph\TalkingBytes\Auth\QueryAuth;
+use Infocyph\TalkingBytes\Core\Contract\MiddlewareInterface;
 use Infocyph\TalkingBytes\Core\Message\CommunicationRequest;
 use Infocyph\TalkingBytes\Core\Middleware\HeaderMiddleware;
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
+use Infocyph\TalkingBytes\Email\Config\ImapConfig;
+use Infocyph\TalkingBytes\Email\Config\Pop3Config;
+use Infocyph\TalkingBytes\Email\Config\SendmailConfig;
+use Infocyph\TalkingBytes\Email\Config\SmtpConfig;
+use Infocyph\TalkingBytes\Email\Config\SmtpCredentials;
+use Infocyph\TalkingBytes\Email\Config\SpoolConfig;
+use Infocyph\TalkingBytes\Email\EmailMessage;
+use Infocyph\TalkingBytes\Email\Enum\ImapSecurity;
+use Infocyph\TalkingBytes\Email\Enum\Pop3Security;
+use Infocyph\TalkingBytes\Email\Enum\SmtpAuthMechanism;
+use Infocyph\TalkingBytes\Email\Mailbox\ImapPartNumberGuard;
+use Infocyph\TalkingBytes\Email\Mailbox\ImapSocketTransport;
+use Infocyph\TalkingBytes\Email\Mailbox\MailboxFlagGuard;
+use Infocyph\TalkingBytes\Email\Mailbox\MailboxFolderNameGuard;
+use Infocyph\TalkingBytes\Email\Mailbox\MailboxUidGuard;
+use Infocyph\TalkingBytes\Email\Mailbox\Pop3MessageNumberGuard;
+use Infocyph\TalkingBytes\Email\System\SmtpCapabilityParser;
+use Infocyph\TalkingBytes\Email\Transport\MailFunctionTransport;
+use Infocyph\TalkingBytes\Email\Transport\SmtpTransport;
 use Infocyph\TalkingBytes\Grpc\GrpcClient;
 use Infocyph\TalkingBytes\Grpc\GrpcRequest;
 use Infocyph\TalkingBytes\Grpc\GrpcResponse;
 use Infocyph\TalkingBytes\Grpc\GrpcStatus;
-use Infocyph\TalkingBytes\Email\Config\SendmailConfig;
-use Infocyph\TalkingBytes\Email\Config\SmtpConfig;
-use Infocyph\TalkingBytes\Email\Config\SmtpCredentials;
-use Infocyph\TalkingBytes\Email\EmailMessage;
-use Infocyph\TalkingBytes\Email\Enum\SmtpAuthMechanism;
-use Infocyph\TalkingBytes\Email\Transport\MailFunctionTransport;
-use Infocyph\TalkingBytes\Email\Transport\SmtpTransport;
-use Infocyph\TalkingBytes\Email\System\SmtpCapabilityParser;
 use Infocyph\TalkingBytes\Http\HeaderBag;
 use Infocyph\TalkingBytes\Http\HttpRequest;
 use Infocyph\TalkingBytes\Http\Internal\CurlResultFactory;
@@ -33,17 +45,17 @@ use Infocyph\TalkingBytes\Retry\JitterBackoffRetryPolicy;
 use Infocyph\TalkingBytes\Webhook\WebhookVerifier;
 
 it('validates retry policy constructor arguments', function (): void {
-    expect(fn() => new FixedDelayRetryPolicy(0, 1))->toThrow(\InvalidArgumentException::class);
-    expect(fn() => new FixedDelayRetryPolicy(1, -1))->toThrow(\InvalidArgumentException::class);
-    expect(fn() => new ExponentialBackoffRetryPolicy(0, 1))->toThrow(\InvalidArgumentException::class);
-    expect(fn() => new ExponentialBackoffRetryPolicy(1, -1))->toThrow(\InvalidArgumentException::class);
-    expect(fn() => new JitterBackoffRetryPolicy(1, 0))->toThrow(\InvalidArgumentException::class);
+    expect(fn () => new FixedDelayRetryPolicy(0, 1))->toThrow(InvalidArgumentException::class);
+    expect(fn () => new FixedDelayRetryPolicy(1, -1))->toThrow(InvalidArgumentException::class);
+    expect(fn () => new ExponentialBackoffRetryPolicy(0, 1))->toThrow(InvalidArgumentException::class);
+    expect(fn () => new ExponentialBackoffRetryPolicy(1, -1))->toThrow(InvalidArgumentException::class);
+    expect(fn () => new JitterBackoffRetryPolicy(1, 0))->toThrow(InvalidArgumentException::class);
 });
 
 it('validates http urls', function (): void {
-    expect(fn() => HttpRequest::get(''))->toThrow(\InvalidArgumentException::class);
-    expect(fn() => HttpRequest::get('not-a-url'))->toThrow(\InvalidArgumentException::class);
-    expect(fn() => HttpRequest::get('ftp://example.com'))->toThrow(\InvalidArgumentException::class);
+    expect(fn () => HttpRequest::get(''))->toThrow(InvalidArgumentException::class);
+    expect(fn () => HttpRequest::get('not-a-url'))->toThrow(InvalidArgumentException::class);
+    expect(fn () => HttpRequest::get('ftp://example.com'))->toThrow(InvalidArgumentException::class);
 
     $request = HttpRequest::get('https://example.com');
 
@@ -51,8 +63,8 @@ it('validates http urls', function (): void {
 });
 
 it('validates http header names and values', function (): void {
-    expect(fn() => new HeaderBag(['Bad Header' => 'value']))->toThrow(\InvalidArgumentException::class);
-    expect(fn() => new HeaderBag(['X-Test' => "evil\r\nnext: bad"]))->toThrow(\InvalidArgumentException::class);
+    expect(fn () => new HeaderBag(['Bad Header' => 'value']))->toThrow(InvalidArgumentException::class);
+    expect(fn () => new HeaderBag(['X-Test' => "evil\r\nnext: bad"]))->toThrow(InvalidArgumentException::class);
 
     $request = HttpRequest::get('https://example.com')->header('X-Test', 'ok');
 
@@ -60,13 +72,13 @@ it('validates http header names and values', function (): void {
 });
 
 it('validates auth inputs', function (): void {
-    expect(fn() => new BasicAuth('', 'pw'))->toThrow(\InvalidArgumentException::class);
-    expect(fn() => new BasicAuth('user', ''))->toThrow(\InvalidArgumentException::class);
-    expect(fn() => new BearerTokenAuth(''))->toThrow(\InvalidArgumentException::class);
-    expect(fn() => new ApiKeyAuth('', 'value'))->toThrow(\InvalidArgumentException::class);
-    expect(fn() => new ApiKeyAuth('X-Api-Key', ''))->toThrow(\InvalidArgumentException::class);
-    expect(fn() => new HeaderAuth('', 'value'))->toThrow(\InvalidArgumentException::class);
-    expect(fn() => new QueryAuth('', 'value'))->toThrow(\InvalidArgumentException::class);
+    expect(fn () => new BasicAuth('', 'pw'))->toThrow(InvalidArgumentException::class);
+    expect(fn () => new BasicAuth('user', ''))->toThrow(InvalidArgumentException::class);
+    expect(fn () => new BearerTokenAuth(''))->toThrow(InvalidArgumentException::class);
+    expect(fn () => new ApiKeyAuth('', 'value'))->toThrow(InvalidArgumentException::class);
+    expect(fn () => new ApiKeyAuth('X-Api-Key', ''))->toThrow(InvalidArgumentException::class);
+    expect(fn () => new HeaderAuth('', 'value'))->toThrow(InvalidArgumentException::class);
+    expect(fn () => new QueryAuth('', 'value'))->toThrow(InvalidArgumentException::class);
 });
 
 it('fails when download path cannot be written', function (): void {
@@ -90,13 +102,14 @@ it('grpc client supports middleware extension', function (): void {
     $headerSeen = null;
 
     $client = GrpcClient::using(
-        static fn(GrpcRequest $request): GrpcResponse => new GrpcResponse(GrpcStatus::Ok, $request->message),
+        static fn (GrpcRequest $request): GrpcResponse => new GrpcResponse(GrpcStatus::Ok, $request->message),
     )
         ->withMiddleware(new HeaderMiddleware(['X-Trace' => '1']))
-        ->withMiddleware(new class($headerSeen) implements \Infocyph\TalkingBytes\Core\Contract\MiddlewareInterface {
+        ->withMiddleware(new class($headerSeen) implements MiddlewareInterface
+        {
             public function __construct(private ?string &$headerSeen) {}
 
-            public function handle(CommunicationRequest $request, \Closure $next): CommunicationResult
+            public function handle(CommunicationRequest $request, Closure $next): CommunicationResult
             {
                 $header = $request->headers['X-Trace'] ?? null;
                 $this->headerSeen = is_string($header) ? $header : null;
@@ -119,18 +132,27 @@ it('webhook verifier rejects malformed timestamp and signature values', function
 });
 
 it('validates resilience constructor arguments', function (): void {
-    expect(fn() => new RateLimiter(0, 60))->toThrow(\InvalidArgumentException::class);
-    expect(fn() => new RateLimiter(1, 0))->toThrow(\InvalidArgumentException::class);
-    expect(fn() => new CircuitBreaker(failureThreshold: 0, coolDownSeconds: 60))->toThrow(\InvalidArgumentException::class);
-    expect(fn() => new CircuitBreaker(failureThreshold: 1, coolDownSeconds: 0))->toThrow(\InvalidArgumentException::class);
+    expect(fn () => new RateLimiter(0, 60))->toThrow(InvalidArgumentException::class);
+    expect(fn () => new RateLimiter(1, 0))->toThrow(InvalidArgumentException::class);
+    expect(fn () => new CircuitBreaker(failureThreshold: 0, coolDownSeconds: 60))->toThrow(InvalidArgumentException::class);
+    expect(fn () => new CircuitBreaker(failureThreshold: 1, coolDownSeconds: 0))->toThrow(InvalidArgumentException::class);
 });
 
 it('validates sendmail argument control characters', function (): void {
-    expect(fn() => new SendmailConfig('/usr/sbin/sendmail', ["-t\r\n"], 10))
-        ->toThrow(\InvalidArgumentException::class);
+    expect(fn () => new SendmailConfig('/usr/sbin/sendmail', ["-t\r\n"], 10))
+        ->toThrow(InvalidArgumentException::class);
 
-    expect(fn() => new SendmailConfig('/usr/sbin/sendmail', ['-X /tmp/sendmail.log'], 10))
-        ->toThrow(\InvalidArgumentException::class, 'must not contain whitespace');
+    expect(fn () => new SendmailConfig('/usr/sbin/sendmail', ['-X /tmp/sendmail.log'], 10))
+        ->toThrow(InvalidArgumentException::class, 'must not contain whitespace');
+});
+
+it('validates outbound max message byte limits in config objects', function (): void {
+    expect(fn () => new SmtpConfig(host: 'smtp.example.com', maxMessageBytes: 0))
+        ->toThrow(InvalidArgumentException::class);
+    expect(fn () => new SendmailConfig('/usr/sbin/sendmail', ['-t', '-i'], 10, 0))
+        ->toThrow(InvalidArgumentException::class);
+    expect(fn () => new SpoolConfig(directory: sys_get_temp_dir(), maxMessageBytes: 0))
+        ->toThrow(InvalidArgumentException::class);
 });
 
 it('validates explicit smtp auth mechanism against advertised capabilities', function (): void {
@@ -141,19 +163,19 @@ it('validates explicit smtp auth mechanism against advertised capabilities', fun
     );
 
     $transport = new SmtpTransport($config);
-    $capabilities = (new SmtpCapabilityParser())->parse([
+    $capabilities = (new SmtpCapabilityParser)->parse([
         '250-mail.example.com',
         '250 AUTH PLAIN',
     ]);
 
     $reflection = new ReflectionMethod($transport, 'resolveAuthMechanism');
 
-    expect(fn() => $reflection->invoke($transport, $capabilities))
+    expect(fn () => $reflection->invoke($transport, $capabilities))
         ->toThrow(RuntimeException::class, 'does not advertise AUTH LOGIN');
 });
 
 it('formats mail() envelope sender with spaced -f parameter', function (): void {
-    $transport = new MailFunctionTransport();
+    $transport = new MailFunctionTransport;
     $message = EmailMessage::new()
         ->from('sender@example.com')
         ->returnPath('bounce@example.com');
@@ -163,4 +185,83 @@ it('formats mail() envelope sender with spaced -f parameter', function (): void 
 
     expect($value)->toStartWith('-f ');
     expect($value)->toContain('bounce@example.com');
+});
+
+it('validates mail function max message byte limit argument', function (): void {
+    expect(fn () => new MailFunctionTransport(maxMessageBytes: 0))
+        ->toThrow(InvalidArgumentException::class);
+});
+
+it('validates pop3 config values', function (): void {
+    expect(fn () => new Pop3Config('', 110, Pop3Security::None, 'user', 'pass'))
+        ->toThrow(InvalidArgumentException::class);
+    expect(fn () => new Pop3Config('mail.example.com', 0, Pop3Security::None, 'user', 'pass'))
+        ->toThrow(InvalidArgumentException::class);
+    expect(fn () => new Pop3Config('mail.example.com', 110, Pop3Security::None, '', 'pass'))
+        ->toThrow(InvalidArgumentException::class);
+    expect(fn () => new Pop3Config('mail.example.com', 110, Pop3Security::None, 'user', ''))
+        ->toThrow(InvalidArgumentException::class);
+    expect(fn () => new Pop3Config('mail.example.com', 110, Pop3Security::None, 'user', 'pass', 0))
+        ->toThrow(InvalidArgumentException::class);
+});
+
+it('validates mailbox folder names', function (): void {
+    expect(fn () => MailboxFolderNameGuard::assertValid(''))->toThrow(InvalidArgumentException::class);
+    expect(fn () => MailboxFolderNameGuard::assertValid("INB\r\nOX"))->toThrow(InvalidArgumentException::class);
+    expect(fn () => MailboxFolderNameGuard::assertValid("INB\0OX"))->toThrow(InvalidArgumentException::class);
+    expect(fn () => MailboxFolderNameGuard::assertValid(str_repeat('A', 256)))->toThrow(InvalidArgumentException::class);
+
+    MailboxFolderNameGuard::assertValid('Archive/2026');
+
+    expect(true)->toBeTrue();
+});
+
+it('validates mailbox uid and pop3 message number guards', function (): void {
+    expect(fn () => MailboxUidGuard::assertValid(0))->toThrow(InvalidArgumentException::class);
+    expect(fn () => MailboxUidGuard::assertValid(-1))->toThrow(InvalidArgumentException::class);
+    expect(fn () => Pop3MessageNumberGuard::assertValid(0))->toThrow(InvalidArgumentException::class);
+
+    MailboxUidGuard::assertValid(1);
+    Pop3MessageNumberGuard::assertValid(1);
+
+    expect(true)->toBeTrue();
+});
+
+it('validates imap part number guard', function (): void {
+    ImapPartNumberGuard::assertValid('1');
+    ImapPartNumberGuard::assertValid('1.2');
+    ImapPartNumberGuard::assertValid('10.3.2');
+    ImapPartNumberGuard::assertValid('HEADER');
+    ImapPartNumberGuard::assertValid('TEXT');
+
+    expect(fn () => ImapPartNumberGuard::assertValid('1] BODY[]'))->toThrow(InvalidArgumentException::class);
+    expect(fn () => ImapPartNumberGuard::assertValid('1)'))->toThrow(InvalidArgumentException::class);
+    expect(fn () => ImapPartNumberGuard::assertValid('1 "bad"'))->toThrow(InvalidArgumentException::class);
+    expect(fn () => ImapPartNumberGuard::assertValid('1 2'))->toThrow(InvalidArgumentException::class);
+});
+
+it('validates mailbox flags and allows system/custom forms', function (): void {
+    MailboxFlagGuard::assertValid('\\Seen');
+    MailboxFlagGuard::assertValid('custom-flag_1');
+
+    expect(fn () => MailboxFlagGuard::assertValid(''))->toThrow(InvalidArgumentException::class);
+    expect(fn () => MailboxFlagGuard::assertValid('bad flag'))->toThrow(InvalidArgumentException::class);
+    expect(fn () => MailboxFlagGuard::assertValid("bad\r\nflag"))->toThrow(InvalidArgumentException::class);
+    expect(fn () => MailboxFlagGuard::assertValid("\0bad"))->toThrow(InvalidArgumentException::class);
+    expect(fn () => MailboxFlagGuard::assertValid('!bad'))->toThrow(InvalidArgumentException::class);
+    expect(fn () => MailboxFlagGuard::assertValid(' bad'))->toThrow(InvalidArgumentException::class);
+    expect(fn () => MailboxFlagGuard::assertValid('bad '))->toThrow(InvalidArgumentException::class);
+    expect(fn () => MailboxFlagGuard::assertValid(str_repeat('a', 65)))->toThrow(InvalidArgumentException::class);
+
+    $transport = new ImapSocketTransport(new ImapConfig(
+        host: 'imap.example.com',
+        port: 143,
+        security: ImapSecurity::None,
+        username: 'user',
+        password: 'pass',
+    ));
+
+    $normalize = new ReflectionMethod($transport, 'normalizeFlag');
+    expect($normalize->invoke($transport, '\\Seen'))->toBe('\\Seen');
+    expect($normalize->invoke($transport, 'custom-flag_1'))->toBe('custom-flag_1');
 });

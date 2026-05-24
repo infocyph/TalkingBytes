@@ -4,26 +4,65 @@ declare(strict_types=1);
 
 namespace Infocyph\TalkingBytes\Email\ValueObject;
 
-use Closure;
+use InvalidArgumentException;
 use RuntimeException;
 
 final readonly class ReceivedAttachment
 {
-    /**
-     * @param Closure():string $contentResolver
-     */
     public function __construct(
         public string $filename,
         public string $mimeType,
         public int $sizeBytes,
         public ?string $contentId,
         public bool $inline,
-        private Closure $contentResolver,
+        private AttachmentContentResolver $contentResolver,
     ) {}
+
+    public function contentHash(string $algorithm = 'sha256'): string
+    {
+        if (!in_array($algorithm, hash_algos(), true)) {
+            throw new InvalidArgumentException(sprintf('Unsupported hash algorithm: %s', $algorithm));
+        }
+
+        return hash($algorithm, $this->contents());
+    }
 
     public function contents(): string
     {
-        return ($this->contentResolver)();
+        return $this->contentResolver->contents();
+    }
+
+    public function extension(): ?string
+    {
+        $extension = strtolower(pathinfo($this->filename, PATHINFO_EXTENSION));
+
+        return $extension !== '' ? $extension : null;
+    }
+
+    public function isImage(): bool
+    {
+        return str_starts_with(strtolower($this->mimeType), 'image/');
+    }
+
+    public function isInline(): bool
+    {
+        return $this->inline;
+    }
+
+    public function safeFilename(string $fallback = 'attachment.bin'): string
+    {
+        $candidate = trim($this->filename);
+        if ($candidate === '') {
+            return $fallback;
+        }
+
+        $safe = preg_replace('/[^A-Za-z0-9._-]/', '_', basename($candidate)) ?? '';
+        $safe = trim($safe, '._');
+        if ($safe === '') {
+            return $fallback;
+        }
+
+        return $safe;
     }
 
     public function saveTo(string $path): void
@@ -38,23 +77,6 @@ final readonly class ReceivedAttachment
      */
     public function streamTo(mixed $stream): void
     {
-        if (!is_resource($stream)) {
-            throw new RuntimeException('Attachment stream target must be a valid resource.');
-        }
-
-        $contents = $this->contents();
-        $written = 0;
-        $length = strlen($contents);
-
-        while ($written < $length) {
-            $chunk = substr($contents, $written);
-            $bytes = fwrite($stream, $chunk);
-
-            if ($bytes === false || $bytes === 0) {
-                throw new RuntimeException('Failed to stream attachment content.');
-            }
-
-            $written += $bytes;
-        }
+        $this->contentResolver->streamTo($stream);
     }
 }

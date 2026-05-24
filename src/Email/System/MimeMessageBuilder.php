@@ -14,26 +14,16 @@ final readonly class MimeMessageBuilder
 
     public function build(EmailMessage $message): MimeMessage
     {
-        $textBody = $message->textBody();
-        $htmlBody = $message->htmlBody();
-
-        if ($textBody === '' && $htmlBody !== '') {
-            $textBody = strip_tags($htmlBody);
-        }
-
-        $hasText = $textBody !== '';
-        $hasHtml = $htmlBody !== '';
-
+        [$textBody, $htmlBody, $hasText, $hasHtml] = $this->extractBodies($message);
         [$inlineAttachments, $regularAttachments] = $this->splitAttachments($message->attachments());
-
         $bodyPart = $this->buildBodyPart($textBody, $htmlBody, $hasText, $hasHtml);
 
         if ($inlineAttachments !== []) {
-            $bodyPart = $this->wrapRelated($bodyPart, $inlineAttachments);
+            $bodyPart = $this->wrapMultipart($bodyPart, $inlineAttachments, 'related');
         }
 
         if ($regularAttachments !== []) {
-            return $this->wrapMixed($bodyPart, $regularAttachments);
+            return $this->wrapMultipart($bodyPart, $regularAttachments, 'mixed');
         }
 
         if ($bodyPart->contentTransferEncoding !== null) {
@@ -41,6 +31,40 @@ final readonly class MimeMessageBuilder
         }
 
         return new MimeMessage($bodyPart->contentType, $bodyPart->body);
+    }
+
+    /**
+     * @param callable(string):void $write
+     */
+    public function buildToStream(EmailMessage $message, callable $write): MimeMessage
+    {
+        [$textBody, $htmlBody, $hasText, $hasHtml] = $this->extractBodies($message);
+        [$inlineAttachments, $regularAttachments] = $this->splitAttachments($message->attachments());
+        $bodyPart = $this->buildBodyPart($textBody, $htmlBody, $hasText, $hasHtml);
+
+        if ($inlineAttachments === [] && $regularAttachments === []) {
+            $write($bodyPart->body);
+
+            if ($bodyPart->contentTransferEncoding !== null) {
+                return new MimeMessage($bodyPart->contentType, '', $bodyPart->contentTransferEncoding);
+            }
+
+            return new MimeMessage($bodyPart->contentType, '');
+        }
+
+        $streamState = $this->initialStreamState($bodyPart);
+
+        if ($inlineAttachments !== []) {
+            $streamState = $this->wrapStreamState($streamState, $inlineAttachments, 'related');
+        }
+
+        if ($regularAttachments !== []) {
+            $streamState = $this->wrapStreamState($streamState, $regularAttachments, 'mixed');
+        }
+
+        $streamState['writer']($write);
+
+        return new MimeMessage($streamState['contentType'], '', $streamState['encoding']);
     }
 
     private function buildBodyPart(string $textBody, string $htmlBody, bool $hasText, bool $hasHtml): MimeMessage
@@ -96,6 +120,34 @@ final readonly class MimeMessageBuilder
     }
 
     /**
+     * @return array{0:string,1:string,2:bool,3:bool}
+     */
+    private function extractBodies(EmailMessage $message): array
+    {
+        $textBody = $message->textBody();
+        $htmlBody = $message->htmlBody();
+        if ($textBody === '' && $htmlBody !== '') {
+            $textBody = strip_tags($htmlBody);
+        }
+
+        return [$textBody, $htmlBody, $textBody !== '', $htmlBody !== ''];
+    }
+
+    /**
+     * @return array{contentType:string,encoding:?ContentTransferEncoding,writer:callable(callable(string):void):void}
+     */
+    private function initialStreamState(MimeMessage $bodyPart): array
+    {
+        return [
+            'contentType' => $bodyPart->contentType,
+            'encoding' => $bodyPart->contentTransferEncoding,
+            'writer' => static function (callable $streamWrite) use ($bodyPart): void {
+                $streamWrite($bodyPart->body);
+            },
+        ];
+    }
+
+    /**
      * @param list<MimePart> $parts
      */
     private function renderMultipart(string $boundary, array $parts): string
@@ -110,7 +162,6 @@ final readonly class MimeMessageBuilder
 
     /**
      * @param list<EmailAttachment> $attachments
-     *
      * @return array{0:list<EmailAttachment>,1:list<EmailAttachment>}
      */
     private function splitAttachments(array $attachments): array
@@ -134,50 +185,95 @@ final readonly class MimeMessageBuilder
     /**
      * @param list<EmailAttachment> $attachments
      */
-    private function wrapMixed(MimeMessage $rootPart, array $attachments): MimeMessage
+    private function wrapMultipart(MimeMessage $rootPart, array $attachments, string $multipartType): MimeMessage
     {
-        $mixedBoundary = MimeBoundary::generate();
+        $boundary = MimeBoundary::generate();
         $body = sprintf(
             "--%s\r\n%s\r\n\r\n%s\r\n",
-            $mixedBoundary,
+            $boundary,
             'Content-Type: ' . $rootPart->contentType,
             $rootPart->body,
         );
 
         foreach ($attachments as $attachment) {
-            $body .= sprintf('--%s\r\n%s\r\n', $mixedBoundary, $this->attachmentEncoder->encode($attachment)->render());
+            $body .= sprintf('--%s\r\n%s\r\n', $boundary, $this->attachmentEncoder->encode($attachment)->render());
         }
 
-        $body .= sprintf('--%s--\r\n', $mixedBoundary);
+        $body .= sprintf('--%s--\r\n', $boundary);
 
         return new MimeMessage(
-            sprintf('multipart/mixed; boundary="%s"', $mixedBoundary),
+            sprintf('multipart/%s; boundary="%s"', $multipartType, $boundary),
             $body,
         );
     }
 
     /**
-     * @param list<EmailAttachment> $inlineAttachments
+     * @param array{contentType:string,encoding:?ContentTransferEncoding,writer:callable(callable(string):void):void} $state
+     * @param list<EmailAttachment> $attachments
+     * @return array{contentType:string,encoding:?ContentTransferEncoding,writer:callable(callable(string):void):void}
      */
-    private function wrapRelated(MimeMessage $bodyPart, array $inlineAttachments): MimeMessage
+    private function wrapStreamState(array $state, array $attachments, string $multipartType): array
     {
-        $relatedBoundary = MimeBoundary::generate();
-        $body = sprintf(
-            "--%s\r\n%s\r\n\r\n%s\r\n",
-            $relatedBoundary,
-            'Content-Type: ' . $bodyPart->contentType,
-            $bodyPart->body,
-        );
+        $boundary = MimeBoundary::generate();
+        $previousContentType = $state['contentType'];
+        $previousEncoding = $state['encoding'];
+        $previousWriter = $state['writer'];
 
-        foreach ($inlineAttachments as $attachment) {
-            $body .= sprintf('--%s\r\n%s\r\n', $relatedBoundary, $this->attachmentEncoder->encode($attachment)->render());
+        return [
+            'contentType' => sprintf('multipart/%s; boundary="%s"', $multipartType, $boundary),
+            'encoding' => null,
+            'writer' => function (callable $streamWrite) use (
+                $boundary,
+                $previousContentType,
+                $previousEncoding,
+                $previousWriter,
+                $attachments,
+            ): void {
+                $this->writeMultipartBoundary($streamWrite, $boundary);
+                $this->writePartHeaders($streamWrite, $previousContentType, $previousEncoding);
+                $previousWriter($streamWrite);
+                $streamWrite("\r\n");
+
+                foreach ($attachments as $attachment) {
+                    $this->writeMultipartBoundary($streamWrite, $boundary);
+                    $this->attachmentEncoder->encodeToStream($attachment, $streamWrite, includeHeaders: true);
+                    $streamWrite("\r\n");
+                }
+
+                $this->writeMultipartClosingBoundary($streamWrite, $boundary);
+            },
+        ];
+    }
+
+    /**
+     * @param callable(string):void $write
+     */
+    private function writeMultipartBoundary(callable $write, string $boundary): void
+    {
+        $write(sprintf("--%s\r\n", $boundary));
+    }
+
+    /**
+     * @param callable(string):void $write
+     */
+    private function writeMultipartClosingBoundary(callable $write, string $boundary): void
+    {
+        $write(sprintf("--%s--\r\n", $boundary));
+    }
+
+    /**
+     * @param callable(string):void $write
+     */
+    private function writePartHeaders(
+        callable $write,
+        string $contentType,
+        ?ContentTransferEncoding $encoding,
+    ): void {
+        $write('Content-Type: ' . $contentType . "\r\n");
+        if ($encoding !== null) {
+            $write('Content-Transfer-Encoding: ' . $encoding->value . "\r\n");
         }
 
-        $body .= sprintf('--%s--\r\n', $relatedBoundary);
-
-        return new MimeMessage(
-            sprintf('multipart/related; boundary="%s"', $relatedBoundary),
-            $body,
-        );
+        $write("\r\n");
     }
 }

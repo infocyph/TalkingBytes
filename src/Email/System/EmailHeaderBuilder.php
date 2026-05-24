@@ -42,7 +42,6 @@ final readonly class EmailHeaderBuilder
 
     /**
      * @param list<string> $headerLines
-     *
      * @return list<string>
      */
     private function addCustomHeaders(EmailMessage $message, array $headerLines): array
@@ -64,7 +63,6 @@ final readonly class EmailHeaderBuilder
 
     /**
      * @param list<string> $headerLines
-     *
      * @return list<string>
      */
     private function addGeneralHeaders(EmailMessage $message, array $headerLines): array
@@ -92,7 +90,6 @@ final readonly class EmailHeaderBuilder
 
     /**
      * @param list<string> $headerLines
-     *
      * @return list<string>
      */
     private function addListHeaders(EmailMessage $message, array $headerLines): array
@@ -125,7 +122,6 @@ final readonly class EmailHeaderBuilder
 
     /**
      * @param list<string> $headerLines
-     *
      * @return list<string>
      */
     private function addMessageThreadHeaders(EmailMessage $message, array $headerLines): array
@@ -165,7 +161,6 @@ final readonly class EmailHeaderBuilder
 
     /**
      * @param list<string> $headerLines
-     *
      * @return list<string>
      */
     private function addMiscHeaders(EmailMessage $message, array $headerLines): array

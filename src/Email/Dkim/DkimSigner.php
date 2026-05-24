@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Infocyph\TalkingBytes\Email\Dkim;
 
 use Infocyph\TalkingBytes\Email\Config\DkimConfig;
-use RuntimeException;
+use Infocyph\TalkingBytes\Email\Exception\DkimException;
 
 final readonly class DkimSigner
 {
@@ -37,11 +37,16 @@ final readonly class DkimSigner
         }
 
         if ($signedHeaders === []) {
-            throw new RuntimeException('Unable to build DKIM signature: no configured headers found in message.');
+            throw new DkimException('Unable to build DKIM signature: no configured headers found in message.');
+        }
+
+        if ($config->algorithm->value !== 'rsa-sha256') {
+            throw new DkimException(sprintf('Unsupported DKIM algorithm for signer: %s', $config->algorithm->value));
         }
 
         $dkimWithoutSignature = sprintf(
-            'v=1; a=rsa-sha256; c=relaxed/relaxed; d=%s; s=%s; t=%d; h=%s; bh=%s; b=',
+            'v=1; a=%s; c=relaxed/relaxed; d=%s; s=%s; t=%d; h=%s; bh=%s; b=',
+            $config->algorithm->value,
             $config->domain,
             $config->selector,
             time(),
@@ -87,18 +92,18 @@ final readonly class DkimSigner
         $resource = openssl_pkey_get_private($privateKey);
 
         if ($resource === false) {
-            throw new RuntimeException('Invalid DKIM private key.');
+            throw new DkimException('Invalid DKIM private key.');
         }
 
         $signature = '';
         $result = openssl_sign($input, $signature, $resource, OPENSSL_ALGO_SHA256);
 
         if ($result !== true) {
-            throw new RuntimeException('Failed to generate DKIM signature.');
+            throw new DkimException('Failed to generate DKIM signature.');
         }
 
         if (!is_string($signature)) {
-            throw new RuntimeException('DKIM signer produced a non-string signature.');
+            throw new DkimException('DKIM signer produced a non-string signature.');
         }
 
         return base64_encode($signature);
@@ -109,22 +114,6 @@ final readonly class DkimSigner
      */
     private function unfoldHeaderLines(string $headers): array
     {
-        $lines = preg_split('/\r\n/', $headers) ?: [];
-        $unfolded = [];
-
-        foreach ($lines as $line) {
-            if (($line[0] ?? '') === ' ' || ($line[0] ?? '') === "\t") {
-                $last = array_key_last($unfolded);
-                if ($last !== null) {
-                    $unfolded[$last] .= ' ' . ltrim($line);
-                }
-
-                continue;
-            }
-
-            $unfolded[] = $line;
-        }
-
-        return $unfolded;
+        return DkimHeaderTools::unfoldLines($headers);
     }
 }

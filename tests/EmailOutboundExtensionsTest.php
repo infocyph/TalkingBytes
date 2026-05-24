@@ -2,11 +2,12 @@
 
 declare(strict_types=1);
 
-use Infocyph\TalkingBytes\Email\Config\SpoolConfig;
+use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
 use Infocyph\TalkingBytes\Email\Config\LogEmailConfig;
-use Infocyph\TalkingBytes\Email\EmailMessage;
-use Infocyph\TalkingBytes\Email\Emailer;
+use Infocyph\TalkingBytes\Email\Config\SpoolConfig;
 use Infocyph\TalkingBytes\Email\Dkim\DkimSigner;
+use Infocyph\TalkingBytes\Email\Emailer;
+use Infocyph\TalkingBytes\Email\EmailMessage;
 use Infocyph\TalkingBytes\Email\Receiver\SpoolEmailReceiver;
 use Infocyph\TalkingBytes\Email\System\EmailHeaderBuilder;
 use Infocyph\TalkingBytes\Email\System\HeaderFolder;
@@ -27,8 +28,8 @@ it('adds sender, one-click unsubscribe and custom headers to built headers', fun
         ->oneClickUnsubscribe('https://example.com/unsubscribe')
         ->header('X-Campaign', 'welcome-v1');
 
-    $mime = (new MimeMessageBuilder())->build($message);
-    $headers = (new EmailHeaderBuilder())->build($message, $mime, includeSubject: true);
+    $mime = (new MimeMessageBuilder)->build($message);
+    $headers = (new EmailHeaderBuilder)->build($message, $mime, includeSubject: true);
 
     expect($headers)->toContain('Sender: mailer@example.com');
     expect($headers)->toContain('List-Unsubscribe: <https://example.com/unsubscribe>');
@@ -44,7 +45,7 @@ it('builds multipart related with inline attachments', function (): void {
         ->html('<img src="cid:logo">')
         ->attachInlineData('logo-bytes', 'logo.png', 'logo', 'image/png');
 
-    $mime = (new MimeMessageBuilder())->build($message);
+    $mime = (new MimeMessageBuilder)->build($message);
 
     expect($mime->contentType)->toContain('multipart/related');
     expect($mime->body)->toContain('Content-ID: <logo>');
@@ -74,7 +75,7 @@ it('provides fake email assertions', function (): void {
 });
 
 it('parses smtp capabilities including auth mechanisms and size', function (): void {
-    $parser = new SmtpCapabilityParser();
+    $parser = new SmtpCapabilityParser;
 
     $capabilities = $parser->parse([
         '250-mail.example.com',
@@ -89,7 +90,7 @@ it('parses smtp capabilities including auth mechanisms and size', function (): v
 });
 
 it('receives queued .eml files from spool receiver', function (): void {
-    $directory = sys_get_temp_dir() . '/talkingbytes-spool-' . bin2hex(random_bytes(4));
+    $directory = sys_get_temp_dir().'/talkingbytes-spool-'.bin2hex(random_bytes(4));
 
     $emailer = Emailer::usingSpool(new SpoolConfig($directory));
 
@@ -105,18 +106,18 @@ it('receives queued .eml files from spool receiver', function (): void {
     $received = $receiver->receive();
 
     expect($received)->not->toBeNull();
-    expect($received?->header('Subject'))->toBe('Spool Test');
-    expect($received?->body)->toContain('Queued body');
+    expect($received?->subject)->toBe('Spool Test');
+    expect($received?->textBody)->toContain('Queued body');
 
-    array_map(static fn($path): bool => unlink($path), glob($directory . '/*') ?: []);
+    array_map(static fn ($path): bool => unlink($path), glob($directory.'/*') ?: []);
     if (is_dir($directory)) {
         rmdir($directory);
     }
 });
 
 it('honors queued fake transport results', function (): void {
-    $transport = (new FakeEmailTransport())
-        ->pushResult(Infocyph\TalkingBytes\Core\Result\CommunicationResult::failure('failed'));
+    $transport = (new FakeEmailTransport)
+        ->pushResult(CommunicationResult::failure('failed'));
 
     $emailer = new Emailer($transport);
 
@@ -135,8 +136,9 @@ it('honors queued fake transport results', function (): void {
 it('logging email transport logs finish event when inner transport throws', function (): void {
     $events = [];
 
-    $transport = new class implements EmailTransport {
-        public function send(EmailMessage $message): Infocyph\TalkingBytes\Core\Result\CommunicationResult
+    $transport = new class implements EmailTransport
+    {
+        public function send(EmailMessage $message): CommunicationResult
         {
             unset($message);
 
@@ -150,7 +152,7 @@ it('logging email transport logs finish event when inner transport throws', func
 
     $loggingTransport = new LoggingEmailTransport($transport, $logger);
 
-    expect(fn() => $loggingTransport->send(
+    expect(fn () => $loggingTransport->send(
         EmailMessage::new()
             ->from('sender@example.com')
             ->to('alice@example.com')
@@ -166,7 +168,7 @@ it('logging email transport logs finish event when inner transport throws', func
 });
 
 it('fails clearly when log transport directory path is not a directory', function (): void {
-    $filePath = sys_get_temp_dir() . '/talkingbytes-log-file-' . bin2hex(random_bytes(4));
+    $filePath = sys_get_temp_dir().'/talkingbytes-log-file-'.bin2hex(random_bytes(4));
     file_put_contents($filePath, 'x');
 
     $transport = new LogEmailTransport(new LogEmailConfig($filePath));
@@ -187,7 +189,7 @@ it('fails clearly when log transport directory path is not a directory', functio
 });
 
 it('keeps spool success when metadata sidecar encoding fails', function (): void {
-    $directory = sys_get_temp_dir() . '/talkingbytes-spool-meta-' . bin2hex(random_bytes(4));
+    $directory = sys_get_temp_dir().'/talkingbytes-spool-meta-'.bin2hex(random_bytes(4));
     $emailer = Emailer::usingSpool(new SpoolConfig($directory, writeMetadata: true));
 
     $result = $emailer->send(
@@ -203,15 +205,15 @@ it('keeps spool success when metadata sidecar encoding fails', function (): void
     expect($result->metadata['metadata_write_failed'] ?? null)->toBeTrue();
     expect($result->metadata['metadata_write_error'] ?? null)->toBeString();
 
-    array_map(static fn($path): bool => unlink($path), glob($directory . '/*') ?: []);
+    array_map(static fn ($path): bool => unlink($path), glob($directory.'/*') ?: []);
     if (is_dir($directory)) {
         rmdir($directory);
     }
 });
 
 it('folds dkim headers on semicolon boundaries', function (): void {
-    $folder = new HeaderFolder();
-    $line = 'DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=example.com; s=selector; t=123456789; h=from:to:subject:date:message-id; bh=abc; b=' . str_repeat('x', 120);
+    $folder = new HeaderFolder;
+    $line = 'DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=example.com; s=selector; t=123456789; h=from:to:subject:date:message-id; bh=abc; b='.str_repeat('x', 120);
 
     $folded = $folder->fold($line, 78);
 
@@ -229,7 +231,7 @@ it('dkim header parser unfolds lines and preserves duplicate headers', function 
         '',
     ]);
 
-    $signer = new DkimSigner();
+    $signer = new DkimSigner;
     $reflection = new ReflectionMethod($signer, 'parseHeaders');
 
     /** @var array<string, list<string>> $parsed */

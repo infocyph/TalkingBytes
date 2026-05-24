@@ -394,12 +394,12 @@ final readonly class HttpRequest
 
     public function withApiKeyHeader(string $header, string $value): self
     {
-        return $this->withAuthenticator(new ApiKeyAuth($header, $value));
+        return $this->withApiKey($header, $value, false);
     }
 
     public function withApiKeyQuery(string $key, string $value): self
     {
-        return $this->withAuthenticator(new ApiKeyAuth($key, $value, true));
+        return $this->withApiKey($key, $value, true);
     }
 
     public function withAuthenticator(AuthenticatorInterface $authenticator): self
@@ -421,12 +421,12 @@ final readonly class HttpRequest
 
     public function withBasicAuth(string $username, string $password): self
     {
-        return $this->withAuthenticator(new BasicAuth($username, $password));
+        return $this->withAuthenticator(new BasicAuth(username: $username, password: $password));
     }
 
     public function withBearerToken(string $token): self
     {
-        return $this->withAuthenticator(new BearerTokenAuth($token));
+        return $this->withAuthenticator(new BearerTokenAuth(token: $token));
     }
 
     private function assertValidUrl(string $url): void
@@ -454,7 +454,6 @@ final readonly class HttpRequest
 
     /**
      * @param string|array<int, mixed> $value
-     *
      * @return string|list<string>
      */
     private function normalizeHeaderValue(string|array $value): string|array
@@ -499,6 +498,11 @@ final readonly class HttpRequest
         }
 
         return $normalized;
+    }
+
+    private function withApiKey(string $key, string $value, bool $query): self
+    {
+        return $this->withAuthenticator(new ApiKeyAuth(key: $key, value: $value, inQuery: $query));
     }
 
     private function withOptions(CurlOptions $options): self

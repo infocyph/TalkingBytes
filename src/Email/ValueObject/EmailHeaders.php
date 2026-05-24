@@ -39,43 +39,12 @@ final readonly class EmailHeaders
         public bool $dsnNotifyFailure = false,
         public bool $dsnNotifyDelay = false,
         public bool $dsnReturnFull = true,
+        public ?string $dsnEnvelopeId = null,
     ) {
-        foreach ([
-            'Subject' => $this->subject,
-            'Content-Language' => $this->language,
-            'X-Mailer' => $this->mailer,
-            'List-Id' => $this->listId,
-            'List-Unsubscribe' => $this->listUnsubscribe,
-            'List-Unsubscribe-Post' => $this->listUnsubscribePost,
-            'List-Subscribe' => $this->listSubscribe,
-            'List-Archive' => $this->listArchive,
-            'X-Spam-Status' => $this->spamStatus,
-            'Organization' => $this->organization,
-            'Message-ID' => $this->messageId,
-            'In-Reply-To' => $this->inReplyTo,
-        ] as $name => $value) {
-            if ($value !== null && $value !== '') {
-                HeaderValueGuard::assertNoCrlf($value, $name);
-            }
-        }
-
-        foreach ($this->references as $reference) {
-            HeaderValueGuard::assertNoCrlf($reference, 'References');
-        }
-
-        foreach ($this->customHeaders as $name => $value) {
-            HeaderValueGuard::assertHeaderName($name);
-
-            if (is_array($value)) {
-                foreach ($value as $singleValue) {
-                    HeaderValueGuard::assertNoCrlf($singleValue, $name);
-                }
-
-                continue;
-            }
-
-            HeaderValueGuard::assertNoCrlf($value, $name);
-        }
+        $this->validateCommonHeaderValues();
+        $this->validateDsnEnvelopeId();
+        $this->validateReferences();
+        $this->validateCustomHeaders();
     }
 
     public function assertCanSend(): void
@@ -118,13 +87,20 @@ final readonly class EmailHeaders
         bool $failure = true,
         bool $delay = true,
         bool $returnFull = true,
+        ?string $envelopeId = null,
     ): self {
         return $this->copy([
             'dsnNotifySuccess' => $success,
             'dsnNotifyFailure' => $failure,
             'dsnNotifyDelay' => $delay,
             'dsnReturnFull' => $returnFull,
+            'dsnEnvelopeId' => $envelopeId,
         ]);
+    }
+
+    public function withDsnEnvelopeId(?string $envelopeId): self
+    {
+        return $this->copy(['dsnEnvelopeId' => $envelopeId]);
     }
 
     public function withGeneralHeaders(string $language = '', ?Priority $priority = null, string $mailer = ''): self
@@ -232,6 +208,17 @@ final readonly class EmailHeaders
      */
     private function copy(array $overrides): self
     {
+        $listId = $this->overrideNullableString($overrides, 'listId', $this->listId);
+        $listUnsubscribe = $this->overrideNullableString($overrides, 'listUnsubscribe', $this->listUnsubscribe);
+        $listUnsubscribePost = $this->overrideNullableString($overrides, 'listUnsubscribePost', $this->listUnsubscribePost);
+        $listSubscribe = $this->overrideNullableString($overrides, 'listSubscribe', $this->listSubscribe);
+        $listArchive = $this->overrideNullableString($overrides, 'listArchive', $this->listArchive);
+        $spamStatus = $this->overrideNullableString($overrides, 'spamStatus', $this->spamStatus);
+        $organization = $this->overrideNullableString($overrides, 'organization', $this->organization);
+        $messageId = $this->overrideNullableString($overrides, 'messageId', $this->messageId);
+        $inReplyTo = $this->overrideNullableString($overrides, 'inReplyTo', $this->inReplyTo);
+        $dsnEnvelopeId = $this->overrideNullableString($overrides, 'dsnEnvelopeId', $this->dsnEnvelopeId);
+
         return new self(
             $this->overrideString($overrides, 'subject', $this->subject),
             $this->overrideEmailAddress($overrides, 'replyTo', $this->replyTo),
@@ -239,23 +226,24 @@ final readonly class EmailHeaders
             $this->overrideString($overrides, 'language', $this->language),
             $this->overridePriority($overrides, 'priority', $this->priority),
             $this->overrideString($overrides, 'mailer', $this->mailer),
-            $this->overrideNullableString($overrides, 'listId', $this->listId),
-            $this->overrideNullableString($overrides, 'listUnsubscribe', $this->listUnsubscribe),
-            $this->overrideNullableString($overrides, 'listUnsubscribePost', $this->listUnsubscribePost),
-            $this->overrideNullableString($overrides, 'listSubscribe', $this->listSubscribe),
-            $this->overrideNullableString($overrides, 'listArchive', $this->listArchive),
+            $listId,
+            $listUnsubscribe,
+            $listUnsubscribePost,
+            $listSubscribe,
+            $listArchive,
             $this->overrideNullableBool($overrides, 'confirmedOptIn', $this->confirmedOptIn),
-            $this->overrideNullableString($overrides, 'spamStatus', $this->spamStatus),
-            $this->overrideNullableString($overrides, 'organization', $this->organization),
+            $spamStatus,
+            $organization,
             $this->overrideEmailAddress($overrides, 'dispositionNotificationTo', $this->dispositionNotificationTo),
-            $this->overrideNullableString($overrides, 'messageId', $this->messageId),
-            $this->overrideNullableString($overrides, 'inReplyTo', $this->inReplyTo),
+            $messageId,
+            $inReplyTo,
             $this->overrideReferences($overrides, 'references', $this->references),
             $this->overrideCustomHeaders($overrides, 'customHeaders', $this->customHeaders),
             $this->overrideBool($overrides, 'dsnNotifySuccess', $this->dsnNotifySuccess),
             $this->overrideBool($overrides, 'dsnNotifyFailure', $this->dsnNotifyFailure),
             $this->overrideBool($overrides, 'dsnNotifyDelay', $this->dsnNotifyDelay),
             $this->overrideBool($overrides, 'dsnReturnFull', $this->dsnReturnFull),
+            $dsnEnvelopeId,
         );
     }
 
@@ -277,7 +265,6 @@ final readonly class EmailHeaders
 
     /**
      * @param string|list<string> $value
-     *
      * @return string|list<string>
      */
     private function normalizeHeaderValue(string|array $value): string|array
@@ -297,7 +284,6 @@ final readonly class EmailHeaders
 
     /**
      * @param array<mixed> $values
-     *
      * @return list<string>
      */
     private function normalizeStringList(array $values, string $key): array
@@ -320,14 +306,14 @@ final readonly class EmailHeaders
      */
     private function overrideBool(array $overrides, string $key, bool $current): bool
     {
-        if (!array_key_exists($key, $overrides)) {
-            return $current;
-        }
-
-        $value = $overrides[$key];
-        if (!is_bool($value)) {
-            throw new InvalidArgumentException(sprintf('Override "%s" must be a bool.', $key));
-        }
+        /** @var bool $value */
+        $value = $this->overrideValue(
+            $overrides,
+            $key,
+            $current,
+            static fn(mixed $value): bool => is_bool($value),
+            'a bool',
+        );
 
         return $value;
     }
@@ -335,18 +321,13 @@ final readonly class EmailHeaders
     /**
      * @param array<string, mixed> $overrides
      * @param array<string, string|list<string>> $current
-     *
      * @return array<string, string|list<string>>
      */
     private function overrideCustomHeaders(array $overrides, string $key, array $current): array
     {
-        if (!array_key_exists($key, $overrides)) {
-            return $current;
-        }
-
-        $value = $overrides[$key];
+        $value = $this->overrideValue($overrides, $key, $current, static fn(mixed $value): bool => is_array($value), 'an array');
         if (!is_array($value)) {
-            throw new InvalidArgumentException(sprintf('Override "%s" must be an array.', $key));
+            return $current;
         }
 
         $normalized = [];
@@ -366,14 +347,14 @@ final readonly class EmailHeaders
      */
     private function overrideEmailAddress(array $overrides, string $key, ?EmailAddress $current): ?EmailAddress
     {
-        if (!array_key_exists($key, $overrides)) {
-            return $current;
-        }
-
-        $value = $overrides[$key];
-        if ($value !== null && !$value instanceof EmailAddress) {
-            throw new InvalidArgumentException(sprintf('Override "%s" must be an EmailAddress or null.', $key));
-        }
+        /** @var ?EmailAddress $value */
+        $value = $this->overrideValue(
+            $overrides,
+            $key,
+            $current,
+            static fn(mixed $value): bool => $value === null || $value instanceof EmailAddress,
+            'an EmailAddress or null',
+        );
 
         return $value;
     }
@@ -383,14 +364,14 @@ final readonly class EmailHeaders
      */
     private function overrideNullableBool(array $overrides, string $key, ?bool $current): ?bool
     {
-        if (!array_key_exists($key, $overrides)) {
-            return $current;
-        }
-
-        $value = $overrides[$key];
-        if ($value !== null && !is_bool($value)) {
-            throw new InvalidArgumentException(sprintf('Override "%s" must be a bool or null.', $key));
-        }
+        /** @var ?bool $value */
+        $value = $this->overrideValue(
+            $overrides,
+            $key,
+            $current,
+            static fn(mixed $value): bool => $value === null || is_bool($value),
+            'a bool or null',
+        );
 
         return $value;
     }
@@ -400,14 +381,14 @@ final readonly class EmailHeaders
      */
     private function overrideNullableString(array $overrides, string $key, ?string $current): ?string
     {
-        if (!array_key_exists($key, $overrides)) {
-            return $current;
-        }
-
-        $value = $overrides[$key];
-        if ($value !== null && !is_string($value)) {
-            throw new InvalidArgumentException(sprintf('Override "%s" must be a string or null.', $key));
-        }
+        /** @var ?string $value */
+        $value = $this->overrideValue(
+            $overrides,
+            $key,
+            $current,
+            static fn(mixed $value): bool => $value === null || is_string($value),
+            'a string or null',
+        );
 
         return $value;
     }
@@ -417,14 +398,14 @@ final readonly class EmailHeaders
      */
     private function overridePriority(array $overrides, string $key, ?Priority $current): ?Priority
     {
-        if (!array_key_exists($key, $overrides)) {
-            return $current;
-        }
-
-        $value = $overrides[$key];
-        if ($value !== null && !$value instanceof Priority) {
-            throw new InvalidArgumentException(sprintf('Override "%s" must be a Priority or null.', $key));
-        }
+        /** @var ?Priority $value */
+        $value = $this->overrideValue(
+            $overrides,
+            $key,
+            $current,
+            static fn(mixed $value): bool => $value === null || $value instanceof Priority,
+            'a Priority or null',
+        );
 
         return $value;
     }
@@ -432,30 +413,16 @@ final readonly class EmailHeaders
     /**
      * @param array<string, mixed> $overrides
      * @param list<string> $current
-     *
      * @return list<string>
      */
     private function overrideReferences(array $overrides, string $key, array $current): array
     {
-        if (!array_key_exists($key, $overrides)) {
+        $value = $this->overrideValue($overrides, $key, $current, static fn(mixed $value): bool => is_array($value), 'an array');
+        if (!is_array($value)) {
             return $current;
         }
 
-        $value = $overrides[$key];
-        if (!is_array($value)) {
-            throw new InvalidArgumentException(sprintf('Override "%s" must be an array.', $key));
-        }
-
-        $normalized = [];
-        foreach ($value as $item) {
-            if (!is_string($item)) {
-                throw new InvalidArgumentException(sprintf('Override "%s" values must be strings.', $key));
-            }
-
-            $normalized[] = $item;
-        }
-
-        return $normalized;
+        return $this->normalizeStringList($value, $key);
     }
 
     /**
@@ -463,15 +430,97 @@ final readonly class EmailHeaders
      */
     private function overrideString(array $overrides, string $key, string $current): string
     {
+        /** @var string $value */
+        $value = $this->overrideValue(
+            $overrides,
+            $key,
+            $current,
+            static fn(mixed $value): bool => is_string($value),
+            'a string',
+        );
+
+        return $value;
+    }
+
+    /**
+     * @param array<string, mixed> $overrides
+     */
+    private function overrideValue(
+        array $overrides,
+        string $key,
+        mixed $current,
+        callable $validator,
+        string $expected,
+    ): mixed {
         if (!array_key_exists($key, $overrides)) {
             return $current;
         }
 
         $value = $overrides[$key];
-        if (!is_string($value)) {
-            throw new InvalidArgumentException(sprintf('Override "%s" must be a string.', $key));
+        if (!$validator($value)) {
+            throw new InvalidArgumentException(sprintf('Override "%s" must be %s.', $key, $expected));
         }
 
         return $value;
+    }
+
+    private function validateCommonHeaderValues(): void
+    {
+        foreach ([
+            'Subject' => $this->subject,
+            'Content-Language' => $this->language,
+            'X-Mailer' => $this->mailer,
+            'List-Id' => $this->listId,
+            'List-Unsubscribe' => $this->listUnsubscribe,
+            'List-Unsubscribe-Post' => $this->listUnsubscribePost,
+            'List-Subscribe' => $this->listSubscribe,
+            'List-Archive' => $this->listArchive,
+            'X-Spam-Status' => $this->spamStatus,
+            'Organization' => $this->organization,
+            'Message-ID' => $this->messageId,
+            'In-Reply-To' => $this->inReplyTo,
+            'DSN-ENVID' => $this->dsnEnvelopeId,
+        ] as $name => $value) {
+            if ($value === null || $value === '') {
+                continue;
+            }
+
+            HeaderValueGuard::assertNoCrlf($value, $name);
+        }
+    }
+
+    private function validateCustomHeaders(): void
+    {
+        foreach ($this->customHeaders as $name => $value) {
+            HeaderValueGuard::assertHeaderName($name);
+
+            if (is_array($value)) {
+                foreach ($value as $singleValue) {
+                    HeaderValueGuard::assertNoCrlf($singleValue, $name);
+                }
+
+                continue;
+            }
+
+            HeaderValueGuard::assertNoCrlf($value, $name);
+        }
+    }
+
+    private function validateDsnEnvelopeId(): void
+    {
+        if ($this->dsnEnvelopeId === null || $this->dsnEnvelopeId === '') {
+            return;
+        }
+
+        if (preg_match('/^[A-Za-z0-9._-]{1,200}$/', $this->dsnEnvelopeId) !== 1) {
+            throw new InvalidArgumentException('DSN envelope ID must use only letters, numbers, dot, underscore, and hyphen.');
+        }
+    }
+
+    private function validateReferences(): void
+    {
+        foreach ($this->references as $reference) {
+            HeaderValueGuard::assertNoCrlf($reference, 'References');
+        }
     }
 }

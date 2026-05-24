@@ -19,6 +19,7 @@ final readonly class ParsedEmailPart
         public ?string $contentId,
         public string $body,
         public bool $inline,
+        public ?string $partNumber = null,
         public array $children = [],
     ) {}
 }

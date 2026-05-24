@@ -28,7 +28,7 @@ function baselineEmail(): EmailMessage
 }
 
 it('returns success metadata for null email transport', function (): void {
-    $result = (new NullEmailTransport())->send(baselineEmail());
+    $result = (new NullEmailTransport)->send(baselineEmail());
 
     expect($result->successful)->toBeTrue();
     expect($result->metadata['transport'] ?? null)->toBe('null-email');
@@ -36,11 +36,11 @@ it('returns success metadata for null email transport', function (): void {
 });
 
 it('writes log email payload to configured directory', function (): void {
-    $directory = getcwd() . '/tests/.tmp-log-' . bin2hex(random_bytes(4));
+    $directory = getcwd().'/tests/.tmp-log-'.bin2hex(random_bytes(4));
     $transport = new LogEmailTransport(new LogEmailConfig($directory, filenamePrefix: 'mail', dailyFiles: false));
 
     $result = $transport->send(baselineEmail());
-    $files = glob($directory . '/*') ?: [];
+    $files = glob($directory.'/*') ?: [];
 
     expect($result->successful)->toBeTrue();
     expect($files)->toHaveCount(1);
@@ -52,12 +52,29 @@ it('writes log email payload to configured directory', function (): void {
     rmdir($directory);
 });
 
+it('fails log transport when configured max message size is exceeded', function (): void {
+    $directory = getcwd().'/tests/.tmp-log-limit-'.bin2hex(random_bytes(4));
+    $transport = new LogEmailTransport(new LogEmailConfig($directory, dailyFiles: false, maxMessageBytes: 32));
+
+    $result = $transport->send(baselineEmail()->text(str_repeat('x', 256)));
+
+    expect($result->successful)->toBeFalse();
+    expect($result->error)->toContain('exceeds configured log max message size');
+
+    if (is_dir($directory)) {
+        foreach (glob($directory.'/*') ?: [] as $file) {
+            unlink($file);
+        }
+        rmdir($directory);
+    }
+});
+
 it('writes spool eml and metadata sidecar when enabled', function (): void {
-    $directory = getcwd() . '/tests/.tmp-spool-' . bin2hex(random_bytes(4));
+    $directory = getcwd().'/tests/.tmp-spool-'.bin2hex(random_bytes(4));
     $transport = new SpoolEmailTransport(new SpoolConfig($directory, writeMetadata: true));
 
     $result = $transport->send(baselineEmail()->tag('batch', 'alpha'));
-    $files = glob($directory . '/*') ?: [];
+    $files = glob($directory.'/*') ?: [];
 
     expect($result->successful)->toBeTrue();
     expect($files)->toHaveCount(2);
@@ -68,6 +85,23 @@ it('writes spool eml and metadata sidecar when enabled', function (): void {
         unlink($file);
     }
     rmdir($directory);
+});
+
+it('fails spool transport when configured max message size is exceeded', function (): void {
+    $directory = getcwd().'/tests/.tmp-spool-limit-'.bin2hex(random_bytes(4));
+    $transport = new SpoolEmailTransport(new SpoolConfig($directory, writeMetadata: false, maxMessageBytes: 32));
+
+    $result = $transport->send(baselineEmail()->text(str_repeat('x', 256)));
+
+    expect($result->successful)->toBeFalse();
+    expect($result->error)->toContain('exceeds configured limit');
+
+    if (is_dir($directory)) {
+        foreach (glob($directory.'/*') ?: [] as $file) {
+            unlink($file);
+        }
+        rmdir($directory);
+    }
 });
 
 it('builds sendmail command with envelope sender argument', function (): void {
@@ -81,7 +115,7 @@ it('builds sendmail command with envelope sender argument', function (): void {
 });
 
 it('fails clearly when sendmail binary is not executable', function (): void {
-    $transport = new SendmailTransport(new SendmailConfig(getcwd() . '/tests/not-a-binary', ['-t'], 1));
+    $transport = new SendmailTransport(new SendmailConfig(getcwd().'/tests/not-a-binary', ['-t'], 1));
     $result = $transport->send(baselineEmail());
 
     expect($result->successful)->toBeFalse();
@@ -91,7 +125,8 @@ it('fails clearly when sendmail binary is not executable', function (): void {
 it('retries failed transport result and succeeds on later attempt', function (): void {
     $attempts = 0;
 
-    $inner = new class($attempts) implements EmailTransport {
+    $inner = new class($attempts) implements EmailTransport
+    {
         public function __construct(private int &$attempts) {}
 
         public function send(EmailMessage $message): CommunicationResult
@@ -115,7 +150,8 @@ it('retries failed transport result and succeeds on later attempt', function ():
 });
 
 it('uses fallback transport and records attempted transports metadata', function (): void {
-    $primary = new class implements EmailTransport {
+    $primary = new class implements EmailTransport
+    {
         public function send(EmailMessage $message): CommunicationResult
         {
             unset($message);
@@ -124,7 +160,8 @@ it('uses fallback transport and records attempted transports metadata', function
         }
     };
 
-    $fallback = new class implements EmailTransport {
+    $fallback = new class implements EmailTransport
+    {
         public function send(EmailMessage $message): CommunicationResult
         {
             unset($message);
@@ -141,7 +178,8 @@ it('uses fallback transport and records attempted transports metadata', function
 });
 
 it('blocks when rate limited transport exceeds quota', function (): void {
-    $inner = new class implements EmailTransport {
+    $inner = new class implements EmailTransport
+    {
         public function send(EmailMessage $message): CommunicationResult
         {
             unset($message);
@@ -154,5 +192,5 @@ it('blocks when rate limited transport exceeds quota', function (): void {
     $first = $transport->send(baselineEmail());
 
     expect($first->successful)->toBeTrue();
-    expect(fn() => $transport->send(baselineEmail()))->toThrow(RuntimeException::class, 'Rate limit exceeded');
+    expect(fn () => $transport->send(baselineEmail()))->toThrow(RuntimeException::class, 'Rate limit exceeded');
 });

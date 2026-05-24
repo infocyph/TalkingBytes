@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Infocyph\TalkingBytes\Core\Message\CommunicationRequest;
 use Infocyph\TalkingBytes\Http\CurlTransport;
 use Infocyph\TalkingBytes\Http\HttpRequest;
 
@@ -20,9 +21,9 @@ it('builds http request with query and auth', function (): void {
 });
 
 it('curl transport returns failure for invalid payload type', function (): void {
-    $transport = new CurlTransport();
+    $transport = new CurlTransport;
 
-    $result = $transport->send(new Infocyph\TalkingBytes\Core\Message\CommunicationRequest('http', ['bad' => 'payload']));
+    $result = $transport->send(new CommunicationRequest('http', ['bad' => 'payload']));
 
     expect($result->successful)->toBeFalse();
     expect($result->error)->toContain('expects HttpRequest payload');

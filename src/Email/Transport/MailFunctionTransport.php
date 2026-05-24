@@ -15,13 +15,26 @@ final readonly class MailFunctionTransport implements EmailTransport
     public function __construct(
         private RawEmailBuilder $rawEmailBuilder = new RawEmailBuilder(),
         private AddressFormatter $addressFormatter = new AddressFormatter(),
-    ) {}
+        private ?int $maxMessageBytes = null,
+    ) {
+        if ($this->maxMessageBytes !== null && $this->maxMessageBytes < 1) {
+            throw new \InvalidArgumentException('mail() max message bytes must be greater than zero when provided.');
+        }
+    }
 
     public function send(EmailMessage $message): CommunicationResult
     {
         $message->assertReadyToSend();
 
         $rawEmail = $this->rawEmailBuilder->build($message, includeSubject: false);
+        if ($this->maxMessageBytes !== null && $rawEmail->sizeBytes > $this->maxMessageBytes) {
+            return CommunicationResult::failure(sprintf(
+                'Email size %d bytes exceeds configured mail() max message size %d bytes.',
+                $rawEmail->sizeBytes,
+                $this->maxMessageBytes,
+            ));
+        }
+
         $messageId = $this->extractMessageId($rawEmail->headers);
         $subject = $this->addressFormatter->encodeMimeHeader($message->headersData()->subject);
 

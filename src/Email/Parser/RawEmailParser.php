@@ -4,10 +4,13 @@ declare(strict_types=1);
 
 namespace Infocyph\TalkingBytes\Email\Parser;
 
+use Infocyph\TalkingBytes\Email\Config\EmailLimits;
+use Infocyph\TalkingBytes\Email\Exception\EmailParseException;
 use Infocyph\TalkingBytes\Email\ValueObject\EmailAddressList;
 use Infocyph\TalkingBytes\Email\ValueObject\HeaderBag;
 use Infocyph\TalkingBytes\Email\ValueObject\ParsedEmail;
 use Infocyph\TalkingBytes\Email\ValueObject\ParsedEmailPart;
+use Infocyph\TalkingBytes\Email\ValueObject\ReceivedAttachment;
 
 final readonly class RawEmailParser implements EmailParser
 {
@@ -16,6 +19,7 @@ final readonly class RawEmailParser implements EmailParser
         private AddressParser $addressParser = new AddressParser(),
         private MimeParser $mimeParser = new MimeParser(),
         private AttachmentExtractor $attachmentExtractor = new AttachmentExtractor(),
+        private EmailLimits $limits = new EmailLimits(),
     ) {}
 
     /**
@@ -23,10 +27,23 @@ final readonly class RawEmailParser implements EmailParser
      */
     public function parse(string $rawEmail, array $metadata = []): ParsedEmail
     {
+        if (strlen($rawEmail) > $this->limits->maxMessageBytes) {
+            throw new EmailParseException(sprintf(
+                'Raw email exceeds max message size limit (%d bytes).',
+                $this->limits->maxMessageBytes,
+            ));
+        }
+
         [$headerBlock, $body] = $this->splitRawMessage($rawEmail);
+        $this->assertHeaderLimits($headerBlock);
         $headers = $this->headerParser->parse($headerBlock);
         $rootPart = $this->mimeParser->parse($headers, $body);
+        $this->assertMimeLimits($rootPart);
         [$textBody, $htmlBody] = $this->collectBodies($rootPart);
+        $attachments = $this->attachmentExtractor->extract($rootPart);
+        $this->assertAttachmentLimits($attachments);
+        $this->assertBodyLimits($rootPart);
+        $parts = $this->flattenParts($rootPart);
 
         return new ParsedEmail(
             $this->addresses($headers, 'From'),
@@ -40,8 +57,8 @@ final readonly class RawEmailParser implements EmailParser
             $this->headerParser->parseReferences($headers->first('References')),
             $textBody,
             $htmlBody,
-            $this->attachmentExtractor->extract($rootPart),
-            $this->flattenParts($rootPart),
+            $attachments,
+            $parts,
             $headers->asMap(),
             $this->normalizeLineEndings($rawEmail),
             $metadata,
@@ -51,6 +68,100 @@ final readonly class RawEmailParser implements EmailParser
     private function addresses(HeaderBag $headers, string $name): EmailAddressList
     {
         return $this->addressParser->parse($headers->first($name));
+    }
+
+    /**
+     * @param list<ReceivedAttachment> $attachments
+     */
+    private function assertAttachmentLimits(array $attachments): void
+    {
+        if (count($attachments) > $this->limits->maxAttachmentCount) {
+            throw new EmailParseException(sprintf(
+                'Attachment count exceeds limit (%d).',
+                $this->limits->maxAttachmentCount,
+            ));
+        }
+
+        foreach ($attachments as $attachment) {
+            if ($attachment->sizeBytes <= $this->limits->maxAttachmentBytes) {
+                continue;
+            }
+
+            throw new EmailParseException(sprintf(
+                'Attachment exceeds max size limit (%d bytes): %s',
+                $this->limits->maxAttachmentBytes,
+                $attachment->filename,
+            ));
+        }
+    }
+
+    private function assertBodyLimits(ParsedEmailPart $root): void
+    {
+        foreach ($this->flattenParts($root) as $part) {
+            if ($part->children !== []) {
+                continue;
+            }
+
+            if (strlen($part->body) > $this->limits->maxDecodedBodyBytes) {
+                throw new EmailParseException(sprintf(
+                    'Decoded MIME body exceeds limit (%d bytes).',
+                    $this->limits->maxDecodedBodyBytes,
+                ));
+            }
+        }
+    }
+
+    private function assertHeaderLimits(string $headerBlock): void
+    {
+        if (strlen($headerBlock) > $this->limits->maxHeaderBytes) {
+            throw new EmailParseException(sprintf(
+                'Header section exceeds limit (%d bytes).',
+                $this->limits->maxHeaderBytes,
+            ));
+        }
+
+        $headerLines = preg_split('/\r\n/', $headerBlock) ?: [];
+        if (count($headerLines) > $this->limits->maxHeaderCount) {
+            throw new EmailParseException(sprintf(
+                'Header count exceeds limit (%d).',
+                $this->limits->maxHeaderCount,
+            ));
+        }
+    }
+
+    private function assertMimeLimits(ParsedEmailPart $root): void
+    {
+        $parts = 0;
+        $maxDepth = 0;
+        $partStack = [$root];
+        $depthStack = [1];
+
+        while ($partStack !== [] && $depthStack !== []) {
+            $current = array_pop($partStack);
+            $depth = array_pop($depthStack);
+
+            $parts++;
+            $maxDepth = max($maxDepth, $depth);
+
+            if ($parts > $this->limits->maxMimeParts) {
+                throw new EmailParseException(sprintf(
+                    'MIME part count exceeds limit (%d).',
+                    $this->limits->maxMimeParts,
+                ));
+            }
+
+            if ($maxDepth > $this->limits->maxMimeDepth) {
+                throw new EmailParseException(sprintf(
+                    'MIME nesting depth exceeds limit (%d).',
+                    $this->limits->maxMimeDepth,
+                ));
+            }
+
+            foreach ($current->children as $child) {
+                $partStack[] = $child;
+                $depthStack[] = $depth + 1;
+            }
+        }
     }
 
     /**
@@ -96,13 +207,13 @@ final readonly class RawEmailParser implements EmailParser
 
         while ($index < $stackCount) {
             $part = $stack[$index];
-            ++$index;
+            $index++;
 
             $parts[] = $part;
 
             foreach ($part->children as $child) {
                 $stack[] = $child;
-                ++$stackCount;
+                $stackCount++;
             }
         }
 

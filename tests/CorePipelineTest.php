@@ -11,9 +11,10 @@ use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
 it('runs middleware pipeline in order', function (): void {
     $events = [];
 
-    $transport = new class($events) implements TransportInterface {
+    $transport = new class($events) implements TransportInterface
+    {
         /**
-         * @param array<int, string> $events
+         * @param  array<int, string>  $events
          */
         public function __construct(private array &$events) {}
 
@@ -26,13 +27,14 @@ it('runs middleware pipeline in order', function (): void {
         }
     };
 
-    $first = new class($events) implements MiddlewareInterface {
+    $first = new class($events) implements MiddlewareInterface
+    {
         /**
-         * @param array<int, string> $events
+         * @param  array<int, string>  $events
          */
         public function __construct(private array &$events) {}
 
-        public function handle(CommunicationRequest $request, \Closure $next): CommunicationResult
+        public function handle(CommunicationRequest $request, Closure $next): CommunicationResult
         {
             $this->events[] = 'first.before';
             $result = $next($request);
@@ -42,13 +44,14 @@ it('runs middleware pipeline in order', function (): void {
         }
     };
 
-    $second = new class($events) implements MiddlewareInterface {
+    $second = new class($events) implements MiddlewareInterface
+    {
         /**
-         * @param array<int, string> $events
+         * @param  array<int, string>  $events
          */
         public function __construct(private array &$events) {}
 
-        public function handle(CommunicationRequest $request, \Closure $next): CommunicationResult
+        public function handle(CommunicationRequest $request, Closure $next): CommunicationResult
         {
             $this->events[] = 'second.before';
             $result = $next($request);
