@@ -47,6 +47,17 @@ $message = EmailMessage::new()
     ->deliveryNotification(failure: true, delay: true, envelopeId: 'invoice-1001');
 ```
 
+### DKIM verify
+
+```php
+use Infocyph\TalkingBytes\Email\Dkim\DkimVerifier;
+use Infocyph\TalkingBytes\Email\Dkim\DnsDkimPublicKeyResolver;
+use Infocyph\TalkingBytes\Email\Parser\RawEmailParser;
+
+$parsed = (new RawEmailParser())->parse($rawEml);
+$verification = (new DkimVerifier(new DnsDkimPublicKeyResolver()))->verify($parsed);
+```
+
 ### Sendmail / spool / null transports
 
 ```php
@@ -98,6 +109,15 @@ $receiver = new SpoolEmailReceiver(new SpoolConfig(__DIR__ . '/storage/inbound-e
 $email = $receiver->receive();
 ```
 
+### Spool sender
+
+```php
+use Infocyph\TalkingBytes\Email\Emailer;
+
+$spoolSender = Emailer::usingSpool(__DIR__ . '/storage/outbound-emails');
+$spoolSender->send($message);
+```
+
 ### IMAP mailbox
 
 ```php
@@ -115,7 +135,7 @@ $messages = $mailbox->folder('INBOX')->query(
     MailboxSearch::new()->unseen()->newestFirst()->limit(20)
 );
 
-$summary = $mailbox->folder('INBOX')->fetchSummary($messages[0]->uid);
+$parsed = $mailbox->folder('INBOX')->fetchParsed($messages[0]->uid);
 ```
 
 ### POP3 mailbox
@@ -129,6 +149,8 @@ $mailbox = Pop3Mailbox::usingConfig(new Pop3Config(
     username: 'user',
     password: 'secret',
 ));
+
+$parsed = $mailbox->fetchParsed(1);
 ```
 
 ### Bounce parsing
@@ -139,6 +161,7 @@ use Infocyph\TalkingBytes\Email\Parser\RawEmailParser;
 
 $parsed = (new RawEmailParser())->parse($rawEml);
 $bounce = (new BounceParser())->parse($parsed);
+$reports = (new BounceParser())->parseMany($parsed);
 ```
 
 ### Authentication-Results parsing
@@ -151,6 +174,19 @@ $results = (new AuthenticationResultsParser())->parse(
 );
 
 $authenticated = $results->isAuthenticated();
+```
+
+### Parser limits
+
+```php
+use Infocyph\TalkingBytes\Email\Config\EmailLimits;
+use Infocyph\TalkingBytes\Email\Parser\RawEmailParser;
+
+$parser = new RawEmailParser(new EmailLimits(
+    maxMessageBytes: 5 * 1024 * 1024,
+    maxMimeDepth: 16,
+    maxMimeParts: 300,
+));
 ```
 
 ## Event Hooks
@@ -166,6 +202,16 @@ Email::events(static function (string $event, array $payload): void {
     // email.parse.failed, mailbox.command.start, mailbox.command.finish,
     // bounce.detected
 });
+```
+
+Mailbox command payloads are redacted before dispatch:
+
+```php
+// LOGIN "user" [REDACTED]
+// AUTHENTICATE [REDACTED]
+// PASS [REDACTED]
+// APOP user [REDACTED]
+// AUTH [REDACTED]
 ```
 
 ## Limits and Safety
@@ -203,8 +249,8 @@ Email::events(static function (string $event, array $payload): void {
 - Required:
   - `ext-curl` (HTTP/cURL transport)
   - `ext-fileinfo` (attachment MIME detection)
+  - `ext-openssl` (DKIM sign/verify and TLS socket crypto)
 - Suggested:
-  - `ext-openssl` (TLS sockets + DKIM sign/verify)
   - `ext-mbstring` (charset conversion + UTF7-IMAP conversion path)
   - `ext-iconv` (charset fallback conversion path)
   - `ext-imap` (optional address parsing and UTF7-IMAP fallback helpers)
