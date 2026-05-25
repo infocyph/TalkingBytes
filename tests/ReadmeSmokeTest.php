@@ -14,12 +14,34 @@ use Infocyph\TalkingBytes\Email\Mailbox\Pop3Mailbox;
 use Infocyph\TalkingBytes\Email\Parser\AuthenticationResultsParser;
 use Infocyph\TalkingBytes\Email\Parser\BounceParser;
 use Infocyph\TalkingBytes\Email\Parser\RawEmailParser;
+use Infocyph\TalkingBytes\Grpc\GrpcClient;
+use Infocyph\TalkingBytes\Grpc\GrpcRequest;
+use Infocyph\TalkingBytes\Grpc\GrpcResponse;
+use Infocyph\TalkingBytes\Grpc\GrpcStatus;
+use Infocyph\TalkingBytes\Grpc\Retry\GrpcRetryPolicy;
+use Infocyph\TalkingBytes\Grpc\Testing\FakeGrpcCaller;
+use Infocyph\TalkingBytes\Http\Concurrent\RequestPool;
+use Infocyph\TalkingBytes\Http\Cookie\CookieJar;
+use Infocyph\TalkingBytes\Http\HttpClient;
+use Infocyph\TalkingBytes\Http\HttpRequest;
+use Infocyph\TalkingBytes\Http\Retry\HttpRetryPolicy;
+use Infocyph\TalkingBytes\Webhook\WebhookSender;
 
 it('contains core usage examples in README', function (): void {
-    $readme = file_get_contents(__DIR__.'/../README.md');
+    $readme = file_get_contents(__DIR__ . '/../README.md');
 
     expect($readme)->toBeString();
     expect($readme)->toContain('SMTP send');
+    expect($readme)->toContain('HTTP send (cURL)');
+    expect($readme)->toContain('HTTP concurrent pool');
+    expect($readme)->toContain('HTTP cookie jar');
+    expect($readme)->toContain('gRPC send');
+    expect($readme)->toContain('gRPC retry policy');
+    expect($readme)->toContain('gRPC fake caller for tests');
+    expect($readme)->toContain('gRPC native invoker boundary');
+    expect($readme)->toContain('Webhook sender retry profile (HTTP)');
+    expect($readme)->toContain('Webhook receiver and replay protection');
+    expect($readme)->toContain('Webhook fake sender');
     expect($readme)->toContain('Sendmail / spool / null transports');
     expect($readme)->toContain('Spool receiver');
     expect($readme)->toContain('IMAP mailbox');
@@ -50,9 +72,20 @@ it('keeps release-level README examples syntactically valid in fake-safe mode', 
     $imap = Mailbox::usingImap(new ImapConfig('imap.example.com', username: 'u', password: 'p'));
     $pop3 = Pop3Mailbox::usingConfig(new Pop3Config('pop.example.com', username: 'u', password: 'p'));
     $search = MailboxSearch::new()->unseen()->limit(10);
-    $auth = (new AuthenticationResultsParser)->parse('mx.example.com; dkim=pass header.d=example.com');
-    $parsed = (new RawEmailParser)->parse("From: a@example.com\r\nTo: b@example.com\r\nSubject: S\r\n\r\nBody");
-    $bounce = (new BounceParser)->parse($parsed);
+    $auth = (new AuthenticationResultsParser())->parse('mx.example.com; dkim=pass header.d=example.com');
+    $parsed = (new RawEmailParser())->parse("From: a@example.com\r\nTo: b@example.com\r\nSubject: S\r\n\r\nBody");
+    $bounce = (new BounceParser())->parse($parsed);
+    $http = HttpClient::fake()->withCookieJar(new CookieJar())->withHttpRetry(new HttpRetryPolicy(baseDelayMs: 0));
+    $pool = HttpClient::multi(2);
+    $webhookSender = WebhookSender::usingHttpWithRetryProfile(HttpClient::fake(), attempts: 2, baseDelayMs: 0);
+    $httpRequest = HttpRequest::get('https://api.example.com/users')->query('page', 1);
+    $grpcFake = (new FakeGrpcCaller())->pushOk(['ok' => true]);
+    $grpcClient = GrpcClient::using(
+        static fn(GrpcRequest $request): GrpcResponse => new GrpcResponse(GrpcStatus::Ok, $request->message),
+    )->withGrpcRetry(GrpcRetryPolicy::standard(attempts: 2, baseDelayMs: 0));
+    $grpcResult = $grpcClient->send(new GrpcRequest('Orders/Create', ['order_id' => 1001]));
+    $grpcFakeClient = GrpcClient::using($grpcFake);
+    $grpcFakeClient->send(new GrpcRequest('Orders/Create', ['order_id' => 1002]));
 
     expect($message->headersData()->subject)->toBe('README smoke');
     expect($smtp)->toBeInstanceOf(Emailer::class);
@@ -63,6 +96,12 @@ it('keeps release-level README examples syntactically valid in fake-safe mode', 
     expect($search->limit)->toBe(10);
     expect($auth->passedDkim())->toBeTrue();
     expect($bounce)->toBeNull();
+    expect($http)->toBeInstanceOf(HttpClient::class);
+    expect($pool->maxConcurrency(2))->toBeInstanceOf(RequestPool::class);
+    expect($webhookSender)->toBeInstanceOf(WebhookSender::class);
+    expect($httpRequest->buildUrl())->toContain('page=1');
+    expect($grpcResult->successful)->toBeTrue();
+    $grpcFake->assert()->assertCallCount(1);
     expect(Email::mailbox()->usingPop3(new Pop3Config('pop.example.com', username: 'u', password: 'p')))
         ->toBeInstanceOf(Pop3Mailbox::class);
 });

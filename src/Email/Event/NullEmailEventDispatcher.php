@@ -4,13 +4,22 @@ declare(strict_types=1);
 
 namespace Infocyph\TalkingBytes\Email\Event;
 
-final class NullEmailEventDispatcher implements EmailEventDispatcher
+use Infocyph\TalkingBytes\Core\Event\NullEventDispatcher;
+
+final readonly class NullEmailEventDispatcher implements EmailEventDispatcher
 {
+    private NullEventDispatcher $dispatcher;
+
+    public function __construct()
+    {
+        $this->dispatcher = new NullEventDispatcher();
+    }
+
     /**
      * @param array<string, mixed> $payload
      */
     public function dispatch(string $event, array $payload = []): void
     {
-        // Intentionally no-op.
+        $this->dispatcher->dispatch($event, $payload);
     }
 }

@@ -25,7 +25,7 @@ final readonly class RequestPool
     }
 
     /**
-     * @param list<HttpRequest> $requests
+     * @param array<int|string, HttpRequest> $requests
      */
     public function sendMany(array $requests): PoolResult
     {

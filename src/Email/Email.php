@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Infocyph\TalkingBytes\Email;
 
-use Infocyph\TalkingBytes\Email\Event\EmailEventBus;
+use Infocyph\TalkingBytes\Core\Event\CommunicationEventBus;
 
 final readonly class Email
 {
@@ -13,7 +13,7 @@ final readonly class Email
      */
     public static function events(?callable $listener): void
     {
-        EmailEventBus::listen($listener);
+        CommunicationEventBus::listen($listener);
     }
 
     public static function mailbox(): EmailMailboxFactory

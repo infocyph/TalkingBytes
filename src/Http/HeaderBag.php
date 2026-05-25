@@ -77,6 +77,11 @@ final readonly class HeaderBag
         return $this->headers[$normalized] ?? null;
     }
 
+    public function has(string $name): bool
+    {
+        return array_key_exists($this->normalize($name), $this->headers);
+    }
+
     /**
      * @return list<string>
      */

@@ -4,33 +4,81 @@ declare(strict_types=1);
 
 namespace Infocyph\TalkingBytes\Http;
 
+use Closure;
 use Infocyph\TalkingBytes\Auth\ApiKeyAuth;
 use Infocyph\TalkingBytes\Auth\AuthenticatorInterface;
 use Infocyph\TalkingBytes\Auth\BasicAuth;
 use Infocyph\TalkingBytes\Auth\BearerTokenAuth;
+use Infocyph\TalkingBytes\Auth\SignedRequestAuth;
 use Infocyph\TalkingBytes\Core\Contract\MiddlewareInterface;
+use Infocyph\TalkingBytes\Core\Contract\TransportInterface;
+use Infocyph\TalkingBytes\Core\Middleware\CircuitBreakerMiddleware;
+use Infocyph\TalkingBytes\Core\Middleware\HeaderMiddleware;
+use Infocyph\TalkingBytes\Core\Middleware\IdempotencyMiddleware;
+use Infocyph\TalkingBytes\Core\Middleware\LoggingMiddleware;
+use Infocyph\TalkingBytes\Core\Middleware\RateLimitMiddleware;
 use Infocyph\TalkingBytes\Core\Middleware\RetryMiddleware;
+use Infocyph\TalkingBytes\Core\Middleware\TimeoutMiddleware;
 use Infocyph\TalkingBytes\Core\Pipeline\MiddlewarePipeline;
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
 use Infocyph\TalkingBytes\Http\Body\MultipartBody;
+use Infocyph\TalkingBytes\Http\Cookie\CookieJar;
+use Infocyph\TalkingBytes\Http\Retry\HttpRetryPolicy;
+use Infocyph\TalkingBytes\Http\Testing\AssertableHttpTransport;
+use Infocyph\TalkingBytes\Http\Testing\FakeHttpTransport;
+use Infocyph\TalkingBytes\Resilience\CircuitBreaker;
+use Infocyph\TalkingBytes\Resilience\RateLimiter;
 use Infocyph\TalkingBytes\Retry\RetryPolicy;
+use Infocyph\TalkingBytes\Signing\RequestSignerInterface;
+use RuntimeException;
 
 final readonly class HttpClient
 {
     /**
      * @param list<MiddlewareInterface> $middlewares
+     * @param array<string, string|list<string>> $defaultHeaders
      * @param list<AuthenticatorInterface> $authenticators
      */
     private function __construct(
-        private CurlTransport $transport,
+        private TransportInterface $transport,
         private array $middlewares = [],
-        private int $timeoutSeconds = 10,
+        private CurlOptions $defaultOptions = new CurlOptions(),
+        private array $defaultHeaders = [],
         private array $authenticators = [],
+        private ?CookieJar $cookieJar = null,
     ) {}
 
     public static function curl(): self
     {
         return new self(new CurlTransport());
+    }
+
+    public static function fake(?FakeHttpTransport $transport = null): self
+    {
+        return new self($transport ?? new FakeHttpTransport());
+    }
+
+    public static function fromConfig(HttpClientConfig $config): self
+    {
+        return new self(
+            transport: new CurlTransport(),
+            defaultOptions: new CurlOptions(
+                timeoutSeconds: $config->timeoutSeconds,
+                connectTimeoutSeconds: $config->connectTimeoutSeconds,
+                followRedirects: $config->followRedirects,
+                maxRedirects: $config->maxRedirects,
+                proxy: $config->proxy,
+                proxyAuth: ($config->proxyUsername !== null || $config->proxyPassword !== null)
+                    ? sprintf('%s:%s', (string) $config->proxyUsername, (string) $config->proxyPassword)
+                    : null,
+                verifyPeer: $config->verifyPeer,
+                verifyHost: $config->verifyHost,
+                caBundle: $config->caBundle,
+                userAgent: $config->userAgent,
+                maxResponseBytes: $config->maxResponseBytes,
+            ),
+            defaultHeaders: $config->defaultHeaders,
+        );
     }
 
     public static function multi(int $maxConcurrency = 10): Concurrent\RequestPool
@@ -43,14 +91,43 @@ final readonly class HttpClient
         return MultipartBody::new();
     }
 
+    public static function using(TransportInterface $transport): self
+    {
+        return new self($transport);
+    }
+
+    public function assert(): AssertableHttpTransport
+    {
+        if (!$this->transport instanceof FakeHttpTransport) {
+            throw new RuntimeException('HttpClient assertions are only available for fake transports.');
+        }
+
+        return new AssertableHttpTransport($this->transport);
+    }
+
+    public function connectTimeout(int $seconds): self
+    {
+        return new self($this->transport, $this->middlewares, $this->defaultOptions->withConnectTimeoutSeconds($seconds), $this->defaultHeaders, $this->authenticators, $this->cookieJar);
+    }
+
     public function delete(string $url): CommunicationResult
     {
-        return $this->send($this->applyDefaults(HttpRequest::delete($url)));
+        return $this->send(HttpRequest::delete($url));
     }
 
     public function get(string $url): CommunicationResult
     {
-        return $this->send($this->applyDefaults(HttpRequest::get($url)));
+        return $this->send(HttpRequest::get($url));
+    }
+
+    public function head(string $url): CommunicationResult
+    {
+        return $this->send(HttpRequest::head($url));
+    }
+
+    public function options(string $url): CommunicationResult
+    {
+        return $this->send(HttpRequest::options($url));
     }
 
     /**
@@ -66,7 +143,7 @@ final readonly class HttpClient
      */
     public function patchJson(string $url, array $payload): CommunicationResult
     {
-        return $this->send($this->applyDefaults(HttpRequest::patch($url)->json($payload)));
+        return $this->send(HttpRequest::patch($url)->json($payload));
     }
 
     /**
@@ -82,7 +159,7 @@ final readonly class HttpClient
      */
     public function postForm(string $url, array $payload): CommunicationResult
     {
-        return $this->send($this->applyDefaults(HttpRequest::post($url)->form($payload)));
+        return $this->send(HttpRequest::post($url)->form($payload));
     }
 
     /**
@@ -90,17 +167,17 @@ final readonly class HttpClient
      */
     public function postJson(string $url, array $payload): CommunicationResult
     {
-        return $this->send($this->applyDefaults(HttpRequest::post($url)->json($payload)));
+        return $this->send(HttpRequest::post($url)->json($payload));
     }
 
     public function postMultipart(string $url, MultipartBody $payload): CommunicationResult
     {
-        return $this->send($this->applyDefaults(HttpRequest::post($url)->multipart($payload)));
+        return $this->send(HttpRequest::post($url)->multipart($payload));
     }
 
     public function postRaw(string $url, string $payload, string $contentType = 'text/plain'): CommunicationResult
     {
-        return $this->send($this->applyDefaults(HttpRequest::post($url)->raw($payload, $contentType)));
+        return $this->send(HttpRequest::post($url)->raw($payload, $contentType));
     }
 
     /**
@@ -116,19 +193,34 @@ final readonly class HttpClient
      */
     public function putJson(string $url, array $payload): CommunicationResult
     {
-        return $this->send($this->applyDefaults(HttpRequest::put($url)->json($payload)));
+        return $this->send(HttpRequest::put($url)->json($payload));
     }
 
     public function send(HttpRequest $request): CommunicationResult
     {
-        $pipeline = new MiddlewarePipeline($this->transport, $this->middlewares);
+        $resolvedRequest = $this->applyDefaults($request);
+        if ($this->cookieJar !== null) {
+            $resolvedRequest = $this->cookieJar->applyToRequest($resolvedRequest);
+        }
 
-        return $pipeline->send($this->applyDefaults($request)->toCommunicationRequest());
+        $pipeline = new MiddlewarePipeline($this->transport, $this->middlewares);
+        $result = $pipeline->send($resolvedRequest->toCommunicationRequest());
+
+        if ($this->cookieJar !== null && $result->response instanceof HttpResponse) {
+            $this->cookieJar->storeFromResponse($result->response, $resolvedRequest->buildUrl());
+        }
+
+        return $result;
     }
 
     public function timeout(int $seconds): self
     {
-        return new self($this->transport, $this->middlewares, $seconds, $this->authenticators);
+        return new self($this->transport, $this->middlewares, $this->defaultOptions->withTimeoutSeconds($seconds), $this->defaultHeaders, $this->authenticators, $this->cookieJar);
+    }
+
+    public function withApiKey(string $header, string $value): self
+    {
+        return $this->withApiKeyHeader($header, $value);
     }
 
     public function withApiKeyHeader(string $header, string $value): self
@@ -146,7 +238,7 @@ final readonly class HttpClient
         $authenticators = $this->authenticators;
         $authenticators[] = $authenticator;
 
-        return new self($this->transport, $this->middlewares, $this->timeoutSeconds, $authenticators);
+        return new self($this->transport, $this->middlewares, $this->defaultOptions, $this->defaultHeaders, $authenticators, $this->cookieJar);
     }
 
     public function withBasicAuth(string $username, string $password): self
@@ -159,12 +251,66 @@ final readonly class HttpClient
         return $this->withAuthenticator(new BearerTokenAuth($token));
     }
 
+    public function withCircuitBreaker(CircuitBreaker $circuitBreaker): self
+    {
+        return $this->withMiddleware(new CircuitBreakerMiddleware($circuitBreaker));
+    }
+
+    public function withCookieJar(CookieJar $cookieJar): self
+    {
+        return new self($this->transport, $this->middlewares, $this->defaultOptions, $this->defaultHeaders, $this->authenticators, $cookieJar);
+    }
+
+    /**
+     * @param array<string, string|list<string>> $headers
+     */
+    public function withDefaultHeaders(array $headers): self
+    {
+        return $this->withMiddleware(new HeaderMiddleware($headers));
+    }
+
+    /**
+     * @param array<string, string|list<string>> $headers
+     */
+    public function withHeaders(array $headers): self
+    {
+        return new self($this->transport, $this->middlewares, $this->defaultOptions, $headers, $this->authenticators, $this->cookieJar);
+    }
+
+    public function withHttpRetry(?HttpRetryPolicy $policy = null): self
+    {
+        return $this->withRetry($policy ?? HttpRetryPolicy::standard());
+    }
+
+    public function withIdempotency(string $headerName = 'Idempotency-Key'): self
+    {
+        return $this->withMiddleware(new IdempotencyMiddleware($headerName));
+    }
+
+    /**
+     * @param callable(string, array<string, mixed>): void $logger
+     */
+    public function withLogging(callable $logger): self
+    {
+        return $this->withMiddleware(new LoggingMiddleware(Closure::fromCallable($logger)));
+    }
+
     public function withMiddleware(MiddlewareInterface $middleware): self
     {
         $middlewares = $this->middlewares;
         $middlewares[] = $middleware;
 
-        return new self($this->transport, $middlewares, $this->timeoutSeconds, $this->authenticators);
+        return new self($this->transport, $middlewares, $this->defaultOptions, $this->defaultHeaders, $this->authenticators, $this->cookieJar);
+    }
+
+    public function withQueryAuth(string $key, string $value): self
+    {
+        return $this->withApiKeyQuery($key, $value);
+    }
+
+    public function withRateLimit(RateLimiter $rateLimiter): self
+    {
+        return $this->withMiddleware(new RateLimitMiddleware($rateLimiter));
     }
 
     public function withRetry(RetryPolicy $policy): self
@@ -172,9 +318,45 @@ final readonly class HttpClient
         return $this->withMiddleware(new RetryMiddleware($policy));
     }
 
+    public function withSigner(RequestSignerInterface $signer): self
+    {
+        return $this->withAuthenticator(new SignedRequestAuth($signer));
+    }
+
+    public function withTimeout(int $seconds): self
+    {
+        return $this->withMiddleware(new TimeoutMiddleware($seconds));
+    }
+
     private function applyDefaults(HttpRequest $request): HttpRequest
     {
-        $request = $request->timeout($this->timeoutSeconds);
+        $request = $request
+            ->timeout($this->defaultOptions->timeoutSeconds)
+            ->connectTimeout($this->defaultOptions->connectTimeoutSeconds)
+            ->followRedirects($this->defaultOptions->followRedirects, $this->defaultOptions->maxRedirects)
+            ->verifyTls($this->defaultOptions->verifyPeer, $this->defaultOptions->verifyHost)
+            ->headers($this->defaultHeaders);
+
+        if ($this->defaultOptions->proxy !== null) {
+            $request = $request->proxy($this->defaultOptions->proxy);
+        }
+
+        if ($this->defaultOptions->proxyAuth !== null && str_contains($this->defaultOptions->proxyAuth, ':')) {
+            [$username, $password] = explode(':', $this->defaultOptions->proxyAuth, 2);
+            $request = $request->proxyAuth($username, $password);
+        }
+
+        if ($this->defaultOptions->caBundle !== null) {
+            $request = $request->caBundle($this->defaultOptions->caBundle);
+        }
+
+        if ($this->defaultOptions->userAgent !== null) {
+            $request = $request->userAgent($this->defaultOptions->userAgent);
+        }
+
+        if ($this->defaultOptions->maxResponseBytes !== null) {
+            $request = $request->maxResponseBytes($this->defaultOptions->maxResponseBytes);
+        }
 
         foreach ($this->authenticators as $authenticator) {
             $request = $request->withAuthenticator($authenticator);

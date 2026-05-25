@@ -12,6 +12,216 @@ Transport-agnostic communication toolkit for PHP (`>=8.4`).
 
 ## Quick Start
 
+### HTTP send (cURL)
+
+```php
+use Infocyph\TalkingBytes\Http\HttpClient;
+
+$http = HttpClient::curl()
+    ->withBearerToken('token')
+    ->timeout(10);
+
+$result = $http->postJson('https://api.example.com/orders', [
+    'order_id' => 1001,
+    'amount' => 500,
+]);
+```
+
+### HTTP retry policy
+
+```php
+use Infocyph\TalkingBytes\Http\HttpClient;
+use Infocyph\TalkingBytes\Http\Retry\HttpRetryPolicy;
+
+$http = HttpClient::curl()->withHttpRetry(new HttpRetryPolicy(
+    maxAttempts: 3,
+    baseDelayMs: 200,
+    retryStatuses: [408, 429, 500, 502, 503, 504],
+));
+```
+
+### HTTP concurrent pool
+
+```php
+use Infocyph\TalkingBytes\Http\HttpClient;
+use Infocyph\TalkingBytes\Http\HttpRequest;
+
+$pool = HttpClient::multi(10);
+
+$results = $pool->sendMany([
+    'users' => HttpRequest::get('https://api.example.com/users'),
+    'orders' => HttpRequest::get('https://api.example.com/orders'),
+]);
+
+$users = $results->get('users');
+```
+
+### HTTP fake + assertions
+
+```php
+use Infocyph\TalkingBytes\Http\HttpClient;
+
+$http = HttpClient::fake();
+$http->postJson('https://api.example.com/orders', ['ok' => true]);
+$http->assert()->assertRequestCount(1);
+```
+
+### HTTP signing and streaming
+
+```php
+use Infocyph\TalkingBytes\Http\HttpClient;
+use Infocyph\TalkingBytes\Signing\HmacSha256Signer;
+
+$http = HttpClient::curl()->withSigner(new HmacSha256Signer('secret'));
+
+$request = \Infocyph\TalkingBytes\Http\HttpRequest::post('https://api.example.com/upload')
+    ->uploadFromFile('/tmp/archive.zip')
+    ->maxUploadBytes(20 * 1024 * 1024);
+
+$result = $http->send($request);
+```
+
+### HTTP stream download and SSRF guard
+
+```php
+use Infocyph\TalkingBytes\Http\HttpClient;
+use Infocyph\TalkingBytes\Http\HttpRequest;
+
+$http = HttpClient::curl();
+
+$download = HttpRequest::get('https://cdn.example.com/archive.zip')
+    ->streamDownloadTo(__DIR__ . '/storage/archive.zip')
+    ->maxDownloadBytes(50 * 1024 * 1024)
+    ->blockPrivateNetworks()
+    ->allowHosts(['cdn.example.com']);
+
+$result = $http->send($download);
+```
+
+### HTTP cookie jar
+
+```php
+use Infocyph\TalkingBytes\Http\Cookie\CookieJar;
+use Infocyph\TalkingBytes\Http\HttpClient;
+
+$jar = new CookieJar();
+$http = HttpClient::curl()->withCookieJar($jar);
+```
+
+### gRPC send
+
+```php
+use Infocyph\TalkingBytes\Grpc\GrpcClient;
+use Infocyph\TalkingBytes\Grpc\GrpcRequest;
+use Infocyph\TalkingBytes\Grpc\GrpcResponse;
+use Infocyph\TalkingBytes\Grpc\GrpcStatus;
+
+$grpc = GrpcClient::using(
+    static fn (GrpcRequest $request): GrpcResponse => new GrpcResponse(GrpcStatus::Ok, ['echo' => $request->message]),
+);
+
+$result = $grpc->send(new GrpcRequest('Orders/Create', ['order_id' => 1001]));
+```
+
+### gRPC retry policy
+
+```php
+use Infocyph\TalkingBytes\Grpc\GrpcClient;
+use Infocyph\TalkingBytes\Grpc\Retry\GrpcRetryPolicy;
+
+$grpc = GrpcClient::using($caller)->withGrpcRetry(
+    GrpcRetryPolicy::standard(attempts: 3, baseDelayMs: 100),
+);
+```
+
+`GrpcRetryPolicy` also supports delay capping and jitter:
+
+```php
+GrpcRetryPolicy::standard(
+    attempts: 4,
+    baseDelayMs: 100,
+    maxDelayMs: 2000,
+    jitterRatio: 0.2,
+);
+```
+
+Retry note: use retries only for idempotent/safe RPCs unless your service has deduplication.
+
+### gRPC fake caller for tests
+
+```php
+use Infocyph\TalkingBytes\Grpc\GrpcClient;
+use Infocyph\TalkingBytes\Grpc\GrpcRequest;
+use Infocyph\TalkingBytes\Grpc\Testing\FakeGrpcCaller;
+
+$fake = (new FakeGrpcCaller())->pushOk(['ok' => true]);
+$grpc = GrpcClient::using($fake);
+$grpc->send(new GrpcRequest('Orders/Create', ['order_id' => 1001]));
+$fake->assert()->assertCallCount(1);
+```
+
+### gRPC native invoker boundary
+
+```php
+use Infocyph\TalkingBytes\Grpc\GrpcClient;
+use Infocyph\TalkingBytes\Grpc\Native\NativeGrpcInvoker;
+
+$grpc = GrpcClient::usingNative($nativeInvoker /* implements NativeGrpcInvoker */);
+```
+
+Native invokers receive `deadlineSeconds`; convert as needed for your runtime (for example with `GrpcDeadline::secondsToMicros()`).
+
+Metadata notes:
+
+- metadata names are normalized to lowercase
+- binary `-bin` metadata keys are currently not supported in this lightweight adapter
+
+### Webhook sender retry profile (HTTP)
+
+```php
+use Infocyph\TalkingBytes\Http\HttpClient;
+use Infocyph\TalkingBytes\Webhook\WebhookMessage;
+use Infocyph\TalkingBytes\Webhook\WebhookSender;
+
+$sender = WebhookSender::usingHttpWithRetryProfile(HttpClient::curl());
+
+$delivery = $sender->send(
+    WebhookMessage::new('order.created')
+        ->payload(['order_id' => 1001])
+        ->url('https://hooks.example.com/order-created'),
+);
+```
+
+Webhook retry profile defaults:
+
+- attempts: `3`
+- backoff: exponential (`baseDelayMs = 250`)
+- retries: `408`, `429`, `5xx`, and transport errors
+- no retries: `400`, `401`, `403`, `404`
+
+### Webhook receiver and replay protection
+
+```php
+use Infocyph\TalkingBytes\Webhook\InMemoryWebhookReplayStore;
+use Infocyph\TalkingBytes\Webhook\Webhook;
+
+$receiver = Webhook::receiver('whsec_test')
+    ->withReplayStore(new InMemoryWebhookReplayStore(), ttlSeconds: 86400);
+
+$event = $receiver->receive($rawBody, $headers);
+```
+
+### Webhook fake sender
+
+```php
+use Infocyph\TalkingBytes\Webhook\Webhook;
+use Infocyph\TalkingBytes\Webhook\WebhookMessage;
+
+$fake = Webhook::fake();
+$fake->send(WebhookMessage::new('order.created')->url('https://hooks.example.test/orders')->payload(['id' => 1]));
+$fake->assert()->assertSentCount(1);
+```
+
 ### SMTP send
 
 ```php
@@ -203,6 +413,18 @@ Email::events(static function (string $event, array $payload): void {
     // bounce.detected
 });
 ```
+
+If you need a protocol-agnostic static facade, use `Infocyph\TalkingBytes\Core\Event\CommunicationEventBus`.
+
+HTTP transport events are also emitted on the same bus:
+
+- `http.request.start`
+- `http.request.finish`
+- `http.request.failed`
+- `http.pool.start`
+- `http.pool.finish`
+
+Payloads use redacted URLs/headers for sensitive keys.
 
 Mailbox command payloads are redacted before dispatch:
 

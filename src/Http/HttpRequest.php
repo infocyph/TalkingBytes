@@ -8,6 +8,7 @@ use Infocyph\TalkingBytes\Auth\ApiKeyAuth;
 use Infocyph\TalkingBytes\Auth\AuthenticatorInterface;
 use Infocyph\TalkingBytes\Auth\BasicAuth;
 use Infocyph\TalkingBytes\Auth\BearerTokenAuth;
+use Infocyph\TalkingBytes\Auth\SignedRequestAuth;
 use Infocyph\TalkingBytes\Core\Message\CommunicationRequest;
 use Infocyph\TalkingBytes\Http\Body\FormBody;
 use Infocyph\TalkingBytes\Http\Body\HttpBody;
@@ -15,6 +16,7 @@ use Infocyph\TalkingBytes\Http\Body\JsonBody;
 use Infocyph\TalkingBytes\Http\Body\MultipartBody;
 use Infocyph\TalkingBytes\Http\Body\RawBody;
 use Infocyph\TalkingBytes\Http\Enum\HttpMethod;
+use Infocyph\TalkingBytes\Signing\RequestSignerInterface;
 use InvalidArgumentException;
 
 final readonly class HttpRequest
@@ -71,6 +73,22 @@ final readonly class HttpRequest
         return new self(HttpMethod::Put, $url);
     }
 
+    public function acceptJson(): self
+    {
+        return $this->header('Accept', 'application/json');
+    }
+
+    /**
+     * @param list<string> $hosts
+     */
+    public function allowHosts(array $hosts): self
+    {
+        return $this->metadata([
+            ...$this->metadata,
+            'security_allow_hosts' => $hosts,
+        ]);
+    }
+
     public function applyAuthenticators(): self
     {
         $request = $this;
@@ -91,6 +109,25 @@ final readonly class HttpRequest
         );
     }
 
+    /**
+     * @param list<string> $hosts
+     */
+    public function blockHosts(array $hosts): self
+    {
+        return $this->metadata([
+            ...$this->metadata,
+            'security_block_hosts' => $hosts,
+        ]);
+    }
+
+    public function blockPrivateNetworks(bool $enabled = true): self
+    {
+        return $this->metadata([
+            ...$this->metadata,
+            'security_block_private_networks' => $enabled,
+        ]);
+    }
+
     public function body(HttpBody $body): self
     {
         return new self(
@@ -107,75 +144,69 @@ final readonly class HttpRequest
 
     public function buildUrl(): string
     {
-        $queryString = $this->queryParams->toQueryString();
-
-        if ($queryString === '') {
+        $additional = $this->queryParams->all();
+        if ($additional === []) {
             return $this->url;
         }
 
-        return str_contains($this->url, '?')
-            ? $this->url . '&' . $queryString
-            : $this->url . '?' . $queryString;
+        $parts = parse_url($this->url);
+        if ($parts === false) {
+            return $this->url;
+        }
+
+        $existing = [];
+        parse_str((string) ($parts['query'] ?? ''), $existing);
+        foreach ($additional as $key => $value) {
+            if ($value === null) {
+                unset($existing[$key]);
+
+                continue;
+            }
+
+            $existing[$key] = $value;
+        }
+
+        $query = http_build_query($existing, '', '&', PHP_QUERY_RFC3986);
+
+        $base = ($parts['scheme'] ?? '') . '://' . ($parts['host'] ?? '');
+        if (isset($parts['port'])) {
+            $base .= ':' . $parts['port'];
+        }
+
+        $base .= $parts['path'] ?? '';
+        if ($query !== '') {
+            $base .= '?' . $query;
+        }
+        if (isset($parts['fragment']) && $parts['fragment'] !== '') {
+            $base .= '#' . $parts['fragment'];
+        }
+
+        return $base;
+    }
+
+    public function caBundle(string $path): self
+    {
+        return $this->withOptions($this->options->withTls(caBundle: $path));
     }
 
     public function connectTimeout(int $seconds): self
     {
-        return $this->withOptions(
-            new CurlOptions(
-                $this->options->timeoutSeconds,
-                $seconds,
-                $this->options->followRedirects,
-                $this->options->maxRedirects,
-                $this->options->proxy,
-                $this->options->verifyPeer,
-                $this->options->verifyHost,
-                $this->options->clientCertificate,
-                $this->options->clientKey,
-                $this->options->clientKeyPassphrase,
-                $this->options->downloadPath,
-                $this->options->additional,
-            ),
-        );
+        return $this->withOptions($this->options->withConnectTimeoutSeconds($seconds));
+    }
+
+    public function contentType(string $contentType): self
+    {
+        return $this->header('Content-Type', $contentType);
     }
 
     public function downloadTo(string $path): self
     {
-        return $this->withOptions(
-            new CurlOptions(
-                $this->options->timeoutSeconds,
-                $this->options->connectTimeoutSeconds,
-                $this->options->followRedirects,
-                $this->options->maxRedirects,
-                $this->options->proxy,
-                $this->options->verifyPeer,
-                $this->options->verifyHost,
-                $this->options->clientCertificate,
-                $this->options->clientKey,
-                $this->options->clientKeyPassphrase,
-                $path,
-                $this->options->additional,
-            ),
-        );
+        return $this->withOptions($this->options->withDownloadPath($path)->withStreamDownloadPath(null));
     }
 
-    public function followRedirects(bool $enabled = true): self
+    public function followRedirects(bool $enabled = true, ?int $max = null): self
     {
-        return $this->withOptions(
-            new CurlOptions(
-                $this->options->timeoutSeconds,
-                $this->options->connectTimeoutSeconds,
-                $enabled,
-                $this->options->maxRedirects,
-                $this->options->proxy,
-                $this->options->verifyPeer,
-                $this->options->verifyHost,
-                $this->options->clientCertificate,
-                $this->options->clientKey,
-                $this->options->clientKeyPassphrase,
-                $this->options->downloadPath,
-                $this->options->additional,
-            ),
-        );
+        return $this->withOptions($this->options->withFollowRedirects($enabled, $max));
     }
 
     /**
@@ -227,27 +258,32 @@ final readonly class HttpRequest
 
     public function json(mixed $value): self
     {
-        return $this->body(new JsonBody($value));
+        return $this->body(new JsonBody($value))->acceptJson();
+    }
+
+    public function jsonWithFlags(mixed $value, int $flags): self
+    {
+        return $this->body(new JsonBody($value, $flags))->acceptJson();
+    }
+
+    public function maxDownloadBytes(int $bytes): self
+    {
+        return $this->withOptions($this->options->withResponseLimits($this->options->maxResponseBytes, $bytes, $this->options->maxUploadBytes));
     }
 
     public function maxRedirects(int $maxRedirects): self
     {
-        return $this->withOptions(
-            new CurlOptions(
-                $this->options->timeoutSeconds,
-                $this->options->connectTimeoutSeconds,
-                $this->options->followRedirects,
-                $maxRedirects,
-                $this->options->proxy,
-                $this->options->verifyPeer,
-                $this->options->verifyHost,
-                $this->options->clientCertificate,
-                $this->options->clientKey,
-                $this->options->clientKeyPassphrase,
-                $this->options->downloadPath,
-                $this->options->additional,
-            ),
-        );
+        return $this->withOptions($this->options->withMaxRedirects($maxRedirects));
+    }
+
+    public function maxResponseBytes(int $bytes): self
+    {
+        return $this->withOptions($this->options->withResponseLimits($bytes, $this->options->maxDownloadBytes, $this->options->maxUploadBytes));
+    }
+
+    public function maxUploadBytes(int $bytes): self
+    {
+        return $this->withOptions($this->options->withResponseLimits($this->options->maxResponseBytes, $this->options->maxDownloadBytes, $bytes));
     }
 
     /**
@@ -269,27 +305,12 @@ final readonly class HttpRequest
 
     public function mtls(string $certificatePath, string $keyPath, ?string $passphrase = null): self
     {
-        return $this->withOptions(
-            new CurlOptions(
-                $this->options->timeoutSeconds,
-                $this->options->connectTimeoutSeconds,
-                $this->options->followRedirects,
-                $this->options->maxRedirects,
-                $this->options->proxy,
-                $this->options->verifyPeer,
-                $this->options->verifyHost,
-                $certificatePath,
-                $keyPath,
-                $passphrase,
-                $this->options->downloadPath,
-                $this->options->additional,
-            ),
-        );
+        return $this->withOptions($this->options->withMtls($certificatePath, $keyPath, $passphrase));
     }
 
-    public function multipart(MultipartBody $multipartBody): self
+    public function multipart(?MultipartBody $multipartBody = null): self
     {
-        return $this->body($multipartBody);
+        return $this->body($multipartBody ?? MultipartBody::new());
     }
 
     public function option(int $option, mixed $value): self
@@ -299,21 +320,33 @@ final readonly class HttpRequest
 
     public function proxy(string $proxy): self
     {
-        return $this->withOptions(
-            new CurlOptions(
-                $this->options->timeoutSeconds,
-                $this->options->connectTimeoutSeconds,
-                $this->options->followRedirects,
-                $this->options->maxRedirects,
-                $proxy,
-                $this->options->verifyPeer,
-                $this->options->verifyHost,
-                $this->options->clientCertificate,
-                $this->options->clientKey,
-                $this->options->clientKeyPassphrase,
-                $this->options->downloadPath,
-                $this->options->additional,
-            ),
+        return $this->withOptions($this->options->withProxy($proxy));
+    }
+
+    public function proxyAuth(string $username, string $password): self
+    {
+        return $this->withOptions($this->options->withProxyAuth(sprintf('%s:%s', $username, $password)));
+    }
+
+    /**
+     * @param array<string, scalar|list<scalar>|null> $values
+     */
+    public function queries(array $values): self
+    {
+        $params = $this->queryParams;
+        foreach ($values as $name => $value) {
+            $params = $params->with($name, $value);
+        }
+
+        return new self(
+            $this->method,
+            $this->url,
+            $this->headers,
+            $params,
+            $this->body,
+            $this->options,
+            $this->authenticators,
+            $this->metadata,
         );
     }
 
@@ -336,24 +369,14 @@ final readonly class HttpRequest
         return $this->body(new RawBody($content, $contentType));
     }
 
+    public function streamDownloadTo(string $path): self
+    {
+        return $this->withOptions($this->options->withStreamDownloadPath($path)->withDownloadPath(null));
+    }
+
     public function timeout(int $seconds): self
     {
-        return $this->withOptions(
-            new CurlOptions(
-                $seconds,
-                $this->options->connectTimeoutSeconds,
-                $this->options->followRedirects,
-                $this->options->maxRedirects,
-                $this->options->proxy,
-                $this->options->verifyPeer,
-                $this->options->verifyHost,
-                $this->options->clientCertificate,
-                $this->options->clientKey,
-                $this->options->clientKeyPassphrase,
-                $this->options->downloadPath,
-                $this->options->additional,
-            ),
-        );
+        return $this->withOptions($this->options->withTimeoutSeconds($seconds));
     }
 
     public function toCommunicationRequest(): CommunicationRequest
@@ -372,24 +395,52 @@ final readonly class HttpRequest
         );
     }
 
+    public function uploadFromFile(string $path): self
+    {
+        if (!is_file($path) || !is_readable($path)) {
+            throw new InvalidArgumentException(sprintf('Upload file is missing or unreadable: %s', $path));
+        }
+
+        $size = filesize($path);
+        if (!is_int($size)) {
+            throw new InvalidArgumentException(sprintf('Unable to determine upload file size: %s', $path));
+        }
+
+        return $this->metadata([
+            ...$this->metadata,
+            'upload_file_path' => $path,
+            'upload_size' => $size,
+        ]);
+    }
+
+    /**
+     * @param resource $stream
+     */
+    public function uploadFromStream(mixed $stream, int $size): self
+    {
+        if (!is_resource($stream)) {
+            throw new InvalidArgumentException('Upload stream must be a valid stream resource.');
+        }
+
+        if ($size < 0) {
+            throw new InvalidArgumentException('Upload stream size must be greater than or equal to 0.');
+        }
+
+        return $this->metadata([
+            ...$this->metadata,
+            'upload_stream' => $stream,
+            'upload_size' => $size,
+        ]);
+    }
+
+    public function userAgent(string $userAgent): self
+    {
+        return $this->withOptions($this->options->withUserAgent($userAgent));
+    }
+
     public function verifyTls(bool $verifyPeer = true, bool $verifyHost = true): self
     {
-        return $this->withOptions(
-            new CurlOptions(
-                $this->options->timeoutSeconds,
-                $this->options->connectTimeoutSeconds,
-                $this->options->followRedirects,
-                $this->options->maxRedirects,
-                $this->options->proxy,
-                $verifyPeer,
-                $verifyHost,
-                $this->options->clientCertificate,
-                $this->options->clientKey,
-                $this->options->clientKeyPassphrase,
-                $this->options->downloadPath,
-                $this->options->additional,
-            ),
-        );
+        return $this->withOptions($this->options->withTls($verifyPeer, $verifyHost));
     }
 
     public function withApiKeyHeader(string $header, string $value): self
@@ -429,12 +480,54 @@ final readonly class HttpRequest
         return $this->withAuthenticator(new BearerTokenAuth(token: $token));
     }
 
+    public function withoutHeader(string $name): self
+    {
+        return new self(
+            $this->method,
+            $this->url,
+            $this->headers->without($name),
+            $this->queryParams,
+            $this->body,
+            $this->options,
+            $this->authenticators,
+            $this->metadata,
+        );
+    }
+
+    public function withoutQuery(string $name): self
+    {
+        return new self(
+            $this->method,
+            $this->url,
+            $this->headers,
+            $this->queryParams->with($name, null),
+            $this->body,
+            $this->options,
+            $this->authenticators,
+            $this->metadata,
+        );
+    }
+
+    public function withoutTlsVerification(): self
+    {
+        return $this->verifyTls(false, false);
+    }
+
+    public function withSigner(RequestSignerInterface $signer): self
+    {
+        return $this->withAuthenticator(new SignedRequestAuth($signer));
+    }
+
     private function assertValidUrl(string $url): void
     {
         $trimmed = trim($url);
 
         if ($trimmed === '') {
             throw new InvalidArgumentException('HTTP URL must not be empty.');
+        }
+
+        if (preg_match('/[\x00-\x1F\x7F]/', $trimmed) === 1) {
+            throw new InvalidArgumentException('HTTP URL contains control characters.');
         }
 
         if (filter_var($trimmed, FILTER_VALIDATE_URL) === false) {

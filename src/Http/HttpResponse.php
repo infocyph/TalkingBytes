@@ -19,14 +19,24 @@ final readonly class HttpResponse
         public array $metadata = [],
     ) {}
 
+    public function accepted(): bool
+    {
+        return $this->statusCode === 202;
+    }
+
     public function clientError(): bool
     {
-        return $this->statusCode !== null && $this->statusCode >= 400 && $this->statusCode < 500;
+        return $this->isClientError();
+    }
+
+    public function created(): bool
+    {
+        return $this->statusCode === 201;
     }
 
     public function failed(): bool
     {
-        return !$this->ok();
+        return $this->isClientError() || $this->isServerError();
     }
 
     /**
@@ -54,6 +64,31 @@ final readonly class HttpResponse
         return is_array($value) ? implode(', ', $value) : $value;
     }
 
+    public function isClientError(): bool
+    {
+        return $this->statusGroup() === 4;
+    }
+
+    public function isInformational(): bool
+    {
+        return $this->statusGroup() === 1;
+    }
+
+    public function isRedirection(): bool
+    {
+        return $this->statusGroup() === 3;
+    }
+
+    public function isServerError(): bool
+    {
+        return $this->statusGroup() === 5;
+    }
+
+    public function isSuccessful(): bool
+    {
+        return $this->statusGroup() === 2;
+    }
+
     /**
      * @throws JsonException
      */
@@ -79,23 +114,60 @@ final readonly class HttpResponse
         }
     }
 
+    public function noContent(): bool
+    {
+        return $this->statusCode === 204;
+    }
+
     public function ok(): bool
     {
-        return $this->statusCode !== null && $this->statusCode >= 200 && $this->statusCode < 300;
+        return $this->isSuccessful();
     }
 
     public function redirect(): bool
     {
-        return $this->statusCode !== null && $this->statusCode >= 300 && $this->statusCode < 400;
+        return $this->isRedirection();
     }
 
     public function serverError(): bool
     {
-        return $this->statusCode !== null && $this->statusCode >= 500;
+        return $this->isServerError();
+    }
+
+    public function stats(): HttpTransferStats
+    {
+        $curlInfo = $this->metadata['curl'] ?? [];
+        if (!is_array($curlInfo)) {
+            $curlInfo = [];
+        }
+
+        /** @var array<string, mixed> $info */
+        $info = $curlInfo;
+
+        return HttpTransferStats::fromCurlInfo($info);
+    }
+
+    public function statusGroup(): ?int
+    {
+        if ($this->statusCode === null || $this->statusCode < 100) {
+            return null;
+        }
+
+        $group = intdiv($this->statusCode, 100);
+        if ($group < 1 || $group > 5) {
+            return null;
+        }
+
+        return $group;
     }
 
     public function successful(): bool
     {
-        return $this->ok();
+        return $this->isSuccessful();
+    }
+
+    public function text(): string
+    {
+        return $this->body;
     }
 }

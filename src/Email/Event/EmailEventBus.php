@@ -4,16 +4,16 @@ declare(strict_types=1);
 
 namespace Infocyph\TalkingBytes\Email\Event;
 
+use Infocyph\TalkingBytes\Core\Event\CommunicationEventBus;
+
 final class EmailEventBus
 {
-    private static ?EmailEventDispatcher $dispatcher = null;
-
     /**
      * @param array<string, mixed> $payload
      */
     public static function dispatch(string $event, array $payload = []): void
     {
-        self::dispatcher()->dispatch($event, $payload);
+        CommunicationEventBus::dispatch($event, $payload);
     }
 
     /**
@@ -21,20 +21,11 @@ final class EmailEventBus
      */
     public static function listen(?callable $listener): void
     {
-        self::$dispatcher = $listener === null
-            ? new NullEmailEventDispatcher()
-            : new CallableEmailEventDispatcher($listener);
+        CommunicationEventBus::listen($listener);
     }
 
     public static function useDispatcher(EmailEventDispatcher $dispatcher): void
     {
-        self::$dispatcher = $dispatcher;
-    }
-
-    private static function dispatcher(): EmailEventDispatcher
-    {
-        self::$dispatcher ??= new NullEmailEventDispatcher();
-
-        return self::$dispatcher;
+        CommunicationEventBus::useDispatcher($dispatcher);
     }
 }

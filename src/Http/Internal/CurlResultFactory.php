@@ -25,12 +25,35 @@ final class CurlResultFactory
     ): CommunicationResult {
         $info = is_array($rawInfo) ? $rawInfo : [];
         $statusCode = self::statusCode($info);
+        $downloadPath = $request->options->downloadPath;
 
-        if ($request->options->downloadPath !== null) {
-            $downloadError = self::writeDownloadBody($request->options->downloadPath, $body);
+        if ($request->options->maxResponseBytes !== null && strlen($body) > $request->options->maxResponseBytes) {
+            return CommunicationResult::failure(
+                sprintf('HTTP response exceeded max allowed bytes (%d).', $request->options->maxResponseBytes),
+                $statusCode,
+                null,
+                ['transport' => $transport],
+            );
+        }
+
+        if ($request->options->maxDownloadBytes !== null && $downloadPath !== null && strlen($body) > $request->options->maxDownloadBytes) {
+            return CommunicationResult::failure(
+                sprintf('HTTP download exceeded max allowed bytes (%d).', $request->options->maxDownloadBytes),
+                $statusCode,
+                null,
+                ['transport' => $transport],
+            );
+        }
+
+        if ($downloadPath !== null) {
+            $downloadError = self::writeDownloadBody($downloadPath, $body);
 
             if ($downloadError !== null) {
-                return CommunicationResult::failure($downloadError, $statusCode, metadata: ['transport' => $transport]);
+                return CommunicationResult::failure(
+                    $downloadError,
+                    $statusCode,
+                    metadata: ['transport' => $transport, 'curl' => $info],
+                );
             }
         }
 
@@ -50,11 +73,11 @@ final class CurlResultFactory
                 sprintf('HTTP request failed with status %d.', $statusCode),
                 $statusCode,
                 $response,
-                ['transport' => $transport],
+                ['transport' => $transport, 'curl' => $info],
             );
         }
 
-        return CommunicationResult::success($statusCode, $response, ['transport' => $transport]);
+        return CommunicationResult::success($statusCode, $response, ['transport' => $transport, 'curl' => $info]);
     }
 
     /**
