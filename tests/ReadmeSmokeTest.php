@@ -31,32 +31,19 @@ it('contains core usage examples in README', function (): void {
     $readme = file_get_contents(__DIR__ . '/../README.md');
 
     expect($readme)->toBeString();
-    expect($readme)->toContain('SMTP send');
-    expect($readme)->toContain('HTTP send (cURL)');
-    expect($readme)->toContain('HTTP concurrent pool');
-    expect($readme)->toContain('HTTP cookie jar');
-    expect($readme)->toContain('gRPC send');
-    expect($readme)->toContain('gRPC retry policy');
-    expect($readme)->toContain('gRPC fake caller for tests');
-    expect($readme)->toContain('gRPC native invoker boundary');
-    expect($readme)->toContain('Webhook sender retry profile (HTTP)');
-    expect($readme)->toContain('Webhook receiver and replay protection');
-    expect($readme)->toContain('Webhook fake sender');
-    expect($readme)->toContain('Sendmail / spool / null transports');
-    expect($readme)->toContain('Spool receiver');
-    expect($readme)->toContain('IMAP mailbox');
-    expect($readme)->toContain('POP3 mailbox');
-    expect($readme)->toContain('Bounce parsing');
-    expect($readme)->toContain('template(');
-    expect($readme)->toContain('Email::events');
-    expect($readme)->toContain('bounce.detected');
-    expect($readme)->toContain('Performance Notes');
-    expect($readme)->toContain('Release Checklist');
-    expect($readme)->toContain('UIDL');
-    expect($readme)->toContain('MailboxSearch::maxSummaryFetches()');
-    expect($readme)->toContain('Authentication-Results parsing');
-    expect($readme)->toContain('Extension Policy');
-    expect($readme)->toContain('Naming Map');
+    expect($readme)->toContain('# TalkingBytes');
+    expect($readme)->toContain('## Quick Start');
+    expect($readme)->toContain('### HTTP');
+    expect($readme)->toContain('### Email');
+    expect($readme)->toContain('### Webhook');
+    expect($readme)->toContain('### gRPC');
+    expect($readme)->toContain('## Full Documentation');
+    expect($readme)->toContain('docs/http/index.rst');
+    expect($readme)->toContain('docs/email/index.rst');
+    expect($readme)->toContain('docs/webhook/index.rst');
+    expect($readme)->toContain('docs/grpc/index.rst');
+    expect($readme)->toContain('docs/security.rst');
+    expect($readme)->toContain('docs/release-checklist.rst');
 });
 
 it('keeps release-level README examples syntactically valid in fake-safe mode', function (): void {

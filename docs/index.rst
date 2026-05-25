@@ -22,10 +22,10 @@ It provides:
    :maxdepth: 2
    :caption: Modules
 
-   http
-   grpc
-   webhook
-   email
+   email/index
+   http/index
+   webhook/index
+   grpc/index
 
 .. toctree::
    :maxdepth: 2
