@@ -13,6 +13,7 @@ use Infocyph\TalkingBytes\Http\Internal\CurlResultFactory;
 use Infocyph\TalkingBytes\Http\Internal\RequestSecurityGuard;
 use Infocyph\TalkingBytes\Http\Internal\ResponseBodyCollector;
 use Infocyph\TalkingBytes\Http\Internal\ResponseHeaderCollector;
+use Infocyph\TalkingBytes\Http\Internal\UploadHandleManager;
 use InvalidArgumentException;
 
 final class CurlTransport implements TransportInterface
@@ -140,14 +141,7 @@ final class CurlTransport implements TransportInterface
 
     private function cleanupUploadHandle(HttpRequest $request): void
     {
-        $openedByConfigurator = $request->metadata['_upload_opened_by_configurator'] ?? false;
-        $resource = $request->metadata['_upload_handle'] ?? null;
-
-        if ($openedByConfigurator !== true || !is_resource($resource)) {
-            return;
-        }
-
-        fclose($resource);
+        UploadHandleManager::cleanup($request);
     }
 
     /**

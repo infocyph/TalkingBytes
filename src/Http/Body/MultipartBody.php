@@ -21,33 +21,19 @@ final readonly class MultipartBody implements HttpBody
 
     public function addData(string $name, string $contents, string $filename, ?string $mimeType = null): self
     {
-        $tempPath = tempnam(sys_get_temp_dir(), 'tb-http-upload-');
-        if ($tempPath === false) {
-            throw new InvalidArgumentException('Unable to allocate temporary upload file for multipart data.');
-        }
+        $file = $this->createTemporaryUploadFile(
+            contents: $contents,
+            filename: $filename,
+            mimeType: $mimeType,
+            context: 'multipart data',
+        );
 
-        if (file_put_contents($tempPath, $contents) === false) {
-            if (is_file($tempPath)) {
-                unlink($tempPath);
-            }
-
-            throw new InvalidArgumentException('Unable to write temporary multipart data file.');
-        }
-
-        $key = $this->nextPartKey($name);
-        $parts = $this->parts;
-        $parts[$key] = new CURLFile($tempPath, $mimeType ?? 'application/octet-stream', $filename);
-
-        return new self($parts);
+        return $this->withPart($name, $file);
     }
 
     public function addField(string $name, string|int|float|bool $value): self
     {
-        $key = $this->nextPartKey($name);
-        $parts = $this->parts;
-        $parts[$key] = (string) $value;
-
-        return new self($parts);
+        return $this->withPart($name, (string) $value);
     }
 
     public function addFile(string $name, string $path, ?string $mimeType = null, ?string $postFilename = null): self
@@ -56,11 +42,10 @@ final readonly class MultipartBody implements HttpBody
             throw new InvalidArgumentException(sprintf('Multipart file is missing or unreadable: %s', $path));
         }
 
-        $key = $this->nextPartKey($name);
-        $parts = $this->parts;
-        $parts[$key] = new CURLFile($path, $mimeType ?? 'application/octet-stream', $postFilename ?? basename($path));
-
-        return new self($parts);
+        return $this->withPart(
+            $name,
+            new CURLFile($path, $mimeType ?? 'application/octet-stream', $postFilename ?? basename($path)),
+        );
     }
 
     /**
@@ -77,24 +62,14 @@ final readonly class MultipartBody implements HttpBody
             throw new InvalidArgumentException('Failed to read multipart stream contents.');
         }
 
-        $tempPath = tempnam(sys_get_temp_dir(), 'tb-http-upload-');
-        if ($tempPath === false) {
-            throw new InvalidArgumentException('Unable to allocate temporary upload file for multipart stream.');
-        }
+        $file = $this->createTemporaryUploadFile(
+            contents: $contents,
+            filename: $filename,
+            mimeType: $mimeType,
+            context: 'multipart stream',
+        );
 
-        if (file_put_contents($tempPath, $contents) === false) {
-            if (is_file($tempPath)) {
-                unlink($tempPath);
-            }
-
-            throw new InvalidArgumentException('Unable to write temporary multipart stream file.');
-        }
-
-        $key = $this->nextPartKey($name);
-        $parts = $this->parts;
-        $parts[$key] = new CURLFile($tempPath, $mimeType ?? 'application/octet-stream', $filename);
-
-        return new self($parts);
+        return $this->withPart($name, $file);
     }
 
     public function contentType(): string
@@ -110,6 +85,31 @@ final readonly class MultipartBody implements HttpBody
         return $this->parts;
     }
 
+    private function createTemporaryUploadFile(
+        string $contents,
+        string $filename,
+        ?string $mimeType,
+        string $context,
+    ): CURLFile {
+        $tempPath = tempnam(sys_get_temp_dir(), 'tb-http-upload-');
+        if ($tempPath === false) {
+            throw new InvalidArgumentException(sprintf(
+                'Unable to allocate temporary upload file for %s.',
+                $context,
+            ));
+        }
+
+        if (file_put_contents($tempPath, $contents) === false) {
+            if (is_file($tempPath)) {
+                unlink($tempPath);
+            }
+
+            throw new InvalidArgumentException(sprintf('Unable to write temporary %s file.', $context));
+        }
+
+        return new CURLFile($tempPath, $mimeType ?? 'application/octet-stream', $filename);
+    }
+
     private function nextPartKey(string $name): string
     {
         if (!array_key_exists($name, $this->parts)) {
@@ -123,5 +123,14 @@ final readonly class MultipartBody implements HttpBody
         } while (array_key_exists($key, $this->parts));
 
         return $key;
+    }
+
+    private function withPart(string $name, string|CURLFile $value): self
+    {
+        $key = $this->nextPartKey($name);
+        $parts = $this->parts;
+        $parts[$key] = $value;
+
+        return new self($parts);
     }
 }

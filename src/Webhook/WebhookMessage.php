@@ -67,15 +67,7 @@ final readonly class WebhookMessage
      */
     public function headers(array $headers): self
     {
-        /** @var array<string, string> $validated */
-        $validated = [];
-        foreach ($headers as $name => $value) {
-            $name = (string) $name;
-            HeaderBag::assertValidHeaderName($name);
-            HeaderBag::assertValidHeaderValue($value);
-            self::assertAllowedHeaderName($name);
-            $validated[$name] = $value;
-        }
+        $validated = self::validateHeaders($headers);
 
         /** @var array<string, string> $merged */
         $merged = array_merge($this->headers, $validated);
@@ -142,15 +134,7 @@ final readonly class WebhookMessage
      */
     public function withHeaders(array $headers): self
     {
-        /** @var array<string, string> $validated */
-        $validated = [];
-        foreach ($headers as $name => $value) {
-            $name = (string) $name;
-            HeaderBag::assertValidHeaderName($name);
-            HeaderBag::assertValidHeaderValue($value);
-            self::assertAllowedHeaderName($name);
-            $validated[$name] = $value;
-        }
+        $validated = self::validateHeaders($headers);
 
         return new self($this->event, $this->url, $this->payload, $validated, $this->deliveryId, $this->metadata);
     }
@@ -178,5 +162,23 @@ final readonly class WebhookMessage
         if (WebhookHeaders::isReserved($name)) {
             throw new InvalidArgumentException(sprintf('Webhook header "%s" is reserved and cannot be overridden.', $name));
         }
+    }
+
+    /**
+     * @param array<array-key, string> $headers
+     * @return array<string, string>
+     */
+    private static function validateHeaders(array $headers): array
+    {
+        $validated = [];
+        foreach ($headers as $name => $value) {
+            $name = (string) $name;
+            HeaderBag::assertValidHeaderName($name);
+            HeaderBag::assertValidHeaderValue($value);
+            self::assertAllowedHeaderName($name);
+            $validated[$name] = $value;
+        }
+
+        return $validated;
     }
 }

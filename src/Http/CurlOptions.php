@@ -4,6 +4,52 @@ declare(strict_types=1);
 
 namespace Infocyph\TalkingBytes\Http;
 
+/**
+ * @phpstan-type CurlOptionChanges array{
+ *   timeoutSeconds?: int,
+ *   connectTimeoutSeconds?: int,
+ *   followRedirects?: bool,
+ *   maxRedirects?: int,
+ *   proxy?: ?string,
+ *   proxyAuth?: ?string,
+ *   verifyPeer?: bool,
+ *   verifyHost?: bool,
+ *   caBundle?: ?string,
+ *   clientCertificate?: ?string,
+ *   clientKey?: ?string,
+ *   clientKeyPassphrase?: ?string,
+ *   userAgent?: ?string,
+ *   downloadPath?: ?string,
+ *   streamDownloadPath?: ?string,
+ *   maxResponseBytes?: ?int,
+ *   maxDownloadBytes?: ?int,
+ *   maxUploadBytes?: ?int,
+ *   httpVersion?: ?int,
+ *   additional?: array<int, mixed>
+ * }
+ * @phpstan-type CurlOptionState array{
+ *   timeoutSeconds: int,
+ *   connectTimeoutSeconds: int,
+ *   followRedirects: bool,
+ *   maxRedirects: int,
+ *   proxy: ?string,
+ *   proxyAuth: ?string,
+ *   verifyPeer: bool,
+ *   verifyHost: bool,
+ *   caBundle: ?string,
+ *   clientCertificate: ?string,
+ *   clientKey: ?string,
+ *   clientKeyPassphrase: ?string,
+ *   userAgent: ?string,
+ *   downloadPath: ?string,
+ *   streamDownloadPath: ?string,
+ *   maxResponseBytes: ?int,
+ *   maxDownloadBytes: ?int,
+ *   maxUploadBytes: ?int,
+ *   httpVersion: ?int,
+ *   additional: array<int, mixed>
+ * }
+ */
 final readonly class CurlOptions
 {
     /**
@@ -61,106 +107,25 @@ final readonly class CurlOptions
         $additional = $this->additional;
         $additional[$option] = $value;
 
-        return new self(
-            $this->timeoutSeconds,
-            $this->connectTimeoutSeconds,
-            $this->followRedirects,
-            $this->maxRedirects,
-            $this->proxy,
-            $this->proxyAuth,
-            $this->verifyPeer,
-            $this->verifyHost,
-            $this->caBundle,
-            $this->clientCertificate,
-            $this->clientKey,
-            $this->clientKeyPassphrase,
-            $this->userAgent,
-            $this->downloadPath,
-            $this->streamDownloadPath,
-            $this->maxResponseBytes,
-            $this->maxDownloadBytes,
-            $this->maxUploadBytes,
-            $this->httpVersion,
-            $additional,
-        );
+        return $this->with(['additional' => $additional]);
     }
 
     public function withConnectTimeoutSeconds(int $seconds): self
     {
-        return new self(
-            $this->timeoutSeconds,
-            $seconds,
-            $this->followRedirects,
-            $this->maxRedirects,
-            $this->proxy,
-            $this->proxyAuth,
-            $this->verifyPeer,
-            $this->verifyHost,
-            $this->caBundle,
-            $this->clientCertificate,
-            $this->clientKey,
-            $this->clientKeyPassphrase,
-            $this->userAgent,
-            $this->downloadPath,
-            $this->streamDownloadPath,
-            $this->maxResponseBytes,
-            $this->maxDownloadBytes,
-            $this->maxUploadBytes,
-            $this->httpVersion,
-            $this->additional,
-        );
+        return $this->with(['connectTimeoutSeconds' => $seconds]);
     }
 
     public function withDownloadPath(?string $downloadPath): self
     {
-        return new self(
-            $this->timeoutSeconds,
-            $this->connectTimeoutSeconds,
-            $this->followRedirects,
-            $this->maxRedirects,
-            $this->proxy,
-            $this->proxyAuth,
-            $this->verifyPeer,
-            $this->verifyHost,
-            $this->caBundle,
-            $this->clientCertificate,
-            $this->clientKey,
-            $this->clientKeyPassphrase,
-            $this->userAgent,
-            $downloadPath,
-            $this->streamDownloadPath,
-            $this->maxResponseBytes,
-            $this->maxDownloadBytes,
-            $this->maxUploadBytes,
-            $this->httpVersion,
-            $this->additional,
-        );
+        return $this->with(['downloadPath' => $downloadPath]);
     }
 
     public function withFollowRedirects(bool $enabled, ?int $maxRedirects = null): self
     {
-        return new self(
-            $this->timeoutSeconds,
-            $this->connectTimeoutSeconds,
-            $enabled,
-            $maxRedirects ?? $this->maxRedirects,
-            $this->proxy,
-            $this->proxyAuth,
-            $this->verifyPeer,
-            $this->verifyHost,
-            $this->caBundle,
-            $this->clientCertificate,
-            $this->clientKey,
-            $this->clientKeyPassphrase,
-            $this->userAgent,
-            $this->downloadPath,
-            $this->streamDownloadPath,
-            $this->maxResponseBytes,
-            $this->maxDownloadBytes,
-            $this->maxUploadBytes,
-            $this->httpVersion,
-            $this->additional,
-        );
+        return $this->with([
+            'followRedirects' => $enabled,
+            'maxRedirects' => $maxRedirects ?? $this->maxRedirects,
+        ]);
     }
 
     public function withMaxRedirects(int $maxRedirects): self
@@ -170,210 +135,54 @@ final readonly class CurlOptions
 
     public function withMtls(string $certificatePath, string $keyPath, ?string $passphrase = null): self
     {
-        return new self(
-            $this->timeoutSeconds,
-            $this->connectTimeoutSeconds,
-            $this->followRedirects,
-            $this->maxRedirects,
-            $this->proxy,
-            $this->proxyAuth,
-            $this->verifyPeer,
-            $this->verifyHost,
-            $this->caBundle,
-            $certificatePath,
-            $keyPath,
-            $passphrase,
-            $this->userAgent,
-            $this->downloadPath,
-            $this->streamDownloadPath,
-            $this->maxResponseBytes,
-            $this->maxDownloadBytes,
-            $this->maxUploadBytes,
-            $this->httpVersion,
-            $this->additional,
-        );
+        return $this->with([
+            'clientCertificate' => $certificatePath,
+            'clientKey' => $keyPath,
+            'clientKeyPassphrase' => $passphrase,
+        ]);
     }
 
     public function withProxy(?string $proxy): self
     {
-        return new self(
-            $this->timeoutSeconds,
-            $this->connectTimeoutSeconds,
-            $this->followRedirects,
-            $this->maxRedirects,
-            $proxy,
-            $this->proxyAuth,
-            $this->verifyPeer,
-            $this->verifyHost,
-            $this->caBundle,
-            $this->clientCertificate,
-            $this->clientKey,
-            $this->clientKeyPassphrase,
-            $this->userAgent,
-            $this->downloadPath,
-            $this->streamDownloadPath,
-            $this->maxResponseBytes,
-            $this->maxDownloadBytes,
-            $this->maxUploadBytes,
-            $this->httpVersion,
-            $this->additional,
-        );
+        return $this->with(['proxy' => $proxy]);
     }
 
     public function withProxyAuth(?string $proxyAuth): self
     {
-        return new self(
-            $this->timeoutSeconds,
-            $this->connectTimeoutSeconds,
-            $this->followRedirects,
-            $this->maxRedirects,
-            $this->proxy,
-            $proxyAuth,
-            $this->verifyPeer,
-            $this->verifyHost,
-            $this->caBundle,
-            $this->clientCertificate,
-            $this->clientKey,
-            $this->clientKeyPassphrase,
-            $this->userAgent,
-            $this->downloadPath,
-            $this->streamDownloadPath,
-            $this->maxResponseBytes,
-            $this->maxDownloadBytes,
-            $this->maxUploadBytes,
-            $this->httpVersion,
-            $this->additional,
-        );
+        return $this->with(['proxyAuth' => $proxyAuth]);
     }
 
     public function withResponseLimits(?int $maxResponseBytes, ?int $maxDownloadBytes, ?int $maxUploadBytes): self
     {
-        return new self(
-            $this->timeoutSeconds,
-            $this->connectTimeoutSeconds,
-            $this->followRedirects,
-            $this->maxRedirects,
-            $this->proxy,
-            $this->proxyAuth,
-            $this->verifyPeer,
-            $this->verifyHost,
-            $this->caBundle,
-            $this->clientCertificate,
-            $this->clientKey,
-            $this->clientKeyPassphrase,
-            $this->userAgent,
-            $this->downloadPath,
-            $this->streamDownloadPath,
-            $maxResponseBytes,
-            $maxDownloadBytes,
-            $maxUploadBytes,
-            $this->httpVersion,
-            $this->additional,
-        );
+        return $this->with([
+            'maxResponseBytes' => $maxResponseBytes,
+            'maxDownloadBytes' => $maxDownloadBytes,
+            'maxUploadBytes' => $maxUploadBytes,
+        ]);
     }
 
     public function withStreamDownloadPath(?string $streamDownloadPath): self
     {
-        return new self(
-            $this->timeoutSeconds,
-            $this->connectTimeoutSeconds,
-            $this->followRedirects,
-            $this->maxRedirects,
-            $this->proxy,
-            $this->proxyAuth,
-            $this->verifyPeer,
-            $this->verifyHost,
-            $this->caBundle,
-            $this->clientCertificate,
-            $this->clientKey,
-            $this->clientKeyPassphrase,
-            $this->userAgent,
-            $this->downloadPath,
-            $streamDownloadPath,
-            $this->maxResponseBytes,
-            $this->maxDownloadBytes,
-            $this->maxUploadBytes,
-            $this->httpVersion,
-            $this->additional,
-        );
+        return $this->with(['streamDownloadPath' => $streamDownloadPath]);
     }
 
     public function withTimeoutSeconds(int $seconds): self
     {
-        return new self(
-            $seconds,
-            $this->connectTimeoutSeconds,
-            $this->followRedirects,
-            $this->maxRedirects,
-            $this->proxy,
-            $this->proxyAuth,
-            $this->verifyPeer,
-            $this->verifyHost,
-            $this->caBundle,
-            $this->clientCertificate,
-            $this->clientKey,
-            $this->clientKeyPassphrase,
-            $this->userAgent,
-            $this->downloadPath,
-            $this->streamDownloadPath,
-            $this->maxResponseBytes,
-            $this->maxDownloadBytes,
-            $this->maxUploadBytes,
-            $this->httpVersion,
-            $this->additional,
-        );
+        return $this->with(['timeoutSeconds' => $seconds]);
     }
 
     public function withTls(bool $verifyPeer = true, bool $verifyHost = true, ?string $caBundle = null): self
     {
-        return new self(
-            $this->timeoutSeconds,
-            $this->connectTimeoutSeconds,
-            $this->followRedirects,
-            $this->maxRedirects,
-            $this->proxy,
-            $this->proxyAuth,
-            $verifyPeer,
-            $verifyHost,
-            $caBundle ?? $this->caBundle,
-            $this->clientCertificate,
-            $this->clientKey,
-            $this->clientKeyPassphrase,
-            $this->userAgent,
-            $this->downloadPath,
-            $this->streamDownloadPath,
-            $this->maxResponseBytes,
-            $this->maxDownloadBytes,
-            $this->maxUploadBytes,
-            $this->httpVersion,
-            $this->additional,
-        );
+        return $this->with([
+            'verifyPeer' => $verifyPeer,
+            'verifyHost' => $verifyHost,
+            'caBundle' => $caBundle ?? $this->caBundle,
+        ]);
     }
 
     public function withUserAgent(?string $userAgent): self
     {
-        return new self(
-            $this->timeoutSeconds,
-            $this->connectTimeoutSeconds,
-            $this->followRedirects,
-            $this->maxRedirects,
-            $this->proxy,
-            $this->proxyAuth,
-            $this->verifyPeer,
-            $this->verifyHost,
-            $this->caBundle,
-            $this->clientCertificate,
-            $this->clientKey,
-            $this->clientKeyPassphrase,
-            $userAgent,
-            $this->downloadPath,
-            $this->streamDownloadPath,
-            $this->maxResponseBytes,
-            $this->maxDownloadBytes,
-            $this->maxUploadBytes,
-            $this->httpVersion,
-            $this->additional,
-        );
+        return $this->with(['userAgent' => $userAgent]);
     }
 
     private static function assertPositiveLimit(?int $value, string $field): void
@@ -412,5 +221,38 @@ final readonly class CurlOptions
         if (!in_array(strtolower($scheme), ['http', 'https', 'socks5', 'socks5h'], true)) {
             throw new \InvalidArgumentException(sprintf('proxy scheme is not supported: %s', $proxy));
         }
+    }
+
+    /** @return CurlOptionState */
+    private function state(): array
+    {
+        return [
+            'timeoutSeconds' => $this->timeoutSeconds,
+            'connectTimeoutSeconds' => $this->connectTimeoutSeconds,
+            'followRedirects' => $this->followRedirects,
+            'maxRedirects' => $this->maxRedirects,
+            'proxy' => $this->proxy,
+            'proxyAuth' => $this->proxyAuth,
+            'verifyPeer' => $this->verifyPeer,
+            'verifyHost' => $this->verifyHost,
+            'caBundle' => $this->caBundle,
+            'clientCertificate' => $this->clientCertificate,
+            'clientKey' => $this->clientKey,
+            'clientKeyPassphrase' => $this->clientKeyPassphrase,
+            'userAgent' => $this->userAgent,
+            'downloadPath' => $this->downloadPath,
+            'streamDownloadPath' => $this->streamDownloadPath,
+            'maxResponseBytes' => $this->maxResponseBytes,
+            'maxDownloadBytes' => $this->maxDownloadBytes,
+            'maxUploadBytes' => $this->maxUploadBytes,
+            'httpVersion' => $this->httpVersion,
+            'additional' => $this->additional,
+        ];
+    }
+
+    /** @param CurlOptionChanges $changes */
+    private function with(array $changes): self
+    {
+        return new self(...array_replace($this->state(), $changes));
     }
 }

@@ -77,19 +77,7 @@ final readonly class GrpcClient
         ?float $deadlineSeconds = null,
         array $metadata = [],
     ): CommunicationResult {
-        $request = new GrpcStreamRequest($method, $messages, $headers, $deadlineSeconds, $metadata);
-
-        return $this->runStream(
-            streamType: 'bidi',
-            method: $request->method,
-            execute: fn(NativeGrpcStreamingInvoker $invoker): NativeGrpcResult => $invoker->bidiStream(
-                method: $request->method,
-                messages: $request->messages,
-                headers: $request->headers,
-                onMessage: $onMessage,
-                deadlineSeconds: $request->deadlineSeconds,
-            ),
-        );
+        return $this->runOutboundStream('bidi', $method, $messages, $headers, $deadlineSeconds, $metadata, $onMessage);
     }
 
     /**
@@ -103,18 +91,7 @@ final readonly class GrpcClient
         ?float $deadlineSeconds = null,
         array $metadata = [],
     ): CommunicationResult {
-        $request = new GrpcStreamRequest($method, $messages, $headers, $deadlineSeconds, $metadata);
-
-        return $this->runStream(
-            streamType: 'client',
-            method: $request->method,
-            execute: fn(NativeGrpcStreamingInvoker $invoker): NativeGrpcResult => $invoker->clientStream(
-                method: $request->method,
-                messages: $request->messages,
-                headers: $request->headers,
-                deadlineSeconds: $request->deadlineSeconds,
-            ),
-        );
+        return $this->runOutboundStream('client', $method, $messages, $headers, $deadlineSeconds, $metadata);
     }
 
     public function send(GrpcRequest $request): CommunicationResult
@@ -171,6 +148,44 @@ final readonly class GrpcClient
     public function withRetryPolicy(RetryPolicy $policy): self
     {
         return $this->withMiddleware(new RetryMiddleware($policy));
+    }
+
+    /**
+     * @param iterable<mixed> $messages
+     * @param array<string, mixed> $metadata
+     * @param null|callable(mixed):void $onMessage
+     */
+    private function runOutboundStream(
+        string $streamType,
+        string $method,
+        iterable $messages,
+        GrpcMetadata $headers,
+        ?float $deadlineSeconds,
+        array $metadata,
+        ?callable $onMessage = null,
+    ): CommunicationResult {
+        $request = new GrpcStreamRequest($method, $messages, $headers, $deadlineSeconds, $metadata);
+
+        return $this->runStream(
+            streamType: $streamType,
+            method: $request->method,
+            execute: fn(NativeGrpcStreamingInvoker $invoker): NativeGrpcResult => match ($streamType) {
+                'bidi' => $invoker->bidiStream(
+                    method: $request->method,
+                    messages: $request->messages,
+                    headers: $request->headers,
+                    onMessage: $onMessage ?? static function (mixed $message): void {},
+                    deadlineSeconds: $request->deadlineSeconds,
+                ),
+                'client' => $invoker->clientStream(
+                    method: $request->method,
+                    messages: $request->messages,
+                    headers: $request->headers,
+                    deadlineSeconds: $request->deadlineSeconds,
+                ),
+                default => throw new \InvalidArgumentException(sprintf('Unsupported stream type "%s".', $streamType)),
+            },
+        );
     }
 
     /**

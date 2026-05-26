@@ -139,13 +139,7 @@ final class GrpcMetadata
             ));
         }
 
-        $headers = $this->headers;
-        /** @var list<string> $values */
-        $values = $headers[$normalizedName] ?? [];
-        $values[] = $value;
-        $headers[$normalizedName] = $values;
-
-        return new self($headers);
+        return $this->appendValue($normalizedName, $value);
     }
 
     public function withValue(string $name, string $value): self
@@ -160,13 +154,7 @@ final class GrpcMetadata
 
         self::assertHeaderValue($value, $normalizedName);
 
-        $headers = $this->headers;
-        /** @var list<string> $values */
-        $values = $headers[$normalizedName] ?? [];
-        $values[] = $value;
-        $headers[$normalizedName] = $values;
-
-        return new self($headers);
+        return $this->appendValue($normalizedName, $value);
     }
 
     private static function assertHeaderValue(string $value, string $name): void
@@ -198,5 +186,16 @@ final class GrpcMetadata
         }
 
         return $normalized;
+    }
+
+    private function appendValue(string $normalizedName, string $value): self
+    {
+        $headers = $this->headers;
+        /** @var list<string> $values */
+        $values = $headers[$normalizedName] ?? [];
+        $values[] = $value;
+        $headers[$normalizedName] = $values;
+
+        return new self($headers);
     }
 }
