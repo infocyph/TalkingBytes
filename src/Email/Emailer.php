@@ -1,229 +1,147 @@
 <?php
 
-namespace Infocyph\TakingBytes\Email;
+declare(strict_types=1);
 
-use Infocyph\TakingBytes\Email\System\EmailBuilder;
-use Infocyph\TakingBytes\Email\System\GenericSender;
-use Infocyph\TakingBytes\Email\System\SMTPSender;
+namespace Infocyph\TalkingBytes\Email;
 
-final class Emailer
+use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
+use Infocyph\TalkingBytes\Email\Config\DkimConfig;
+use Infocyph\TalkingBytes\Email\Config\LogEmailConfig;
+use Infocyph\TalkingBytes\Email\Config\SendmailConfig;
+use Infocyph\TalkingBytes\Email\Config\SmtpConfig;
+use Infocyph\TalkingBytes\Email\Config\SpoolConfig;
+use Infocyph\TalkingBytes\Email\Event\EmailEventBus;
+use Infocyph\TalkingBytes\Email\Logging\Psr3LoggerAdapter;
+use Infocyph\TalkingBytes\Email\Testing\AssertableEmailTransport;
+use Infocyph\TalkingBytes\Email\Testing\FakeEmailTransport;
+use Infocyph\TalkingBytes\Email\Transport\DkimSigningTransport;
+use Infocyph\TalkingBytes\Email\Transport\EmailTransport;
+use Infocyph\TalkingBytes\Email\Transport\FallbackEmailTransport;
+use Infocyph\TalkingBytes\Email\Transport\LogEmailTransport;
+use Infocyph\TalkingBytes\Email\Transport\LoggingEmailTransport;
+use Infocyph\TalkingBytes\Email\Transport\MailFunctionTransport;
+use Infocyph\TalkingBytes\Email\Transport\NullEmailTransport;
+use Infocyph\TalkingBytes\Email\Transport\RateLimitedEmailTransport;
+use Infocyph\TalkingBytes\Email\Transport\RetryEmailTransport;
+use Infocyph\TalkingBytes\Email\Transport\SendmailTransport;
+use Infocyph\TalkingBytes\Email\Transport\SmtpTransport;
+use Infocyph\TalkingBytes\Email\Transport\SpoolEmailTransport;
+use Infocyph\TalkingBytes\Resilience\RateLimiter;
+use Infocyph\TalkingBytes\Retry\RetryPolicy;
+
+final readonly class Emailer
 {
-    // Recipients grouped (to, cc, bcc)
-    private array $recipients = [
-        'to' => [],
-        'cc' => [],
-        'bcc' => []
-    ];
+    public function __construct(private EmailTransport $transport) {}
 
-    // Message details grouped
-    private array $messageDetails = [
-        'messageId' => '',
-        'inReplyTo' => '',
-        'references' => []
-    ];
+    public static function fake(): self
+    {
+        return new self(new FakeEmailTransport());
+    }
 
-    // General headers grouped
-    private array $generalHeaders = [
-        'language' => '',
-        'priority' => null,
-        'mailer' => ''
-    ];
+    public static function usingLog(LogEmailConfig $config): self
+    {
+        return new self(new LogEmailTransport($config));
+    }
 
-    // List headers grouped
-    private array $listHeaders = [
-        'listId' => '',
-        'unsubscribe' => '',
-        'subscribe' => '',
-        'archive' => ''
-    ];
+    public static function usingMailFunction(): self
+    {
+        return new self(new MailFunctionTransport());
+    }
 
-    // Miscellaneous headers grouped
-    private array $miscHeaders = [
-        'confirmedOptIn' => null,
-        'spamStatus' => '',
-        'organization' => '',
-        'dispositionNotificationTo' => ''
-    ];
+    public static function usingNull(): self
+    {
+        return new self(new NullEmailTransport());
+    }
 
-    private string $subject;
-    private string $htmlContent;
-    private string $plainText;
-    private string $replyTo;
-    private array $attachments = [];
-    private array $smtpConfig = [];
+    public static function usingSendmail(SendmailConfig $config = new SendmailConfig()): self
+    {
+        return new self(new SendmailTransport($config));
+    }
+
+    public static function usingSmtp(SmtpConfig $config): self
+    {
+        return new self(new SmtpTransport($config));
+    }
+
+    public static function usingSpool(SpoolConfig $config): self
+    {
+        return new self(new SpoolEmailTransport($config));
+    }
+
+    public function assertable(): AssertableEmailTransport
+    {
+        if (!$this->transport instanceof FakeEmailTransport) {
+            throw new \LogicException('Assertable email transport is available only when using Emailer::fake().');
+        }
+
+        return new AssertableEmailTransport($this->transport);
+    }
+
+    public function send(EmailMessage $message): CommunicationResult
+    {
+        EmailEventBus::dispatch('email.send.start', [
+            'subject' => $message->headersData()->subject,
+            'to_count' => count($message->envelope()->to),
+            'cc_count' => count($message->envelope()->cc),
+            'bcc_count' => count($message->envelope()->bcc),
+        ]);
+
+        $startedAt = microtime(true);
+        $result = $this->transport->send($message);
+
+        EmailEventBus::dispatch('email.send.finish', [
+            'successful' => $result->successful,
+            'error' => $result->error,
+            'duration_ms' => (int) round((microtime(true) - $startedAt) * 1000),
+            'metadata' => $result->metadata,
+        ]);
+
+        return $result;
+    }
+
+    public function transport(): EmailTransport
+    {
+        return $this->transport;
+    }
+
+    public function withDkim(DkimConfig $config): self
+    {
+        return new self(new DkimSigningTransport($this->transport, $config));
+    }
 
     /**
-     * @var bool
+     * @param list<EmailTransport> $fallbackTransports
      */
-    private bool $smtpConfigured = false;
-
-    public function __construct($fromEmail, $fromName)
+    public function withFallback(array $fallbackTransports): self
     {
-        $this->from = [
-            'email' => $this->encodeNonAscii($fromEmail),
-            'name' => $this->encodeNonAscii($fromName)
-        ];
-        $this->replyTo = $this->from['email']; // Default Reply-To
+        return new self(new FallbackEmailTransport($this->transport, $fallbackTransports));
     }
 
-    public function setSMTP(array $smtpConfig): self
+    /**
+     * @param callable(string, array<string,mixed>):void $logger
+     */
+    public function withLogging(callable $logger): self
     {
-        $this->smtpConfig = array_merge([
-            'host' => '',
-            'auth' => false,
-            'username' => '',
-            'password' => '',
-            'port' => 25,
-            'secure' => null
-        ], $smtpConfig);
-        $this->smtpConfigured = true;
-        return $this;
+        return new self(new LoggingEmailTransport($this->transport, $logger));
     }
 
-    // Set recipients (to, cc, bcc)
-    public function setRecipients(array $to, array $cc = [], array $bcc = []): self
+    public function withPsrLogger(object $logger, string $level = 'info'): self
     {
-        $this->recipients['to'] = array_map([$this, 'encodeNonAscii'], $to);
-        $this->recipients['cc'] = array_map([$this, 'encodeNonAscii'], $cc);
-        $this->recipients['bcc'] = array_map([$this, 'encodeNonAscii'], $bcc);
-        return $this;
+        return $this->withLogging(new Psr3LoggerAdapter($logger)->toCallable($level));
     }
 
-    // Set message details (subject, content)
-    public function setMessage(string $subject, string $htmlContent, string $plainText = ''): self
+    public function withRateLimit(RateLimiter $rateLimiter): self
     {
-        $this->subject = $this->encodeMimeHeader($subject);
-        $this->htmlContent = $htmlContent;
-        $this->plainText = $plainText;
-        return $this;
+        return new self(new RateLimitedEmailTransport($this->transport, $rateLimiter));
     }
 
-    // Set reply-to email
-    public function setReplyTo(string $email): self
+    public function withRetry(RetryPolicy $retryPolicy): self
     {
-        $this->replyTo = $this->encodeNonAscii($email);
-        return $this;
+        return new self(new RetryEmailTransport($this->transport, $retryPolicy));
     }
 
-    // Set message-specific headers
-    public function setMessageDetails(string $messageId = '', string $inReplyTo = '', array $references = []): self
+    public function withTransport(EmailTransport $transport): self
     {
-        $this->messageDetails['messageId'] = $messageId;
-        $this->messageDetails['inReplyTo'] = $inReplyTo;
-        $this->messageDetails['references'] = $references;
-        return $this;
-    }
-
-    // Set general headers
-    public function setGeneralHeaders(string $language = '', int $priority = null, string $mailer = ''): self
-    {
-        $this->generalHeaders['language'] = $language;
-        $this->generalHeaders['priority'] = $priority;
-        $this->generalHeaders['mailer'] = $mailer;
-        return $this;
-    }
-
-    // Set list headers
-    public function setListHeaders(
-        string $listId = '',
-        string $unsubscribe = '',
-        string $subscribe = '',
-        string $archive = ''
-    ): self {
-        $this->listHeaders['listId'] = $listId;
-        $this->listHeaders['unsubscribe'] = $unsubscribe;
-        $this->listHeaders['subscribe'] = $subscribe;
-        $this->listHeaders['archive'] = $archive;
-        return $this;
-    }
-
-    // Set miscellaneous headers
-    public function setMiscHeaders(
-        bool $confirmedOptIn = null,
-        string $spamStatus = '',
-        string $organization = '',
-        string $dispositionNotificationTo = ''
-    ): self {
-        $this->miscHeaders['confirmedOptIn'] = $confirmedOptIn;
-        $this->miscHeaders['spamStatus'] = $spamStatus;
-        $this->miscHeaders['organization'] = $organization;
-        $this->miscHeaders['dispositionNotificationTo'] = $dispositionNotificationTo;
-        return $this;
-    }
-
-    // Add attachment
-    public function attachment($filePath, $filename = null): self
-    {
-        if (file_exists($filePath)) {
-            $this->attachments[] = ['path' => $filePath, 'name' => $filename ?: basename($filePath)];
-        }
-        return $this;
-    }
-
-    // Send the email
-    public function send()
-    {
-        $builder = new EmailBuilder($this->from);
-
-        // Set common headers
-        $builder->setCommonHeaders(
-            $this->recipients['to'],
-            $this->subject,
-            $this->recipients['cc'],
-            $this->recipients['bcc'],
-            $this->replyTo
-        )
-            ->setIdHeaders(
-                $this->messageDetails['messageId'],
-                $this->messageDetails['inReplyTo'],
-                $this->messageDetails['references']
-            )
-            ->setGeneralHeaders(
-                $this->generalHeaders['language'],
-                $this->generalHeaders['priority'],
-                $this->generalHeaders['mailer']
-            )
-            ->setListHeaders(
-                $this->listHeaders['listId'],
-                $this->listHeaders['unsubscribe'],
-                $this->listHeaders['subscribe'],
-                $this->listHeaders['archive']
-            )
-            ->setMiscHeaders(
-                $this->miscHeaders['confirmedOptIn'],
-                $this->miscHeaders['spamStatus'],
-                $this->miscHeaders['organization'],
-                $this->miscHeaders['dispositionNotificationTo']
-            );
-
-        // Choose the appropriate sending method (SMTP or generic)
-        if ($this->smtpConfigured) {
-            return (new SMTPSender($this->from, $this->smtpConfig))->send(
-                $this->recipients['to'],
-                $builder->setBody($this->htmlContent, $this->plainText, $this->attachments),
-                $builder->getHeaders()
-            );
-        }
-
-        return (new GenericSender())->send(
-            $this->recipients['to'],
-            $this->subject,
-            $builder->setBody($this->htmlContent, $this->plainText, $this->attachments),
-            $builder->getHeaders()
-        );
-    }
-
-    // Helper to encode non-ASCII characters
-    private function encodeNonAscii($string)
-    {
-        return preg_replace_callback('/[^\x20-\x7E]/', function ($matches) {
-            return '=?UTF-8?B?' . base64_encode($matches[0]) . '?=';
-        }, $string);
-    }
-
-    // Helper to encode MIME headers
-    private function encodeMimeHeader($text)
-    {
-        return '=?UTF-8?B?' . base64_encode($text) . '?=';
+        return new self($transport);
     }
 }
