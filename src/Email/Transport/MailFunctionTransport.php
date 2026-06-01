@@ -9,6 +9,7 @@ use Infocyph\TalkingBytes\Email\EmailMessage;
 use Infocyph\TalkingBytes\Email\Result\EmailSendResult;
 use Infocyph\TalkingBytes\Email\System\AddressFormatter;
 use Infocyph\TalkingBytes\Email\System\RawEmailBuilder;
+use Infocyph\TalkingBytes\Email\ValueObject\EmailAddress;
 
 final readonly class MailFunctionTransport implements EmailTransport
 {
@@ -39,11 +40,27 @@ final readonly class MailFunctionTransport implements EmailTransport
         $subject = $this->addressFormatter->encodeMimeHeader($message->headersData()->subject);
 
         $recipients = array_map(
-            static fn($address): string => $address->email,
+            static fn(EmailAddress $address): string => $address->email,
             $message->envelope()->recipients(),
         );
 
-        $sent = mail(
+        $availabilityError = $this->mailFunctionAvailabilityError();
+        if ($availabilityError !== null) {
+            $result = $this->failedResult(
+                $messageId,
+                $recipients,
+                $rawEmail->sizeBytes,
+                ['mail_unavailable' => $availabilityError],
+            );
+
+            return CommunicationResult::failure(
+                'mail() transport failed.',
+                response: $result,
+                metadata: $result->metadata,
+            );
+        }
+
+        $sent = $this->invokeMail(
             implode(',', $recipients),
             $subject,
             $rawEmail->body,
@@ -51,16 +68,9 @@ final readonly class MailFunctionTransport implements EmailTransport
             $this->envelopeSenderParameter($message),
         );
 
-        $result = new EmailSendResult(
-            'mail-function',
-            $messageId,
-            $sent ? $recipients : [],
-            $sent ? [] : array_fill_keys($recipients, 'mail() transport failed.'),
-            [
-                'transport' => 'mail-function',
-                'size_bytes' => $rawEmail->sizeBytes,
-            ],
-        );
+        $result = $sent
+            ? $this->successResult($messageId, $recipients, $rawEmail->sizeBytes)
+            : $this->failedResult($messageId, $recipients, $rawEmail->sizeBytes);
 
         if (!$sent) {
             return CommunicationResult::failure(
@@ -90,5 +100,97 @@ final readonly class MailFunctionTransport implements EmailTransport
         }
 
         return trim($matches[1]);
+    }
+
+    /**
+     * @param list<string> $recipients
+     * @param array<string, mixed> $extraMetadata
+     */
+    private function failedResult(
+        ?string $messageId,
+        array $recipients,
+        int $sizeBytes,
+        array $extraMetadata = [],
+    ): EmailSendResult {
+        return new EmailSendResult(
+            'mail-function',
+            $messageId,
+            [],
+            array_fill_keys($recipients, 'mail() transport failed.'),
+            array_merge(
+                [
+                    'transport' => 'mail-function',
+                    'size_bytes' => $sizeBytes,
+                ],
+                $extraMetadata,
+            ),
+        );
+    }
+
+    private function invokeMail(
+        string $to,
+        string $subject,
+        string $body,
+        string $headers,
+        string $parameters,
+    ): bool {
+        set_error_handler(
+            static fn(): bool => true,
+            E_WARNING,
+        );
+
+        try {
+            return mail($to, $subject, $body, $headers, $parameters);
+        } finally {
+            restore_error_handler();
+        }
+    }
+
+    private function mailFunctionAvailabilityError(): ?string
+    {
+        if (PHP_OS_FAMILY === 'Windows') {
+            return null;
+        }
+
+        $sendmailPath = (string) ini_get('sendmail_path');
+        if ($sendmailPath === '') {
+            return null;
+        }
+
+        if (preg_match('/^\s*(?:"([^"]+)"|\'([^\']+)\'|(\S+))/', $sendmailPath, $matches) !== 1) {
+            return null;
+        }
+
+        $binary = $matches[1] !== '' ? $matches[1] : ($matches[2] !== '' ? $matches[2] : $matches[3]);
+        if ($binary[0] !== '/') {
+            return null;
+        }
+
+        if (!is_file($binary)) {
+            return sprintf('sendmail binary does not exist: %s', $binary);
+        }
+
+        if (!is_executable($binary)) {
+            return sprintf('sendmail binary is not executable: %s', $binary);
+        }
+
+        return null;
+    }
+
+    /**
+     * @param list<string> $recipients
+     */
+    private function successResult(?string $messageId, array $recipients, int $sizeBytes): EmailSendResult
+    {
+        return new EmailSendResult(
+            'mail-function',
+            $messageId,
+            $recipients,
+            [],
+            [
+                'transport' => 'mail-function',
+                'size_bytes' => $sizeBytes,
+            ],
+        );
     }
 }

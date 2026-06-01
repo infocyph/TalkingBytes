@@ -8,7 +8,7 @@ use Infocyph\TalkingBytes\Http\Internal\ResponseBodyCollector;
 use Infocyph\TalkingBytes\Http\Internal\ResponseHeaderCollector;
 
 it('streams download chunks to a temp file and finalizes atomically', function (): void {
-    $target = sys_get_temp_dir().'/tb-http-stream-'.bin2hex(random_bytes(6)).'.txt';
+    $target = sys_get_temp_dir() . '/tb-http-stream-' . bin2hex(random_bytes(6)) . '.txt';
     $request = HttpRequest::get('https://example.com')->streamDownloadTo($target);
     $collector = new ResponseBodyCollector($request);
 
@@ -24,7 +24,7 @@ it('streams download chunks to a temp file and finalizes atomically', function (
 });
 
 it('enforces max download bytes during streamed download collection', function (): void {
-    $target = sys_get_temp_dir().'/tb-http-stream-'.bin2hex(random_bytes(6)).'.txt';
+    $target = sys_get_temp_dir() . '/tb-http-stream-' . bin2hex(random_bytes(6)) . '.txt';
     $request = HttpRequest::get('https://example.com')
         ->streamDownloadTo($target)
         ->maxDownloadBytes(3);
@@ -37,7 +37,7 @@ it('enforces max download bytes during streamed download collection', function (
 });
 
 it('allows streamed download when size is exactly the configured max', function (): void {
-    $target = sys_get_temp_dir().'/tb-http-stream-'.bin2hex(random_bytes(6)).'.txt';
+    $target = sys_get_temp_dir() . '/tb-http-stream-' . bin2hex(random_bytes(6)) . '.txt';
     $request = HttpRequest::get('https://example.com')
         ->streamDownloadTo($target)
         ->maxDownloadBytes(11);
@@ -70,10 +70,10 @@ it('configures upload from file and stream sources', function (): void {
     expect($handle)->toBeInstanceOf(CurlHandle::class);
 
     $request = HttpRequest::put('https://example.com/upload')->uploadFromFile($path);
-    $resolved = (new CurlHandleConfigurator)->configure(
+    $resolved = (new CurlHandleConfigurator())->configure(
         $handle,
         $request,
-        new ResponseHeaderCollector,
+        new ResponseHeaderCollector(),
         new ResponseBodyCollector($request),
     );
 
@@ -83,7 +83,7 @@ it('configures upload from file and stream sources', function (): void {
     if (is_resource($resolved->metadata['_upload_handle'])) {
         fclose($resolved->metadata['_upload_handle']);
     }
-    curl_close($handle);
+    unset($handle);
     if (is_file($path)) {
         unlink($path);
     }
@@ -96,10 +96,10 @@ it('configures upload from file and stream sources', function (): void {
     expect($streamHandle)->toBeInstanceOf(CurlHandle::class);
 
     $streamRequest = HttpRequest::put('https://example.com/upload')->uploadFromStream($stream, 14);
-    $resolvedStream = (new CurlHandleConfigurator)->configure(
+    $resolvedStream = (new CurlHandleConfigurator())->configure(
         $streamHandle,
         $streamRequest,
-        new ResponseHeaderCollector,
+        new ResponseHeaderCollector(),
         new ResponseBodyCollector($streamRequest),
     );
 
@@ -107,7 +107,7 @@ it('configures upload from file and stream sources', function (): void {
     expect($resolvedStream->metadata['_upload_handle'] ?? null)->toBe($stream);
     expect(ftell($stream))->toBe(0);
 
-    curl_close($streamHandle);
+    unset($streamHandle);
     fclose($stream);
 });
 
@@ -124,15 +124,15 @@ it('rejects combining upload source with regular request body', function (): voi
     expect($handle)->toBeInstanceOf(CurlHandle::class);
 
     expect(
-        fn (): HttpRequest => (new CurlHandleConfigurator)->configure(
+        fn(): HttpRequest => (new CurlHandleConfigurator())->configure(
             $handle,
             $request,
-            new ResponseHeaderCollector,
+            new ResponseHeaderCollector(),
             new ResponseBodyCollector($request),
         ),
     )->toThrow(InvalidArgumentException::class, 'cannot combine uploadFromFile/uploadFromStream');
 
-    curl_close($handle);
+    unset($handle);
     if (is_file($path)) {
         unlink($path);
     }
@@ -151,15 +151,15 @@ it('enforces max upload bytes for file and stream uploads', function (): void {
         ->maxUploadBytes(4);
 
     expect(
-        fn (): HttpRequest => (new CurlHandleConfigurator)->configure(
+        fn(): HttpRequest => (new CurlHandleConfigurator())->configure(
             $handle,
             $request,
-            new ResponseHeaderCollector,
+            new ResponseHeaderCollector(),
             new ResponseBodyCollector($request),
         ),
     )->toThrow(InvalidArgumentException::class, 'max upload bytes');
 
-    curl_close($handle);
+    unset($handle);
     if (is_file($path)) {
         unlink($path);
     }
@@ -176,14 +176,14 @@ it('enforces max upload bytes for file and stream uploads', function (): void {
         ->maxUploadBytes(4);
 
     expect(
-        fn (): HttpRequest => (new CurlHandleConfigurator)->configure(
+        fn(): HttpRequest => (new CurlHandleConfigurator())->configure(
             $streamHandle,
             $streamRequest,
-            new ResponseHeaderCollector,
+            new ResponseHeaderCollector(),
             new ResponseBodyCollector($streamRequest),
         ),
     )->toThrow(InvalidArgumentException::class, 'max upload bytes');
 
-    curl_close($streamHandle);
+    unset($streamHandle);
     fclose($stream);
 });

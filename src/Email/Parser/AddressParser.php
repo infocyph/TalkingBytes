@@ -17,10 +17,13 @@ final class AddressParser
 
         $imapAddresses = $this->parseWithImap($headerValue);
         if ($imapAddresses !== null) {
-            return new EmailAddressList($imapAddresses);
+            $filtered = $this->filterValidAddresses($imapAddresses);
+            if ($filtered !== []) {
+                return new EmailAddressList($filtered);
+            }
         }
 
-        return new EmailAddressList($this->parseWithoutImap($headerValue));
+        return new EmailAddressList($this->filterValidAddresses($this->parseWithoutImap($headerValue)));
     }
 
     private function fallbackAddress(string $raw): InboundEmailAddress
@@ -30,6 +33,18 @@ final class AddressParser
         }
 
         return new InboundEmailAddress(null, null, $raw);
+    }
+
+    /**
+     * @param list<InboundEmailAddress> $addresses
+     * @return list<InboundEmailAddress>
+     */
+    private function filterValidAddresses(array $addresses): array
+    {
+        return array_values(array_filter(
+            $addresses,
+            static fn(InboundEmailAddress $address): bool => $address->email !== null,
+        ));
     }
 
     private function parseMailbox(object $mailbox, string $rawHeader): InboundEmailAddress

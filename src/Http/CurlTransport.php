@@ -50,7 +50,7 @@ final class CurlTransport implements TransportInterface
 
         $configured = $this->configureHandle($handle, $resolvedRequest, $url, $startedAt);
         if ($configured instanceof CommunicationResult) {
-            curl_close($handle);
+            unset($handle);
 
             return $configured;
         }
@@ -67,7 +67,7 @@ final class CurlTransport implements TransportInterface
         $streamFinalizeError = $bodyCollector->finalize();
         $this->cleanupUploadHandle($resolvedRequest);
 
-        curl_close($handle);
+        unset($handle);
 
         $result = $this->buildExecutionResult(
             $resolvedRequest,

@@ -38,3 +38,32 @@ jobs:
       service_db_password: "phpforge"
       artifact_retention_days: 61
 
+  mailpit-integration:
+    runs-on: ubuntu-latest
+    services:
+      mailpit:
+        image: axllent/mailpit:latest
+        ports:
+          - 1025:1025
+          - 8025:8025
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+          extensions: curl, fileinfo, openssl
+
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist
+
+      - name: Run Mailpit integration test
+        env:
+          RUN_MAILPIT_INTEGRATION: '1'
+          SMTP_HOST: 127.0.0.1
+          SMTP_PORT: 1025
+          MAILPIT_API_BASE: http://127.0.0.1:8025
+        run: vendor/bin/pest --configuration=vendor/infocyph/phpforge/resources/pest.xml --bootstrap=vendor/autoload.php tests/MailpitIntegrationTest.php

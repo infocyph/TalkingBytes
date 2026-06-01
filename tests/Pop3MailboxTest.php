@@ -16,7 +16,7 @@ use PHPUnit\Framework\SkippedWithMessageException;
 final class FakePop3ServerProcess
 {
     /**
-     * @param  array<int, resource|null>  $pipes
+     * @param array<int, resource|null> $pipes
      */
     private function __construct(
         private mixed $process,
@@ -25,17 +25,22 @@ final class FakePop3ServerProcess
         public int $port,
     ) {}
 
+    public function __destruct()
+    {
+        $this->stop();
+    }
+
     /**
-     * @param  array<string, mixed>  $scenario
+     * @param array<string, mixed> $scenario
      */
     public static function start(array $scenario): self
     {
-        $workDir = sys_get_temp_dir().'/talkingbytes-pop3-'.bin2hex(random_bytes(6));
+        $workDir = sys_get_temp_dir() . '/talkingbytes-pop3-' . bin2hex(random_bytes(6));
         mkdir($workDir, 0775, true);
 
-        $scriptPath = $workDir.'/server.php';
-        $scenarioPath = $workDir.'/scenario.json';
-        $readyPath = $workDir.'/ready.json';
+        $scriptPath = $workDir . '/server.php';
+        $scenarioPath = $workDir . '/scenario.json';
+        $readyPath = $workDir . '/ready.json';
         file_put_contents($scriptPath, self::script());
         file_put_contents($scenarioPath, json_encode($scenario, JSON_THROW_ON_ERROR));
 
@@ -46,8 +51,9 @@ final class FakePop3ServerProcess
         ];
 
         $process = proc_open([PHP_BINARY, $scriptPath, $scenarioPath, $readyPath], $descriptors, $pipes);
-        if (! is_resource($process)) {
+        if (!is_resource($process)) {
             self::cleanupDirectory($workDir);
+
             throw new RuntimeException('Unable to start fake POP3 server process.');
         }
 
@@ -60,39 +66,10 @@ final class FakePop3ServerProcess
         return new self($process, $pipes, $workDir, $port);
     }
 
-    /**
-     * @return array{commands:list<string>,mismatches:list<string>}
-     */
-    public function transcript(): array
-    {
-        $reportPath = $this->workDir.'/report.json';
-        $deadline = microtime(true) + 1.0;
-
-        while (! is_file($reportPath) && microtime(true) < $deadline) {
-            usleep(10000);
-        }
-
-        if (! is_file($reportPath)) {
-            return ['commands' => [], 'mismatches' => ['report not found']];
-        }
-
-        $decoded = json_decode((string) file_get_contents($reportPath), true);
-        if (! is_array($decoded)) {
-            return ['commands' => [], 'mismatches' => ['invalid report']];
-        }
-
-        /** @var list<string> $commands */
-        $commands = is_array($decoded['commands'] ?? null) ? array_values($decoded['commands']) : [];
-        /** @var list<string> $mismatches */
-        $mismatches = is_array($decoded['mismatches'] ?? null) ? array_values($decoded['mismatches']) : [];
-
-        return ['commands' => $commands, 'mismatches' => $mismatches];
-    }
-
     public function stop(): void
     {
         foreach ([1, 2] as $index) {
-            if (! is_resource($this->pipes[$index] ?? null)) {
+            if (!is_resource($this->pipes[$index] ?? null)) {
                 continue;
             }
 
@@ -112,14 +89,47 @@ final class FakePop3ServerProcess
         self::cleanupDirectory($this->workDir);
     }
 
-    public function __destruct()
+    /**
+     * @return array{commands:list<string>,mismatches:list<string>}
+     */
+    public function transcript(): array
     {
-        $this->stop();
+        $reportPath = $this->workDir . '/report.json';
+        $deadline = microtime(true) + 2.0;
+
+        while (!is_file($reportPath) && microtime(true) < $deadline) {
+            usleep(10000);
+        }
+
+        if (!is_file($reportPath)) {
+            return ['commands' => [], 'mismatches' => ['report not found']];
+        }
+
+        $decoded = null;
+        while (microtime(true) < $deadline) {
+            $decoded = json_decode((string) file_get_contents($reportPath), true);
+            if (is_array($decoded)) {
+                break;
+            }
+
+            usleep(10000);
+        }
+
+        if (!is_array($decoded)) {
+            return ['commands' => [], 'mismatches' => ['invalid report']];
+        }
+
+        /** @var list<string> $commands */
+        $commands = is_array($decoded['commands'] ?? null) ? array_values($decoded['commands']) : [];
+        /** @var list<string> $mismatches */
+        $mismatches = is_array($decoded['mismatches'] ?? null) ? array_values($decoded['mismatches']) : [];
+
+        return ['commands' => $commands, 'mismatches' => $mismatches];
     }
 
     private static function cleanupDirectory(string $directory): void
     {
-        foreach (glob($directory.'/*') ?: [] as $path) {
+        foreach (glob($directory . '/*') ?: [] as $path) {
             if (is_file($path)) {
                 unlink($path);
             }
@@ -128,45 +138,6 @@ final class FakePop3ServerProcess
         if (is_dir($directory)) {
             rmdir($directory);
         }
-    }
-
-    /**
-     * @param  array<int, resource|null>  $pipes
-     */
-    private static function waitForReadyPort(string $readyPath, mixed $process, array $pipes): int
-    {
-        $deadline = microtime(true) + 5.0;
-
-        while (! is_file($readyPath) && microtime(true) < $deadline) {
-            $status = proc_get_status($process);
-            if (($status['running'] ?? false) !== true) {
-                $stderr = is_resource($pipes[2] ?? null) ? (string) stream_get_contents($pipes[2]) : '';
-                $reportPath = dirname($readyPath).'/report.json';
-                if (is_file($reportPath)) {
-                    $report = json_decode((string) file_get_contents($reportPath), true);
-                    $mismatch = is_array($report['mismatches'] ?? null) ? ($report['mismatches'][0] ?? '') : '';
-                    if (is_string($mismatch) && str_contains($mismatch, 'bind failed')) {
-                        throw new SkippedWithMessageException('TCP socket bind is unavailable in this environment.');
-                    }
-                }
-
-                throw new RuntimeException('Fake POP3 server exited early: '.trim($stderr));
-            }
-
-            usleep(10000);
-        }
-
-        if (! is_file($readyPath)) {
-            throw new RuntimeException('Fake POP3 server did not become ready in time.');
-        }
-
-        $ready = json_decode((string) file_get_contents($readyPath), true, flags: JSON_THROW_ON_ERROR);
-        $port = (int) ($ready['port'] ?? 0);
-        if ($port < 1) {
-            throw new RuntimeException('Fake POP3 server reported an invalid port.');
-        }
-
-        return $port;
     }
 
     private static function script(): string
@@ -253,6 +224,61 @@ fclose($server);
 file_put_contents($reportPath, json_encode($transcript));
 PHP;
     }
+
+    /**
+     * @param array<int, resource|null> $pipes
+     */
+    private static function waitForReadyPort(string $readyPath, mixed $process, array $pipes): int
+    {
+        $deadline = microtime(true) + 5.0;
+
+        while (!is_file($readyPath) && microtime(true) < $deadline) {
+            $status = proc_get_status($process);
+            if (($status['running'] ?? false) !== true) {
+                $stderr = is_resource($pipes[2] ?? null) ? (string) stream_get_contents($pipes[2]) : '';
+                $reportPath = dirname($readyPath) . '/report.json';
+                if (is_file($reportPath)) {
+                    $report = json_decode((string) file_get_contents($reportPath), true);
+                    $mismatch = is_array($report['mismatches'] ?? null) ? ($report['mismatches'][0] ?? '') : '';
+                    if (is_string($mismatch) && str_contains($mismatch, 'bind failed')) {
+                        throw new SkippedWithMessageException('TCP socket bind is unavailable in this environment.');
+                    }
+                }
+
+                throw new RuntimeException('Fake POP3 server exited early: ' . trim($stderr));
+            }
+
+            usleep(10000);
+        }
+
+        if (!is_file($readyPath)) {
+            throw new RuntimeException('Fake POP3 server did not become ready in time.');
+        }
+
+        while (microtime(true) < $deadline) {
+            $rawReady = file_get_contents($readyPath);
+            if ($rawReady === false || $rawReady === '') {
+                usleep(10000);
+                continue;
+            }
+
+            try {
+                $ready = json_decode($rawReady, true, flags: JSON_THROW_ON_ERROR);
+            } catch (\JsonException) {
+                usleep(10000);
+                continue;
+            }
+
+            $port = (int) ($ready['port'] ?? 0);
+            if ($port > 0) {
+                return $port;
+            }
+
+            usleep(10000);
+        }
+
+        throw new RuntimeException('Fake POP3 server reported an invalid port.');
+    }
 }
 
 it('fetches status, list and parsed message over pop3 socket transport', function (): void {
@@ -320,7 +346,7 @@ it('fails when pop3 starttls is required and stls capability is missing', functi
         password: 'pass',
     ));
 
-    expect(fn () => $mailbox->status())->toThrow(MailboxConnectionException::class);
+    expect(fn() => $mailbox->status())->toThrow(MailboxConnectionException::class);
 
     $mailbox->logout();
     $server->stop();
@@ -374,7 +400,7 @@ it('fails pop3 authentication when server rejects password', function (): void {
         password: 'wrong',
     ));
 
-    expect(fn () => $mailbox->status())->toThrow(MailboxAuthenticationException::class);
+    expect(fn() => $mailbox->status())->toThrow(MailboxAuthenticationException::class);
 
     $mailbox->logout();
     $server->stop();
@@ -398,7 +424,7 @@ it('rejects unsupported pop3 folder operations and non-all searches', function (
         password: 'pass',
     ));
 
-    expect(fn () => $mailbox->transport()->search(MailboxSearch::new()->unseen()))->toThrow(MailboxProtocolException::class);
+    expect(fn() => $mailbox->transport()->search(MailboxSearch::new()->unseen()))->toThrow(MailboxProtocolException::class);
 
     $mailbox->logout();
     $server->stop();
@@ -463,7 +489,7 @@ it('fails pop3 retr when multiline terminator is missing', function (): void {
         timeoutSeconds: 1,
     ));
 
-    expect(fn () => $mailbox->fetchParsed(1))->toThrow(MailboxConnectionException::class);
+    expect(fn() => $mailbox->fetchParsed(1))->toThrow(MailboxConnectionException::class);
 
     $mailbox->logout();
     $server->stop();
@@ -528,11 +554,11 @@ it('redacts POP3 PASS value in mailbox command events', function (): void {
 
     expect(array_any(
         $events,
-        static fn (array $payload): bool => ($payload['command'] ?? null) === 'PASS [REDACTED]',
+        static fn(array $payload): bool => ($payload['command'] ?? null) === 'PASS [REDACTED]',
     ))->toBeTrue();
     expect(array_any(
         $events,
-        static fn (array $payload): bool => is_string($payload['command'] ?? null) && str_contains($payload['command'], 'PASS pass'),
+        static fn(array $payload): bool => is_string($payload['command'] ?? null) && str_contains($payload['command'], 'PASS pass'),
     ))->toBeFalse();
 });
 
@@ -545,8 +571,8 @@ it('rejects invalid pop3 message numbers before issuing commands', function (): 
         password: 'pass',
     ));
 
-    expect(fn () => $mailbox->fetchRaw(0))->toThrow(InvalidArgumentException::class);
-    expect(fn () => $mailbox->delete(-1))->toThrow(InvalidArgumentException::class);
+    expect(fn() => $mailbox->fetchRaw(0))->toThrow(InvalidArgumentException::class);
+    expect(fn() => $mailbox->delete(-1))->toThrow(InvalidArgumentException::class);
 });
 
 it('exposes dedicated pop3 transport contract without foldered mailbox operations', function (): void {

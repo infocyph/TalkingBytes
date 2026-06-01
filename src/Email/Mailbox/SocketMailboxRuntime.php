@@ -12,14 +12,24 @@ final class SocketMailboxRuntime
     /**
      * @return resource
      */
-    public static function connect(string $host, int $port, int $timeoutSeconds, string $protocolLabel, bool $ssl): mixed
-    {
+    public static function connect(
+        string $host,
+        int $port,
+        int $timeoutSeconds,
+        string $protocolLabel,
+        bool $ssl,
+    ): mixed {
         $targetHost = $ssl ? sprintf('ssl://%s', $host) : $host;
         $errno = 0;
         $errstr = '';
         $connection = fsockopen($targetHost, $port, $errno, $errstr, $timeoutSeconds);
         if (!is_resource($connection)) {
-            throw new MailboxConnectionException(sprintf('Unable to connect to %s server: %s (%d)', $protocolLabel, $errstr, $errno));
+            throw new MailboxConnectionException(sprintf(
+                'Unable to connect to %s server: %s (%d)',
+                $protocolLabel,
+                $errstr,
+                $errno,
+            ));
         }
 
         stream_set_timeout($connection, $timeoutSeconds);
@@ -72,7 +82,18 @@ final class SocketMailboxRuntime
      */
     public static function enableTls(mixed $connection, string $protocol): void
     {
-        if (!stream_socket_enable_crypto($connection, true, STREAM_CRYPTO_METHOD_TLS_CLIENT)) {
+        set_error_handler(
+            static fn(): bool => true,
+            E_WARNING,
+        );
+
+        try {
+            $enabled = stream_socket_enable_crypto($connection, true, STREAM_CRYPTO_METHOD_TLS_CLIENT);
+        } finally {
+            restore_error_handler();
+        }
+
+        if ($enabled !== true) {
             throw new MailboxConnectionException(sprintf('Unable to enable TLS on %s socket.', strtoupper($protocol)));
         }
     }
@@ -104,7 +125,10 @@ final class SocketMailboxRuntime
         }
 
         if ($required) {
-            throw new MailboxConnectionException(sprintf('%s STARTTLS is required but not supported by server.', strtoupper($protocol)));
+            throw new MailboxConnectionException(sprintf(
+                '%s STARTTLS is required but not supported by server.',
+                strtoupper($protocol),
+            ));
         }
 
         return false;
