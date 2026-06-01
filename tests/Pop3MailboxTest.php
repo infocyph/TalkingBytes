@@ -255,13 +255,29 @@ PHP;
             throw new RuntimeException('Fake POP3 server did not become ready in time.');
         }
 
-        $ready = json_decode((string) file_get_contents($readyPath), true, flags: JSON_THROW_ON_ERROR);
-        $port = (int) ($ready['port'] ?? 0);
-        if ($port < 1) {
-            throw new RuntimeException('Fake POP3 server reported an invalid port.');
+        while (microtime(true) < $deadline) {
+            $rawReady = file_get_contents($readyPath);
+            if ($rawReady === false || $rawReady === '') {
+                usleep(10000);
+                continue;
+            }
+
+            try {
+                $ready = json_decode($rawReady, true, flags: JSON_THROW_ON_ERROR);
+            } catch (\JsonException) {
+                usleep(10000);
+                continue;
+            }
+
+            $port = (int) ($ready['port'] ?? 0);
+            if ($port > 0) {
+                return $port;
+            }
+
+            usleep(10000);
         }
 
-        return $port;
+        throw new RuntimeException('Fake POP3 server reported an invalid port.');
     }
 }
 
