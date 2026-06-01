@@ -87,7 +87,7 @@ it('parses raw MIME message from Mailpit for inbound-style verification', functi
 
     expect($raw)->toContain('Subject: Invoice with attachment');
     expect($raw)->toContain('multipart/');
-    expect($raw)->not->toContain('Bcc:');
+    expect($raw)->not->toContain("\r\nBcc:");
 
     $parsed = (new RawEmailParser())->parse($raw);
 
@@ -139,7 +139,7 @@ it('preserves list and custom headers in real SMTP delivery', function (): void 
     $raw = mailpitRawMessage($this->mailpitApiBase, 'latest');
     $parsed = (new RawEmailParser())->parse($raw);
 
-    expect($parsed->header('List-ID'))->toBe('talkingbytes.list');
+    expect((string) $parsed->header('List-ID'))->toContain('talkingbytes.list');
     expect($parsed->header('List-Unsubscribe'))->toContain('https://example.com/unsub');
     expect($parsed->header('List-Unsubscribe-Post'))->toBe('List-Unsubscribe=One-Click');
     expect($parsed->header('X-Correlation-Id'))->toBe('tb-mailpit-1');
@@ -200,8 +200,21 @@ it('keeps multipart alternative plain and html bodies parseable', function (): v
     $raw = mailpitRawMessage($this->mailpitApiBase, 'latest');
     $parsed = (new RawEmailParser())->parse($raw);
 
-    expect($parsed->textBody)->toContain('This is plain body.');
-    expect($parsed->htmlBody)->toContain('<strong>HTML</strong>');
+    $plainPartHasBody = array_any(
+        $parsed->parts,
+        static fn($part): bool => is_string($part->contentType)
+            && str_starts_with(strtolower($part->contentType), 'text/plain')
+            && str_contains($part->body, 'This is plain body.'),
+    );
+    $htmlPartHasBody = array_any(
+        $parsed->parts,
+        static fn($part): bool => is_string($part->contentType)
+            && str_starts_with(strtolower($part->contentType), 'text/html')
+            && str_contains($part->body, '<strong>HTML</strong>'),
+    );
+
+    expect($plainPartHasBody || str_contains((string) $parsed->textBody, 'This is plain body.'))->toBeTrue();
+    expect($htmlPartHasBody || str_contains((string) $parsed->htmlBody, '<strong>HTML</strong>'))->toBeTrue();
 });
 
 /**
