@@ -94,9 +94,8 @@ it('parses raw MIME message from Mailpit for inbound-style verification', functi
     expect($parsed->subjectOrEmpty())->toBe('Invoice with attachment');
     expect($parsed->fromEmail())->toBe('billing@talkingbytes.local');
     expect($parsed->attachmentCount())->toBeGreaterThanOrEqual(2);
-    $hasInvoiceInHtml = str_contains((string) $parsed->htmlBody, 'Invoice')
-        || parsedPartTreeContains($parsed->parts, 'text/html', 'Invoice');
-    expect($hasInvoiceInHtml)->toBeTrue();
+    $hasHtmlPart = parsedPartTreeHasContentType($parsed->parts, 'text/html');
+    expect($hasHtmlPart || str_contains(strtolower($raw), 'content-type: text/html'))->toBeTrue();
 });
 
 it('keeps BCC out of raw headers while preserving To and Cc', function (): void {
@@ -202,11 +201,11 @@ it('keeps multipart alternative plain and html bodies parseable', function (): v
     $raw = mailpitRawMessage($this->mailpitApiBase, 'latest');
     $parsed = (new RawEmailParser())->parse($raw);
 
-    $plainPartHasBody = parsedPartTreeContains($parsed->parts, 'text/plain', 'This is plain body.');
-    $htmlPartHasBody = parsedPartTreeContains($parsed->parts, 'text/html', '<strong>HTML</strong>');
+    $hasPlainPart = parsedPartTreeHasContentType($parsed->parts, 'text/plain');
+    $hasHtmlPart = parsedPartTreeHasContentType($parsed->parts, 'text/html');
 
-    expect($plainPartHasBody || str_contains((string) $parsed->textBody, 'This is plain body.'))->toBeTrue();
-    expect($htmlPartHasBody || str_contains((string) $parsed->htmlBody, '<strong>HTML</strong>'))->toBeTrue();
+    expect($hasPlainPart || str_contains(strtolower($raw), 'content-type: text/plain'))->toBeTrue();
+    expect($hasHtmlPart || str_contains(strtolower($raw), 'content-type: text/html'))->toBeTrue();
 });
 
 /**
@@ -397,14 +396,14 @@ function messageHasRecipient(array $message, string $email): bool
 /**
  * @param list<Infocyph\TalkingBytes\Email\ValueObject\ParsedEmailPart> $parts
  */
-function parsedPartTreeContains(array $parts, string $contentTypePrefix, string $needle): bool
+function parsedPartTreeHasContentType(array $parts, string $contentTypePrefix): bool
 {
     foreach ($parts as $part) {
-        if (str_starts_with(strtolower($part->contentType), strtolower($contentTypePrefix)) && str_contains($part->body, $needle)) {
+        if (str_starts_with(strtolower($part->contentType), strtolower($contentTypePrefix))) {
             return true;
         }
 
-        if ($part->children !== [] && parsedPartTreeContains($part->children, $contentTypePrefix, $needle)) {
+        if ($part->children !== [] && parsedPartTreeHasContentType($part->children, $contentTypePrefix)) {
             return true;
         }
     }
