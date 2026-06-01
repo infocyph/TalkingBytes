@@ -22,7 +22,8 @@ beforeEach(function (): void {
         localDomain: 'localhost',
     ));
 
-    mailpitRequest($this->mailpitApiBase, 'DELETE', '/api/v1/messages');
+    waitForMailpitApiReady($this->mailpitApiBase);
+    mailpitRequest($this->mailpitApiBase, 'DELETE', '/api/v1/messages', expectJson: false);
 });
 
 afterEach(function (): void {
@@ -30,7 +31,7 @@ afterEach(function (): void {
         return;
     }
 
-    mailpitRequest($this->mailpitApiBase, 'DELETE', '/api/v1/messages');
+    mailpitRequest($this->mailpitApiBase, 'DELETE', '/api/v1/messages', expectJson: false);
 });
 
 it('verifies outbound and inbound-style SMTP flows against Mailpit API', function (): void {
@@ -96,10 +97,117 @@ it('parses raw MIME message from Mailpit for inbound-style verification', functi
     expect($parsed->htmlBody)->toContain('Invoice');
 });
 
+it('keeps BCC out of raw headers while preserving To and Cc', function (): void {
+    $message = EmailMessage::new()
+        ->from('sender@talkingbytes.local')
+        ->to('to@example.com')
+        ->cc('cc@example.com')
+        ->bcc('bcc@example.com')
+        ->subject('Header visibility')
+        ->text('Header visibility body');
+
+    $result = $this->emailer->send($message);
+    expect($result->successful)->toBeTrue();
+
+    waitForMailpitMessages($this->mailpitApiBase, 1);
+    $raw = mailpitRawMessage($this->mailpitApiBase, 'latest');
+    $parsed = (new RawEmailParser())->parse($raw);
+
+    expect($raw)->not->toContain("\r\nBcc:");
+    expect($parsed->to->count())->toBeGreaterThanOrEqual(1);
+    expect($parsed->cc->count())->toBeGreaterThanOrEqual(1);
+});
+
+it('preserves list and custom headers in real SMTP delivery', function (): void {
+    $message = EmailMessage::new()
+        ->from('sender@talkingbytes.local')
+        ->to('user@example.com')
+        ->subject('List header check')
+        ->text('List header body')
+        ->listHeaders(
+            listId: 'talkingbytes.list',
+            unsubscribe: '<https://example.com/unsub>',
+            subscribe: '<https://example.com/sub>',
+        )
+        ->oneClickUnsubscribe('https://example.com/unsub')
+        ->header('X-Correlation-Id', 'tb-mailpit-1');
+
+    $result = $this->emailer->send($message);
+    expect($result->successful)->toBeTrue();
+
+    waitForMailpitMessages($this->mailpitApiBase, 1);
+    $raw = mailpitRawMessage($this->mailpitApiBase, 'latest');
+    $parsed = (new RawEmailParser())->parse($raw);
+
+    expect($parsed->header('List-ID'))->toBe('talkingbytes.list');
+    expect($parsed->header('List-Unsubscribe'))->toContain('https://example.com/unsub');
+    expect($parsed->header('List-Unsubscribe-Post'))->toBe('List-Unsubscribe=One-Click');
+    expect($parsed->header('X-Correlation-Id'))->toBe('tb-mailpit-1');
+});
+
+it('round-trips utf8 subject and display names through real SMTP', function (): void {
+    $message = EmailMessage::new()
+        ->from('billing@talkingbytes.local', 'রিপোর্ট টিম')
+        ->to('user@example.com')
+        ->subject('ফেব্রুয়ারি রিপোর্ট')
+        ->text('UTF-8 content');
+
+    $result = $this->emailer->send($message);
+    expect($result->successful)->toBeTrue();
+
+    waitForMailpitMessages($this->mailpitApiBase, 1);
+    $raw = mailpitRawMessage($this->mailpitApiBase, 'latest');
+    $parsed = (new RawEmailParser())->parse($raw);
+
+    expect($parsed->subjectOrEmpty())->toBe('ফেব্রুয়ারি রিপোর্ট');
+    expect($parsed->from->first()?->name)->toBe('রিপোর্ট টিম');
+});
+
+it('extracts inline and regular attachments from real SMTP raw source', function (): void {
+    $message = EmailMessage::new()
+        ->from('sender@talkingbytes.local')
+        ->to('user@example.com')
+        ->subject('Attachment extraction')
+        ->text('Attachment extraction body')
+        ->html('<p>Inline image below</p><img src="cid:logo-cid">')
+        ->attachInlineData('inline-image-data', 'logo.png', 'logo-cid', 'image/png')
+        ->attachData('pdf-content', 'invoice.pdf', 'application/pdf');
+
+    $result = $this->emailer->send($message);
+    expect($result->successful)->toBeTrue();
+
+    waitForMailpitMessages($this->mailpitApiBase, 1);
+    $raw = mailpitRawMessage($this->mailpitApiBase, 'latest');
+    $parsed = (new RawEmailParser())->parse($raw);
+
+    expect($parsed->attachmentCount())->toBeGreaterThanOrEqual(2);
+    expect(array_any($parsed->attachments, static fn($attachment): bool => $attachment->isInline()))->toBeTrue();
+    expect(array_any($parsed->attachments, static fn($attachment): bool => $attachment->safeFilename() === 'invoice.pdf'))->toBeTrue();
+});
+
+it('keeps multipart alternative plain and html bodies parseable', function (): void {
+    $message = EmailMessage::new()
+        ->from('sender@talkingbytes.local')
+        ->to('user@example.com')
+        ->subject('Alternative body')
+        ->text('This is plain body.')
+        ->html('<p>This is <strong>HTML</strong> body.</p>');
+
+    $result = $this->emailer->send($message);
+    expect($result->successful)->toBeTrue();
+
+    waitForMailpitMessages($this->mailpitApiBase, 1);
+    $raw = mailpitRawMessage($this->mailpitApiBase, 'latest');
+    $parsed = (new RawEmailParser())->parse($raw);
+
+    expect($parsed->textBody)->toContain('This is plain body.');
+    expect($parsed->htmlBody)->toContain('<strong>HTML</strong>');
+});
+
 /**
  * @return array<string, mixed>
  */
-function mailpitRequest(string $baseUrl, string $method, string $path): array
+function mailpitRequest(string $baseUrl, string $method, string $path, bool $expectJson = true): array
 {
     $handle = curl_init($baseUrl . $path);
     if ($handle === false) {
@@ -124,16 +232,41 @@ function mailpitRequest(string $baseUrl, string $method, string $path): array
         throw new RuntimeException(sprintf('Mailpit API returned HTTP %d for %s %s.', $statusCode, $method, $path));
     }
 
-    if ($rawBody === '') {
+    if ($rawBody === '' || $expectJson === false) {
         return [];
     }
 
     $decoded = json_decode($rawBody, true);
     if (! is_array($decoded)) {
-        throw new RuntimeException('Mailpit API returned invalid JSON.');
+        throw new RuntimeException(sprintf(
+            'Mailpit API returned invalid JSON for %s %s. Body preview: %s',
+            $method,
+            $path,
+            substr($rawBody, 0, 200),
+        ));
     }
 
     return $decoded;
+}
+
+function waitForMailpitApiReady(string $baseUrl, float $timeoutSeconds = 10.0): void
+{
+    $deadline = microtime(true) + $timeoutSeconds;
+
+    while (microtime(true) < $deadline) {
+        try {
+            $info = mailpitRequest($baseUrl, 'GET', '/api/v1/info');
+            if ($info !== []) {
+                return;
+            }
+        } catch (RuntimeException) {
+            // Wait and retry until Mailpit API is ready.
+        }
+
+        usleep(100000);
+    }
+
+    throw new RuntimeException('Mailpit API did not become ready in time.');
 }
 
 function mailpitRawMessage(string $baseUrl, string $messageId = 'latest'): string
