@@ -94,7 +94,9 @@ it('parses raw MIME message from Mailpit for inbound-style verification', functi
     expect($parsed->subjectOrEmpty())->toBe('Invoice with attachment');
     expect($parsed->fromEmail())->toBe('billing@talkingbytes.local');
     expect($parsed->attachmentCount())->toBeGreaterThanOrEqual(2);
-    expect($parsed->htmlBody)->toContain('Invoice');
+    $hasInvoiceInHtml = str_contains((string) $parsed->htmlBody, 'Invoice')
+        || parsedPartTreeContains($parsed->parts, 'text/html', 'Invoice');
+    expect($hasInvoiceInHtml)->toBeTrue();
 });
 
 it('keeps BCC out of raw headers while preserving To and Cc', function (): void {
@@ -200,18 +202,8 @@ it('keeps multipart alternative plain and html bodies parseable', function (): v
     $raw = mailpitRawMessage($this->mailpitApiBase, 'latest');
     $parsed = (new RawEmailParser())->parse($raw);
 
-    $plainPartHasBody = array_any(
-        $parsed->parts,
-        static fn($part): bool => is_string($part->contentType)
-            && str_starts_with(strtolower($part->contentType), 'text/plain')
-            && str_contains($part->body, 'This is plain body.'),
-    );
-    $htmlPartHasBody = array_any(
-        $parsed->parts,
-        static fn($part): bool => is_string($part->contentType)
-            && str_starts_with(strtolower($part->contentType), 'text/html')
-            && str_contains($part->body, '<strong>HTML</strong>'),
-    );
+    $plainPartHasBody = parsedPartTreeContains($parsed->parts, 'text/plain', 'This is plain body.');
+    $htmlPartHasBody = parsedPartTreeContains($parsed->parts, 'text/html', '<strong>HTML</strong>');
 
     expect($plainPartHasBody || str_contains((string) $parsed->textBody, 'This is plain body.'))->toBeTrue();
     expect($htmlPartHasBody || str_contains((string) $parsed->htmlBody, '<strong>HTML</strong>'))->toBeTrue();
@@ -396,6 +388,24 @@ function messageHasRecipient(array $message, string $email): bool
             if (is_string($address) && strtolower($address) === $needle) {
                 return true;
             }
+        }
+    }
+
+    return false;
+}
+
+/**
+ * @param list<Infocyph\TalkingBytes\Email\ValueObject\ParsedEmailPart> $parts
+ */
+function parsedPartTreeContains(array $parts, string $contentTypePrefix, string $needle): bool
+{
+    foreach ($parts as $part) {
+        if (str_starts_with(strtolower($part->contentType), strtolower($contentTypePrefix)) && str_contains($part->body, $needle)) {
+            return true;
+        }
+
+        if ($part->children !== [] && parsedPartTreeContains($part->children, $contentTypePrefix, $needle)) {
+            return true;
         }
     }
 
