@@ -6,7 +6,6 @@ namespace Infocyph\TalkingBytes\Http\Concurrent;
 
 use Infocyph\TalkingBytes\Core\Event\CommunicationEventBus;
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
-use Infocyph\TalkingBytes\Http\HttpRedactor;
 use Infocyph\TalkingBytes\Http\HttpRequest;
 use Infocyph\TalkingBytes\Http\Internal\CurlHandleConfigurator;
 use Infocyph\TalkingBytes\Http\Internal\CurlResultFactory;
@@ -14,6 +13,7 @@ use Infocyph\TalkingBytes\Http\Internal\RequestSecurityGuard;
 use Infocyph\TalkingBytes\Http\Internal\ResponseBodyCollector;
 use Infocyph\TalkingBytes\Http\Internal\ResponseHeaderCollector;
 use Infocyph\TalkingBytes\Http\Internal\UploadHandleManager;
+use Infocyph\TalkingBytes\Http\Support\HttpRedactor;
 use InvalidArgumentException;
 
 final readonly class CurlMultiTransport

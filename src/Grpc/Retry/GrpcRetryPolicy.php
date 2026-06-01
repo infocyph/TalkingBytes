@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace Infocyph\TalkingBytes\Grpc\Retry;
 
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
-use Infocyph\TalkingBytes\Grpc\GrpcResponse;
 use Infocyph\TalkingBytes\Grpc\GrpcStatus;
+use Infocyph\TalkingBytes\Grpc\Sender\GrpcResponse;
 use Infocyph\TalkingBytes\Retry\RetryPolicy;
 use InvalidArgumentException;
 use Throwable;

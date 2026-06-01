@@ -2,11 +2,11 @@
 
 declare(strict_types=1);
 
-use Infocyph\TalkingBytes\Webhook\InMemoryWebhookReplayStore;
+use Infocyph\TalkingBytes\Webhook\Replay\InMemoryWebhookReplayStore;
 use Infocyph\TalkingBytes\Webhook\Testing\WebhookTestFactory;
 use Infocyph\TalkingBytes\Webhook\Webhook;
 use Infocyph\TalkingBytes\Webhook\WebhookReceiver;
-use Infocyph\TalkingBytes\Webhook\WebhookSignature;
+use Infocyph\TalkingBytes\Webhook\Model\WebhookSignature;
 
 it('receives, verifies and decodes webhook events', function (): void {
     [$payload, $headers] = WebhookTestFactory::signedJson(

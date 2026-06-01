@@ -5,6 +5,10 @@ declare(strict_types=1);
 namespace Infocyph\TalkingBytes\Webhook;
 
 use Infocyph\TalkingBytes\Core\Event\CommunicationEventBus;
+use Infocyph\TalkingBytes\Webhook\Contracts\WebhookReplayStore;
+use Infocyph\TalkingBytes\Webhook\Model\WebhookEvent;
+use Infocyph\TalkingBytes\Webhook\Support\WebhookHeaders;
+use Infocyph\TalkingBytes\Webhook\Support\WebhookNameGuard;
 use InvalidArgumentException;
 use JsonException;
 use RuntimeException;

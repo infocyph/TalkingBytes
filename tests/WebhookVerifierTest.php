@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-use Infocyph\TalkingBytes\Webhook\WebhookSignature;
+use Infocyph\TalkingBytes\Webhook\Model\WebhookSignature;
 use Infocyph\TalkingBytes\Webhook\WebhookVerifier;
 
 it('verifies valid webhook signatures', function (): void {

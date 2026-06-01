@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace Infocyph\TalkingBytes\Auth;
 
 use Closure;
-use Infocyph\TalkingBytes\Http\HeaderBag;
 use Infocyph\TalkingBytes\Http\HttpRequest;
+use Infocyph\TalkingBytes\Http\Support\HeaderBag;
 use Infocyph\TalkingBytes\Signing\RequestSignerInterface;
 
 final readonly class SignedRequestAuth implements AuthenticatorInterface

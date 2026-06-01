@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Infocyph\TalkingBytes\Webhook;
+namespace Infocyph\TalkingBytes\Webhook\Model;
 
 use Infocyph\TalkingBytes\Webhook\Signing\HmacWebhookSigner;
 use InvalidArgumentException;

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Infocyph\TalkingBytes\Http;
 
+use Infocyph\TalkingBytes\Http\Stats\HttpTransferStats;
 use JsonException;
 
 final readonly class HttpResponse

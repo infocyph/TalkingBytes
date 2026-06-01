@@ -2,18 +2,20 @@
 
 declare(strict_types=1);
 
-namespace Infocyph\TalkingBytes\Http;
+namespace Infocyph\TalkingBytes\Http\Transport;
 
 use Infocyph\TalkingBytes\Core\Contract\TransportInterface;
 use Infocyph\TalkingBytes\Core\Event\CommunicationEventBus;
 use Infocyph\TalkingBytes\Core\Message\CommunicationRequest;
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
+use Infocyph\TalkingBytes\Http\HttpRequest;
 use Infocyph\TalkingBytes\Http\Internal\CurlHandleConfigurator;
 use Infocyph\TalkingBytes\Http\Internal\CurlResultFactory;
 use Infocyph\TalkingBytes\Http\Internal\RequestSecurityGuard;
 use Infocyph\TalkingBytes\Http\Internal\ResponseBodyCollector;
 use Infocyph\TalkingBytes\Http\Internal\ResponseHeaderCollector;
 use Infocyph\TalkingBytes\Http\Internal\UploadHandleManager;
+use Infocyph\TalkingBytes\Http\Support\HttpRedactor;
 use InvalidArgumentException;
 
 final class CurlTransport implements TransportInterface

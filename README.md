@@ -76,10 +76,27 @@ $delivery = Webhook::sender($httpClient)
 
 ```php
 use Infocyph\TalkingBytes\Grpc\GrpcClient;
-use Infocyph\TalkingBytes\Grpc\GrpcRequest;
+use Infocyph\TalkingBytes\Grpc\Receiver\GrpcInboundRequest;
+use Infocyph\TalkingBytes\Grpc\Receiver\GrpcInboundResponse;
+use Infocyph\TalkingBytes\Grpc\Sender\GrpcRequest;
+use Infocyph\TalkingBytes\Grpc\Sender\GrpcResponse;
+use Infocyph\TalkingBytes\Grpc\GrpcServer;
+use Infocyph\TalkingBytes\Grpc\GrpcStatus;
 
-$result = GrpcClient::transport($transport)
-    ->call(GrpcRequest::create('Orders/Create', ['order_id' => 1001]));
+$client = GrpcClient::using(
+    static fn (GrpcRequest $request): GrpcResponse =>
+        new GrpcResponse(GrpcStatus::Ok, ['ok' => true, 'echo' => $request->message]),
+);
+
+$result = $client->send(new GrpcRequest('/orders.v1.OrderService/Create', [
+    'order_id' => 1001,
+]));
+
+$server = GrpcServer::new()->withHandler(
+    '/orders.v1.OrderService/Create',
+    static fn (GrpcInboundRequest $request): GrpcInboundResponse =>
+        GrpcInboundResponse::ok(['received' => $request->message]),
+);
 ```
 
 ## Full Documentation
@@ -92,6 +109,9 @@ Detailed docs are in `docs/` (Read the Docs structure):
 - `docs/http/index.rst`
 - `docs/webhook/index.rst`
 - `docs/grpc/index.rst`
+- `docs/grpc/quickstart.rst` (Node A -> Node B microservice example)
+- `docs/grpc/inbound-outbound.rst` (inbound + outbound gRPC)
+- `docs/webhook/end-to-end.rst` (full sender/verifier/receiver flow)
 - `docs/events.rst`
 - `docs/testing.rst`
 - `docs/security.rst`

@@ -14,6 +14,11 @@ use Infocyph\TalkingBytes\Grpc\Native\NativeGrpcInvoker;
 use Infocyph\TalkingBytes\Grpc\Native\NativeGrpcResult;
 use Infocyph\TalkingBytes\Grpc\Native\NativeGrpcStreamingInvoker;
 use Infocyph\TalkingBytes\Grpc\Retry\GrpcRetryPolicy;
+use Infocyph\TalkingBytes\Grpc\Sender\GrpcCallError;
+use Infocyph\TalkingBytes\Grpc\Sender\GrpcRequest;
+use Infocyph\TalkingBytes\Grpc\Sender\GrpcResponse;
+use Infocyph\TalkingBytes\Grpc\Sender\GrpcStreamRequest;
+use Infocyph\TalkingBytes\Grpc\Sender\GrpcTransport;
 use Infocyph\TalkingBytes\Retry\RetryPolicy;
 use Throwable;
 

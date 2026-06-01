@@ -2,13 +2,14 @@
 
 declare(strict_types=1);
 
-namespace Infocyph\TalkingBytes\Grpc;
+namespace Infocyph\TalkingBytes\Grpc\Sender;
 
 use Closure;
 use Infocyph\TalkingBytes\Core\Contract\TransportInterface;
 use Infocyph\TalkingBytes\Core\Event\CommunicationEventBus;
 use Infocyph\TalkingBytes\Core\Message\CommunicationRequest;
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
+use Infocyph\TalkingBytes\Grpc\GrpcStatus;
 use Throwable;
 
 final readonly class GrpcTransport implements TransportInterface

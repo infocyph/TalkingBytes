@@ -13,7 +13,7 @@ use Infocyph\TalkingBytes\Core\Middleware\RetryMiddleware;
 use Infocyph\TalkingBytes\Core\Middleware\TimeoutMiddleware;
 use Infocyph\TalkingBytes\Core\Pipeline\MiddlewarePipeline;
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
-use Infocyph\TalkingBytes\Grpc\GrpcRequest;
+use Infocyph\TalkingBytes\Grpc\Sender\GrpcRequest;
 use Infocyph\TalkingBytes\Http\HttpRequest;
 use Infocyph\TalkingBytes\Resilience\CircuitBreaker;
 use Infocyph\TalkingBytes\Resilience\RateLimiter;

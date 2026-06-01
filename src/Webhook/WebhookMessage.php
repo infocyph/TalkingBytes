@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Infocyph\TalkingBytes\Webhook;
 
-use Infocyph\TalkingBytes\Http\HeaderBag;
+use Infocyph\TalkingBytes\Http\Support\HeaderBag;
+use Infocyph\TalkingBytes\Webhook\Support\WebhookHeaders;
+use Infocyph\TalkingBytes\Webhook\Support\WebhookNameGuard;
 use InvalidArgumentException;
 use JsonSerializable;
 

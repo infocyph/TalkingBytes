@@ -16,6 +16,9 @@ use Infocyph\TalkingBytes\Http\Body\JsonBody;
 use Infocyph\TalkingBytes\Http\Body\MultipartBody;
 use Infocyph\TalkingBytes\Http\Body\RawBody;
 use Infocyph\TalkingBytes\Http\Enum\HttpMethod;
+use Infocyph\TalkingBytes\Http\Options\CurlOptions;
+use Infocyph\TalkingBytes\Http\Support\HeaderBag;
+use Infocyph\TalkingBytes\Http\Support\QueryParams;
 use Infocyph\TalkingBytes\Signing\RequestSignerInterface;
 use InvalidArgumentException;
 

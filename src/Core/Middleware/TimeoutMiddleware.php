@@ -8,7 +8,7 @@ use Closure;
 use Infocyph\TalkingBytes\Core\Contract\MiddlewareInterface;
 use Infocyph\TalkingBytes\Core\Message\CommunicationRequest;
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
-use Infocyph\TalkingBytes\Grpc\GrpcRequest;
+use Infocyph\TalkingBytes\Grpc\Sender\GrpcRequest;
 use Infocyph\TalkingBytes\Http\HttpRequest;
 
 final readonly class TimeoutMiddleware implements MiddlewareInterface
