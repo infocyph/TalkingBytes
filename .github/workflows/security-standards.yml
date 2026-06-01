@@ -66,4 +66,4 @@ jobs:
           SMTP_HOST: 127.0.0.1
           SMTP_PORT: 1025
           MAILPIT_API_BASE: http://127.0.0.1:8025
-        run: vendor/bin/pest tests/MailpitIntegrationTest.php
+        run: vendor/bin/pest --configuration=vendor/infocyph/phpforge/resources/pest.xml --bootstrap=vendor/autoload.php tests/MailpitIntegrationTest.php
