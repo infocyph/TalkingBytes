@@ -183,7 +183,7 @@ final readonly class CurlMultiTransport
             $prepared = $configurator->configure($handle, $prepared, $collector, $bodyCollector);
         } catch (InvalidArgumentException $exception) {
             $bodyCollector?->finalize();
-            curl_close($handle);
+            unset($handle);
             $results[$index] = CommunicationResult::failure($exception->getMessage());
 
             return null;

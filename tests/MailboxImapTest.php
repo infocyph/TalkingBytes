@@ -733,7 +733,6 @@ it('reuses selected imap folder between operations and clears state on logout', 
     $mailbox->transport()->logout();
 
     $selectedFolder = new ReflectionProperty($transport, 'selectedFolder');
-    $selectedFolder->setAccessible(true);
     expect($selectedFolder->getValue($transport))->toBeNull();
 
     $transcript = $server->transcript();

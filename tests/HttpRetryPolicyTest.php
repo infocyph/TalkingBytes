@@ -57,7 +57,6 @@ it('adds http retry middleware helper to client defaults', function (): void {
     $client = HttpClient::curl()->withHttpRetry();
     $reflection = new ReflectionClass($client);
     $middlewares = $reflection->getProperty('middlewares');
-    $middlewares->setAccessible(true);
 
     /** @var list<object> $resolved */
     $resolved = $middlewares->getValue($client);
