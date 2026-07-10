@@ -77,7 +77,6 @@ final readonly class WebhookVerifier
 
         $result = new WebhookVerificationResult(
             valid: true,
-            reason: null,
             timestamp: $timestamp,
             signaturePresent: true,
             signaturePrefix: substr($signature, 0, 8),
