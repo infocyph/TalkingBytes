@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace Infocyph\TalkingBytes\Grpc\Testing;
 
-use Infocyph\TalkingBytes\Grpc\GrpcRequest;
-use Infocyph\TalkingBytes\Grpc\GrpcResponse;
 use Infocyph\TalkingBytes\Grpc\GrpcStatus;
+use Infocyph\TalkingBytes\Grpc\Sender\GrpcRequest;
+use Infocyph\TalkingBytes\Grpc\Sender\GrpcResponse;
 use LogicException;
 
 final class FakeGrpcCaller

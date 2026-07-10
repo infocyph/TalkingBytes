@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace Infocyph\TalkingBytes\Webhook\Testing;
 
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
-use Infocyph\TalkingBytes\Webhook\WebhookDelivery;
-use Infocyph\TalkingBytes\Webhook\WebhookDeliveryResult;
+use Infocyph\TalkingBytes\Webhook\Model\WebhookDelivery;
+use Infocyph\TalkingBytes\Webhook\Model\WebhookDeliveryResult;
 use Infocyph\TalkingBytes\Webhook\WebhookMessage;
 
 final class FakeWebhookSender

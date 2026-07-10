@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Infocyph\TalkingBytes\Grpc\Testing;
 
-use Infocyph\TalkingBytes\Grpc\GrpcRequest;
+use Infocyph\TalkingBytes\Grpc\Sender\GrpcRequest;
 use LogicException;
 
 final readonly class AssertableGrpcCaller

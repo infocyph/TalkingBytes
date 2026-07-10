@@ -6,7 +6,7 @@ use Infocyph\TalkingBytes\Core\Event\CommunicationEventBus;
 use Infocyph\TalkingBytes\Http\HttpClient;
 use Infocyph\TalkingBytes\Http\Testing\FakeHttpTransport;
 use Infocyph\TalkingBytes\Webhook\Webhook;
-use Infocyph\TalkingBytes\Webhook\WebhookHeaders;
+use Infocyph\TalkingBytes\Webhook\Support\WebhookHeaders;
 use Infocyph\TalkingBytes\Webhook\WebhookMessage;
 
 it('does not leak webhook secret, raw payload, or signature in event payloads', function (): void {

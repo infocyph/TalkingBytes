@@ -2,7 +2,9 @@
 
 declare(strict_types=1);
 
-namespace Infocyph\TalkingBytes\Grpc;
+namespace Infocyph\TalkingBytes\Grpc\Sender;
+
+use Infocyph\TalkingBytes\Grpc\GrpcStatus;
 
 final readonly class GrpcCallError
 {

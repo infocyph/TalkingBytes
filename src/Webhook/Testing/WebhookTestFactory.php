@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace Infocyph\TalkingBytes\Webhook\Testing;
 
-use Infocyph\TalkingBytes\Webhook\WebhookHeaders;
-use Infocyph\TalkingBytes\Webhook\WebhookNameGuard;
-use Infocyph\TalkingBytes\Webhook\WebhookSignature;
+use Infocyph\TalkingBytes\Webhook\Model\WebhookSignature;
+use Infocyph\TalkingBytes\Webhook\Support\WebhookHeaders;
+use Infocyph\TalkingBytes\Webhook\Support\WebhookNameGuard;
 
 final class WebhookTestFactory
 {

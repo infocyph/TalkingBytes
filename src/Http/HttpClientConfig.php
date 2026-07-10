@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace Infocyph\TalkingBytes\Http;
 
+use Infocyph\TalkingBytes\Http\Options\CurlOptions;
+use Infocyph\TalkingBytes\Http\Support\HeaderBag;
+
 final readonly class HttpClientConfig
 {
     /**

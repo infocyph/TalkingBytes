@@ -2,8 +2,11 @@
 
 declare(strict_types=1);
 
-namespace Infocyph\TalkingBytes\Grpc;
+namespace Infocyph\TalkingBytes\Grpc\Sender;
 
+use Infocyph\TalkingBytes\Grpc\GrpcDeadline;
+use Infocyph\TalkingBytes\Grpc\GrpcMetadata;
+use Infocyph\TalkingBytes\Grpc\GrpcMethodGuard;
 use InvalidArgumentException;
 
 final readonly class GrpcRequest

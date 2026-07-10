@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Infocyph\TalkingBytes\Http;
+namespace Infocyph\TalkingBytes\Http\Support;
 
 use InvalidArgumentException;
 

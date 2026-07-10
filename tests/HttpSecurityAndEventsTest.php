@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 use Infocyph\TalkingBytes\Core\Event\CommunicationEventBus;
 use Infocyph\TalkingBytes\Http\Concurrent\CurlMultiTransport;
-use Infocyph\TalkingBytes\Http\CurlTransport;
-use Infocyph\TalkingBytes\Http\HttpRedactor;
 use Infocyph\TalkingBytes\Http\HttpRequest;
 use Infocyph\TalkingBytes\Http\Internal\RequestSecurityGuard;
+use Infocyph\TalkingBytes\Http\Support\HttpRedactor;
+use Infocyph\TalkingBytes\Http\Transport\CurlTransport;
 
 it('redacts sensitive http headers and query parameters', function (): void {
     $redactedHeaders = HttpRedactor::redactHeaders([
@@ -36,7 +36,7 @@ it('redacts sensitive http headers and query parameters', function (): void {
 });
 
 it('enforces host allow and block lists before sending request', function (): void {
-    $transport = new CurlTransport;
+    $transport = new CurlTransport();
 
     $blocked = $transport->sendRequest(
         HttpRequest::get('https://example.com')->blockHosts(['example.com']),
@@ -52,7 +52,7 @@ it('enforces host allow and block lists before sending request', function (): vo
 });
 
 it('blocks private networks when configured', function (): void {
-    $transport = new CurlTransport;
+    $transport = new CurlTransport();
 
     $result = $transport->sendRequest(
         HttpRequest::get('http://127.0.0.1')->blockPrivateNetworks(),
@@ -75,7 +75,7 @@ it('blocks additional reserved host ranges when private network blocking is enab
     ];
 
     foreach ($reservedUrls as $url) {
-        expect(fn () => RequestSecurityGuard::assertAllowed(HttpRequest::get($url)->blockPrivateNetworks()))
+        expect(fn() => RequestSecurityGuard::assertAllowed(HttpRequest::get($url)->blockPrivateNetworks()))
             ->toThrow(InvalidArgumentException::class, 'private or reserved');
     }
 });
@@ -85,7 +85,7 @@ it('applies security guard checks to redirect destinations as well', function ()
         ->blockPrivateNetworks();
 
     expect(
-        fn () => RequestSecurityGuard::assertAllowed($request, 'http://127.0.0.1/internal'),
+        fn() => RequestSecurityGuard::assertAllowed($request, 'http://127.0.0.1/internal'),
     )->toThrow(InvalidArgumentException::class, 'private or reserved');
 });
 
@@ -97,7 +97,7 @@ it('dispatches http pool lifecycle events', function (): void {
         }
     });
 
-    $pool = new CurlMultiTransport;
+    $pool = new CurlMultiTransport();
     $result = $pool->sendMany([], 5);
 
     CommunicationEventBus::listen(null);
@@ -125,7 +125,7 @@ it('dispatches http request start and failure events for curl transport', functi
         ->timeout(1)
         ->connectTimeout(1);
 
-    $result = (new CurlTransport)->sendRequest($request);
+    $result = (new CurlTransport())->sendRequest($request);
     CommunicationEventBus::listen(null);
 
     expect($result->successful)->toBeFalse();

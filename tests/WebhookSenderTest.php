@@ -7,7 +7,7 @@ use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
 use Infocyph\TalkingBytes\Http\HttpClient;
 use Infocyph\TalkingBytes\Http\HttpResponse;
 use Infocyph\TalkingBytes\Http\Testing\SequenceHttpTransport;
-use Infocyph\TalkingBytes\Webhook\WebhookHeaders;
+use Infocyph\TalkingBytes\Webhook\Support\WebhookHeaders;
 use Infocyph\TalkingBytes\Webhook\WebhookMessage;
 use Infocyph\TalkingBytes\Webhook\WebhookSender;
 

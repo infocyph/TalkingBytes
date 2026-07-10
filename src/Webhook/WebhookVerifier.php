@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Infocyph\TalkingBytes\Webhook;
 
 use Infocyph\TalkingBytes\Core\Event\CommunicationEventBus;
+use Infocyph\TalkingBytes\Webhook\Model\WebhookVerificationResult;
 use Infocyph\TalkingBytes\Webhook\Signing\HmacWebhookSigner;
 use Infocyph\TalkingBytes\Webhook\Signing\WebhookSignatureParser;
 use InvalidArgumentException;
@@ -76,7 +77,6 @@ final readonly class WebhookVerifier
 
         $result = new WebhookVerificationResult(
             valid: true,
-            reason: null,
             timestamp: $timestamp,
             signaturePresent: true,
             signaturePrefix: substr($signature, 0, 8),

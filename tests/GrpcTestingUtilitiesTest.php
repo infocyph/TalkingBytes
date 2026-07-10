@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 use Infocyph\TalkingBytes\Grpc\GrpcClient;
 use Infocyph\TalkingBytes\Grpc\GrpcMetadata;
-use Infocyph\TalkingBytes\Grpc\GrpcRequest;
+use Infocyph\TalkingBytes\Grpc\Sender\GrpcRequest;
 use Infocyph\TalkingBytes\Grpc\GrpcStatus;
 use Infocyph\TalkingBytes\Grpc\Testing\FakeGrpcCaller;
 

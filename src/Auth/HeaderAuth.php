@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Infocyph\TalkingBytes\Auth;
 
-use Infocyph\TalkingBytes\Http\HeaderBag;
 use Infocyph\TalkingBytes\Http\HttpRequest;
+use Infocyph\TalkingBytes\Http\Support\HeaderBag;
 use InvalidArgumentException;
 
 final readonly class HeaderAuth implements AuthenticatorInterface

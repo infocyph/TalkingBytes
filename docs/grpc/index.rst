@@ -8,6 +8,7 @@ invocation, integrated with communication middleware and result mapping.
    :maxdepth: 2
 
    quickstart
+   inbound-outbound
    streaming
    retry
    native

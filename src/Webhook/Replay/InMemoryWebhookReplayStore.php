@@ -2,7 +2,9 @@
 
 declare(strict_types=1);
 
-namespace Infocyph\TalkingBytes\Webhook;
+namespace Infocyph\TalkingBytes\Webhook\Replay;
+
+use Infocyph\TalkingBytes\Webhook\Contracts\WebhookReplayStore;
 
 final class InMemoryWebhookReplayStore implements WebhookReplayStore
 {

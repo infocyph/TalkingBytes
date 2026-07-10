@@ -3,11 +3,11 @@
 declare(strict_types=1);
 
 use Infocyph\TalkingBytes\Core\Message\CommunicationRequest;
-use Infocyph\TalkingBytes\Http\CurlOptions;
-use Infocyph\TalkingBytes\Http\CurlTransport;
 use Infocyph\TalkingBytes\Http\HttpClient;
 use Infocyph\TalkingBytes\Http\HttpClientConfig;
 use Infocyph\TalkingBytes\Http\HttpRequest;
+use Infocyph\TalkingBytes\Http\Options\CurlOptions;
+use Infocyph\TalkingBytes\Http\Transport\CurlTransport;
 
 it('builds http request with query and auth', function (): void {
     $request = HttpRequest::post('https://example.com/orders')
@@ -61,25 +61,25 @@ it('builds http client from config defaults', function (): void {
 });
 
 it('validates http client config values', function (): void {
-    expect(fn () => HttpClientConfig::fromArray([
+    expect(fn() => HttpClientConfig::fromArray([
         'timeoutSeconds' => 0,
     ]))->toThrow(InvalidArgumentException::class, 'timeoutSeconds must be greater than 0');
 
-    expect(fn () => HttpClientConfig::fromArray([
+    expect(fn() => HttpClientConfig::fromArray([
         'connectTimeoutSeconds' => -1,
     ]))->toThrow(InvalidArgumentException::class, 'connectTimeoutSeconds must be greater than 0');
 
-    expect(fn () => HttpClientConfig::fromArray([
+    expect(fn() => HttpClientConfig::fromArray([
         'maxRedirects' => -1,
     ]))->toThrow(InvalidArgumentException::class, 'maxRedirects must be greater than or equal to 0');
 
-    expect(fn () => HttpClientConfig::fromArray([
+    expect(fn() => HttpClientConfig::fromArray([
         'defaultHeaders' => ['Bad Header' => 'x'],
     ]))->toThrow(InvalidArgumentException::class, 'Invalid HTTP header name');
 });
 
 it('curl transport returns failure for invalid payload type', function (): void {
-    $transport = new CurlTransport;
+    $transport = new CurlTransport();
 
     $result = $transport->send(new CommunicationRequest('http', ['bad' => 'payload']));
 
@@ -94,27 +94,27 @@ it('keeps redirects disabled by default', function (): void {
 });
 
 it('validates curl options upfront', function (): void {
-    expect(fn () => new CurlOptions(timeoutSeconds: 0))
+    expect(fn() => new CurlOptions(timeoutSeconds: 0))
         ->toThrow(InvalidArgumentException::class, 'timeoutSeconds must be greater than 0');
 
-    expect(fn () => new CurlOptions(connectTimeoutSeconds: 0))
+    expect(fn() => new CurlOptions(connectTimeoutSeconds: 0))
         ->toThrow(InvalidArgumentException::class, 'connectTimeoutSeconds must be greater than 0');
 
-    expect(fn () => new CurlOptions(maxRedirects: -1))
+    expect(fn() => new CurlOptions(maxRedirects: -1))
         ->toThrow(InvalidArgumentException::class, 'maxRedirects must be greater than or equal to 0');
 
-    expect(fn () => new CurlOptions(maxResponseBytes: 0))
+    expect(fn() => new CurlOptions(maxResponseBytes: 0))
         ->toThrow(InvalidArgumentException::class, 'maxResponseBytes must be greater than 0');
 
-    expect(fn () => new CurlOptions(proxy: ''))
+    expect(fn() => new CurlOptions(proxy: ''))
         ->toThrow(InvalidArgumentException::class, 'proxy must not be empty');
 
-    expect(fn () => new CurlOptions(proxy: '127.0.0.1:8080'))
+    expect(fn() => new CurlOptions(proxy: '127.0.0.1:8080'))
         ->toThrow(InvalidArgumentException::class, 'proxy must include a scheme');
 
-    expect(fn () => new CurlOptions(caBundle: '/path/that/does/not/exist.pem'))
+    expect(fn() => new CurlOptions(caBundle: '/path/that/does/not/exist.pem'))
         ->toThrow(InvalidArgumentException::class, 'caBundle must point to a readable file');
 
-    expect(fn () => new CurlOptions(clientCertificate: '/missing-cert.pem'))
+    expect(fn() => new CurlOptions(clientCertificate: '/missing-cert.pem'))
         ->toThrow(InvalidArgumentException::class, 'clientCertificate must point to a readable file');
 });

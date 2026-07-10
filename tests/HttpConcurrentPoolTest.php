@@ -5,9 +5,9 @@ declare(strict_types=1);
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
 use Infocyph\TalkingBytes\Http\Concurrent\CurlMultiTransport;
 use Infocyph\TalkingBytes\Http\Concurrent\PoolResult;
-use Infocyph\TalkingBytes\Http\CurlTransport;
 use Infocyph\TalkingBytes\Http\HttpClient;
 use Infocyph\TalkingBytes\Http\HttpRequest;
+use Infocyph\TalkingBytes\Http\Transport\CurlTransport;
 
 it('preserves request keys in concurrent pool results', function (): void {
     $requests = [
@@ -15,7 +15,7 @@ it('preserves request keys in concurrent pool results', function (): void {
         'orders' => HttpRequest::get('https://example.com/orders')->blockHosts(['example.com']),
     ];
 
-    $pool = (new CurlMultiTransport)->sendMany($requests, maxConcurrency: 10, failFast: false);
+    $pool = (new CurlMultiTransport())->sendMany($requests, maxConcurrency: 10, failFast: false);
 
     expect(array_keys($pool->all()))->toBe(['users', 'orders']);
     expect($pool->get('users'))->toBeInstanceOf(CommunicationResult::class);
@@ -59,8 +59,8 @@ it('uses the same request configuration path in single and multi transports', fu
         ->uploadFromFile($path)
         ->raw('body');
 
-    $singleResult = (new CurlTransport)->sendRequest($request);
-    $multiResult = (new CurlMultiTransport)->sendMany(['x' => $request])->get('x');
+    $singleResult = (new CurlTransport())->sendRequest($request);
+    $multiResult = (new CurlMultiTransport())->sendMany(['x' => $request])->get('x');
 
     if (is_file($path)) {
         unlink($path);

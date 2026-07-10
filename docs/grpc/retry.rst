@@ -9,9 +9,14 @@ Use ``GrpcRetryPolicy`` with ``withGrpcRetry()``.
 .. code-block:: php
 
    use Infocyph\TalkingBytes\Grpc\GrpcClient;
+   use Infocyph\TalkingBytes\Grpc\Sender\GrpcRequest;
+   use Infocyph\TalkingBytes\Grpc\Sender\GrpcResponse;
+   use Infocyph\TalkingBytes\Grpc\GrpcStatus;
    use Infocyph\TalkingBytes\Grpc\Retry\GrpcRetryPolicy;
 
-   $client = GrpcClient::transport($transport)->withGrpcRetry(
+   $client = GrpcClient::using(
+       static fn (GrpcRequest $request): GrpcResponse => new GrpcResponse(GrpcStatus::Ok, $request->message),
+   )->withGrpcRetry(
        GrpcRetryPolicy::standard(attempts: 3, baseDelayMs: 100)
    );
 
