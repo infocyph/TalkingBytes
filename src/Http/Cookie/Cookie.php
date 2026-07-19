@@ -19,16 +19,29 @@ final readonly class Cookie
         public bool $httpOnly = false,
         public bool $hostOnly = false,
     ) {
-        if ($this->name === '') {
-            throw new InvalidArgumentException('Cookie name must not be empty.');
+        if (preg_match('/^[!#$%&\'\*+\-.\^_`|~0-9A-Za-z]+$/', $this->name) !== 1) {
+            throw new InvalidArgumentException('Cookie name contains invalid characters.');
         }
 
-        if ($this->domain === '') {
-            throw new InvalidArgumentException('Cookie domain must not be empty.');
+        $unquotedValue = $this->value;
+        if (str_starts_with($unquotedValue, '"') || str_ends_with($unquotedValue, '"')) {
+            if (strlen($unquotedValue) < 2 || !str_starts_with($unquotedValue, '"') || !str_ends_with($unquotedValue, '"')) {
+                throw new InvalidArgumentException('Cookie value has mismatched quotes.');
+            }
+
+            $unquotedValue = substr($unquotedValue, 1, -1);
         }
 
-        if (!str_starts_with($this->path, '/')) {
-            throw new InvalidArgumentException('Cookie path must start with "/".');
+        if (preg_match('/^[\x21\x23-\x2B\x2D-\x3A\x3C-\x5B\x5D-\x7E]*$/D', $unquotedValue) !== 1) {
+            throw new InvalidArgumentException('Cookie value contains invalid characters.');
+        }
+
+        if ($this->domain === '' || preg_match('/[\x00-\x20\x7F\/]/', $this->domain) === 1) {
+            throw new InvalidArgumentException('Cookie domain is empty or contains invalid characters.');
+        }
+
+        if (!str_starts_with($this->path, '/') || preg_match('/[\x00-\x1F\x7F]/', $this->path) === 1) {
+            throw new InvalidArgumentException('Cookie path must start with "/" and contain no control characters.');
         }
     }
 
@@ -67,7 +80,15 @@ final readonly class Cookie
             }
         }
 
-        return str_starts_with($path, $this->path);
+        if ($path === $this->path) {
+            return true;
+        }
+
+        if (!str_starts_with($path, $this->path)) {
+            return false;
+        }
+
+        return str_ends_with($this->path, '/') || ($path[strlen($this->path)] ?? '') === '/';
     }
 
     public function pair(): string

@@ -27,3 +27,15 @@ General
 - keep retries bounded with backoff and jitter
 - emit events/metrics for timing and failure analysis
 - use fake transports for local and CI determinism
+
+Benchmarks
+----------
+
+Run the repeatable component benchmark suite with ``composer ic:benchmark``.
+Record the PHP version, extensions, OPcache state, operating system, and
+hardware when comparing results. These microbenchmarks cover repeated HTTP
+request preparation, email building/parsing, and webhook verification; they do
+not establish production application RPM. Measure end-to-end sustained
+successful RPM separately on the production-equivalent host application and
+include concurrency, failures, timeouts, latency percentiles, and memory in the
+result.

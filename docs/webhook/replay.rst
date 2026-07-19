@@ -17,7 +17,10 @@ Use ``WebhookReplayStore`` to prevent duplicate processing.
 Built-in implementation
 -----------------------
 
-``InMemoryWebhookReplayStore`` exists for tests and local development.
+``InMemoryWebhookReplayStore`` exists for tests and local development. It
+retains at most 10,000 live delivery IDs by default and fails closed when that
+capacity is exhausted. Use the ``maxEntries`` constructor argument to select a
+smaller bound for constrained processes.
 
 Production guidance
 -------------------

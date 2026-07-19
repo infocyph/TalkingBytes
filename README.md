@@ -1,5 +1,13 @@
 # TalkingBytes
 
+[![Security & Standards](https://github.com/infocyph/TalkingBytes/actions/workflows/security-standards.yml/badge.svg)](https://github.com/infocyph/TalkingBytes/actions/workflows/security-standards.yml)
+![Packagist Downloads](https://img.shields.io/packagist/dt/infocyph/TalkingBytes?color=green\&link=https%3A%2F%2Fpackagist.org%2Fpackages%2Finfocyph%2FTalkingBytes)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
+![Packagist Version](https://img.shields.io/packagist/v/infocyph/TalkingBytes)
+![Packagist PHP Version](https://img.shields.io/packagist/dependency-v/infocyph/TalkingBytes/php)
+![GitHub Code Size](https://img.shields.io/github/languages/code-size/infocyph/TalkingBytes)
+[![Documentation](https://img.shields.io/badge/Documentation-TalkingBytes-blue?logo=readthedocs&logoColor=white)](https://docs.infocyph.com/projects/TalkingBytes/)
+
 Transport-agnostic communication toolkit for PHP.
 
 TalkingBytes provides a shared middleware/event core with protocol modules for:
@@ -99,35 +107,19 @@ $server = GrpcServer::new()->withHandler(
 );
 ```
 
-## Full Documentation
+## Security
 
-Detailed docs are in `docs/` (Read the Docs structure):
+Protected by [PHPForge](https://github.com/infocyph/PHPForge) — an automated quality and security gate for PHP projects.
 
-- `docs/getting-started.rst`
-- `docs/architecture.rst`
-- `docs/email/index.rst`
-- `docs/http/index.rst`
-- `docs/webhook/index.rst`
-- `docs/grpc/index.rst`
-- `docs/grpc/quickstart.rst` (Node A -> Node B microservice example)
-- `docs/grpc/inbound-outbound.rst` (inbound + outbound gRPC)
-- `docs/webhook/end-to-end.rst` (full sender/verifier/receiver flow)
-- `docs/events.rst`
-- `docs/testing.rst`
-- `docs/security.rst`
-- `docs/performance.rst`
-- `docs/extensions.rst`
-- `docs/naming.rst`
-- `docs/release-checklist.rst`
+---
 
-## Quality Gates
-
-Run full quality and test pipeline:
-
-```bash
-composer ic:ci
-```
-
-## License
-
-MIT
+<div align="center">
+  <sub><strong>Made with ❤️ for the PHP community</strong></sub><br />
+  <sub><a href="LICENSE">MIT Licensed</a></sub><br />
+  <a href="https://docs.infocyph.com/projects/TalkingBytes">Documentation</a> •
+  <a href="SECURITY.md">Security</a> •
+  <a href="CODE_OF_CONDUCT.md">Code of Conduct</a> •
+  <a href="CONTRIBUTING.md">Contributing</a> •
+  <a href="https://github.com/infocyph/TalkingBytes/issues">Report Bug</a> •
+  <a href="https://github.com/infocyph/TalkingBytes/issues">Request Feature</a>
+</div>

@@ -37,13 +37,10 @@ it('contains core usage examples in README', function (): void {
     expect($readme)->toContain('### Email');
     expect($readme)->toContain('### Webhook');
     expect($readme)->toContain('### gRPC');
-    expect($readme)->toContain('## Full Documentation');
-    expect($readme)->toContain('docs/http/index.rst');
-    expect($readme)->toContain('docs/email/index.rst');
-    expect($readme)->toContain('docs/webhook/index.rst');
-    expect($readme)->toContain('docs/grpc/index.rst');
-    expect($readme)->toContain('docs/security.rst');
-    expect($readme)->toContain('docs/release-checklist.rst');
+    expect($readme)->toContain('## Security');
+    expect($readme)->toContain('https://docs.infocyph.com/projects/TalkingBytes/');
+    expect($readme)->toContain('SECURITY.md');
+    expect($readme)->toContain('CONTRIBUTING.md');
 });
 
 it('keeps release-level README examples syntactically valid in fake-safe mode', function (): void {
