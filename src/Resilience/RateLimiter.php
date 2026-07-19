@@ -30,9 +30,14 @@ final class RateLimiter
         $now = microtime(true);
         $windowStart = $now - $this->perSeconds;
 
-        $this->timestamps = array_values(
-            array_filter($this->timestamps, static fn(float $timestamp): bool => $timestamp >= $windowStart),
-        );
+        $activeTimestamps = [];
+        foreach ($this->timestamps as $timestamp) {
+            if ($timestamp >= $windowStart) {
+                $activeTimestamps[] = $timestamp;
+            }
+        }
+
+        $this->timestamps = $activeTimestamps;
 
         if (count($this->timestamps) >= $this->maxRequests) {
             throw new RuntimeException('Rate limit exceeded.');

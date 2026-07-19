@@ -37,3 +37,11 @@ Redaction
 
 ``HttpRedactor`` masks sensitive data in events/log payloads,
 including common auth headers and query secrets.
+
+Cookie safety
+-------------
+
+``CookieJar`` validates cookie syntax, rejects ``Domain`` attributes that do
+not match the response origin, honors RFC path boundaries, and bounds retained
+state. The default capacity is 3,000 cookies and can be lowered with the
+``maxCookies`` constructor argument for long-lived clients.

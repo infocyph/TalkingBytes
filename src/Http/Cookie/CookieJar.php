@@ -7,6 +7,7 @@ namespace Infocyph\TalkingBytes\Http\Cookie;
 use DateTimeImmutable;
 use Infocyph\TalkingBytes\Http\HttpRequest;
 use Infocyph\TalkingBytes\Http\HttpResponse;
+use InvalidArgumentException;
 
 final class CookieJar
 {
@@ -14,6 +15,13 @@ final class CookieJar
      * @var array<string, Cookie>
      */
     private array $cookies = [];
+
+    public function __construct(private readonly int $maxCookies = 3000)
+    {
+        if ($this->maxCookies < 1) {
+            throw new InvalidArgumentException('Cookie jar maxCookies must be greater than zero.');
+        }
+    }
 
     /**
      * @return array<string, Cookie>
@@ -30,7 +38,9 @@ final class CookieJar
             return $request;
         }
 
-        $cookiePairs = $this->extractExistingCookiePairs($request);
+        $explicitCookiePairs = $this->extractExistingCookiePairs($request);
+        $cookiePairs = $explicitCookiePairs;
+        $selectedPathLengths = [];
         $now = new DateTimeImmutable();
 
         foreach ($this->cookies as $key => $cookie) {
@@ -44,24 +54,29 @@ final class CookieJar
                 continue;
             }
 
-            if (array_key_exists($cookie->name, $cookiePairs)) {
+            if (isset($explicitCookiePairs[$cookie->name])) {
+                continue;
+            }
+
+            $pathLength = strlen($cookie->path);
+            if (($selectedPathLengths[$cookie->name] ?? -1) >= $pathLength) {
                 continue;
             }
 
             $cookiePairs[$cookie->name] = $cookie->value;
+            $selectedPathLengths[$cookie->name] = $pathLength;
         }
 
         if ($cookiePairs === []) {
             return $request;
         }
 
-        $line = implode('; ', array_map(
-            static fn(string $name, string $value): string => sprintf('%s=%s', $name, $value),
-            array_keys($cookiePairs),
-            array_values($cookiePairs),
-        ));
+        $pairs = [];
+        foreach ($cookiePairs as $name => $value) {
+            $pairs[] = sprintf('%s=%s', $name, $value);
+        }
 
-        return $request->header('Cookie', $line);
+        return $request->header('Cookie', implode('; ', $pairs));
     }
 
     public function count(): int
@@ -71,7 +86,7 @@ final class CookieJar
 
     public function remember(Cookie $cookie): void
     {
-        $this->cookies[$cookie->key()] = $cookie;
+        $this->store($cookie);
     }
 
     public function storeFromResponse(HttpResponse $response, string $requestUrl): void
@@ -100,7 +115,7 @@ final class CookieJar
                 continue;
             }
 
-            $this->cookies[$cookie->key()] = $cookie;
+            $this->store($cookie);
         }
     }
 
@@ -173,7 +188,7 @@ final class CookieJar
 
         return [
             ...$attributes,
-            'domain' => ltrim(strtolower($value), '.'),
+            'domain' => rtrim(ltrim(strtolower($value), '.'), '.'),
             'hostOnly' => false,
         ];
     }
@@ -283,6 +298,26 @@ final class CookieJar
         return substr($requestPath, 0, $lastSlash);
     }
 
+    private function domainMatchesOrigin(string $originHost, string $cookieDomain): bool
+    {
+        $originHost = strtolower(rtrim($originHost, '.'));
+        $cookieDomain = strtolower(rtrim($cookieDomain, '.'));
+
+        if ($originHost === $cookieDomain) {
+            return true;
+        }
+
+        if (filter_var($originHost, FILTER_VALIDATE_IP) !== false) {
+            return false;
+        }
+
+        if ($cookieDomain === '' || !str_contains($cookieDomain, '.')) {
+            return false;
+        }
+
+        return str_ends_with($originHost, '.' . $cookieDomain);
+    }
+
     /**
      * @return array<string, string>
      */
@@ -362,16 +397,35 @@ final class CookieJar
             $attributes = $this->applyAttribute($attributes, $segment);
         }
 
-        return new Cookie(
-            $name,
-            $value,
-            $attributes['domain'],
-            $attributes['path'],
-            $attributes['expiresAt'],
-            $attributes['secure'],
-            $attributes['httpOnly'],
-            $attributes['hostOnly'],
-        );
+        if (!$attributes['hostOnly'] && !$this->domainMatchesOrigin($context['host'], $attributes['domain'])) {
+            return null;
+        }
+
+        try {
+            return new Cookie(
+                $name,
+                $value,
+                $attributes['domain'],
+                $attributes['path'],
+                $attributes['expiresAt'],
+                $attributes['secure'],
+                $attributes['httpOnly'],
+                $attributes['hostOnly'],
+            );
+        } catch (InvalidArgumentException) {
+            return null;
+        }
+    }
+
+    private function purgeExpired(): void
+    {
+        $now = new DateTimeImmutable();
+
+        foreach ($this->cookies as $key => $cookie) {
+            if ($cookie->isExpired($now)) {
+                unset($this->cookies[$key]);
+            }
+        }
     }
 
     /**
@@ -399,5 +453,23 @@ final class CookieJar
             'path' => $path,
             'secure' => strtolower((string) ($parts['scheme'] ?? 'http')) === 'https',
         ];
+    }
+
+    private function store(Cookie $cookie): void
+    {
+        $key = $cookie->key();
+        if (isset($this->cookies[$key])) {
+            $this->cookies[$key] = $cookie;
+
+            return;
+        }
+
+        if (count($this->cookies) >= $this->maxCookies) {
+            $this->purgeExpired();
+        }
+
+        if (count($this->cookies) < $this->maxCookies) {
+            $this->cookies[$key] = $cookie;
+        }
     }
 }

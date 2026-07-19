@@ -63,6 +63,18 @@ it('supports replay store duplicate detection', function (): void {
         ->toThrow(RuntimeException::class, 'already been processed');
 });
 
+it('bounds the in-memory replay store and fails closed at capacity', function (): void {
+    $store = new InMemoryWebhookReplayStore(maxEntries: 1);
+    $store->remember('evt_1', 3600);
+    $store->remember('evt_1', 3600);
+
+    expect($store->seen('evt_1'))->toBeTrue();
+    expect(fn() => $store->remember('evt_2', 3600))
+        ->toThrow(RuntimeException::class, 'capacity has been exhausted');
+    expect(fn() => new InMemoryWebhookReplayStore(maxEntries: 0))
+        ->toThrow(InvalidArgumentException::class);
+});
+
 it('validates event and delivery header values using name guard', function (): void {
     [$payload, $headers] = WebhookTestFactory::signedJson(
         secret: 'whsec_test',
