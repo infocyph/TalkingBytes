@@ -60,6 +60,37 @@ it('builds http client from config defaults', function (): void {
     expect($defaulted->options->userAgent)->toBe('TalkingBytes/1.0');
 });
 
+it('reuses requests when client defaults require no changes', function (): void {
+    $client = HttpClient::curl();
+    $request = HttpRequest::get('https://example.com');
+    $method = new ReflectionMethod($client, 'applyDefaults');
+
+    expect($method->invoke($client, $request))->toBe($request);
+    expect($request->applyAuthenticators())->toBe($request);
+});
+
+it('keeps configured client defaults authoritative without repeating equal changes', function (): void {
+    $client = HttpClient::fromConfig(new HttpClientConfig(
+        timeoutSeconds: 15,
+        connectTimeoutSeconds: 5,
+        followRedirects: true,
+        maxRedirects: 3,
+        userAgent: 'TalkingBytes/1.0',
+        defaultHeaders: ['X-App' => 'TalkingBytes'],
+    ));
+    $request = HttpRequest::get('https://example.com')
+        ->timeout(2)
+        ->connectTimeout(2);
+    $method = new ReflectionMethod($client, 'applyDefaults');
+    /** @var HttpRequest $defaulted */
+    $defaulted = $method->invoke($client, $request);
+
+    expect($defaulted->options->timeoutSeconds)->toBe(15);
+    expect($defaulted->options->connectTimeoutSeconds)->toBe(5);
+    expect($defaulted->options->followRedirects)->toBeTrue();
+    expect($defaulted->headers->get('X-App'))->toBe('TalkingBytes');
+});
+
 it('validates http client config values', function (): void {
     expect(fn() => HttpClientConfig::fromArray([
         'timeoutSeconds' => 0,

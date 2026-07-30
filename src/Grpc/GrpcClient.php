@@ -24,6 +24,8 @@ use Throwable;
 
 final readonly class GrpcClient
 {
+    private MiddlewarePipeline $pipeline;
+
     /**
      * @param list<MiddlewareInterface> $middlewares
      */
@@ -31,7 +33,9 @@ final readonly class GrpcClient
         private GrpcTransport $transport,
         private array $middlewares = [],
         private ?NativeGrpcStreamingInvoker $streamingInvoker = null,
-    ) {}
+    ) {
+        $this->pipeline = new MiddlewarePipeline($transport, $middlewares);
+    }
 
     /**
      * @param callable(GrpcRequest): GrpcResponse $caller
@@ -101,9 +105,7 @@ final readonly class GrpcClient
 
     public function send(GrpcRequest $request): CommunicationResult
     {
-        $pipeline = new MiddlewarePipeline($this->transport, $this->middlewares);
-
-        return $pipeline->send(new CommunicationRequest('grpc', $request));
+        return $this->pipeline->send(new CommunicationRequest('grpc', $request));
     }
 
     /**

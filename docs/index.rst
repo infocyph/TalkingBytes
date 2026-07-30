@@ -1,5 +1,5 @@
 TalkingBytes Documentation
-=========================
+==========================
 
 TalkingBytes is a transport-agnostic communication toolkit for PHP.
 
@@ -32,6 +32,7 @@ It provides:
    :caption: Cross-Cutting
 
    events
+   middleware-and-resilience
    testing
    security
    performance

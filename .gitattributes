@@ -1,14 +1,17 @@
 .github export-ignore
+.idea export-ignore
 benchmarks export-ignore
 docs export-ignore
 examples export-ignore
 tests export-ignore
+vendor export-ignore
 
 .editorconfig export-ignore
 .gitattributes export-ignore
 .gitignore export-ignore
 .readthedocs.yaml export-ignore
 captainhook.json export-ignore
+composer.lock export-ignore
 pest.xml export-ignore
 phpbench.json export-ignore
 phpcs.xml.dist export-ignore
@@ -17,5 +20,6 @@ phpunit.xml export-ignore
 pint.json export-ignore
 psalm.xml export-ignore
 rector.php export-ignore
+talkingbytes19.txt export-ignore
 
 * text eol=lf

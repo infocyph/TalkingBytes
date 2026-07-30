@@ -31,7 +31,7 @@
         "ext-openssl": "*"
     },
     "require-dev": {
-        "infocyph/phpforge": "dev-main"
+        "infocyph/phpforge": "dev-main@dev"
     },
     "suggest": {
         "ext-grpc": "Required for native gRPC transport.",
