@@ -36,6 +36,8 @@ use RuntimeException;
 
 final readonly class HttpClient
 {
+    private MiddlewarePipeline $pipeline;
+
     /**
      * @param list<MiddlewareInterface> $middlewares
      * @param array<string, string|list<string>> $defaultHeaders
@@ -48,7 +50,9 @@ final readonly class HttpClient
         private array $defaultHeaders = [],
         private array $authenticators = [],
         private ?CookieJar $cookieJar = null,
-    ) {}
+    ) {
+        $this->pipeline = new MiddlewarePipeline($transport, $middlewares);
+    }
 
     public static function curl(): self
     {
@@ -205,8 +209,7 @@ final readonly class HttpClient
             $resolvedRequest = $this->cookieJar->applyToRequest($resolvedRequest);
         }
 
-        $pipeline = new MiddlewarePipeline($this->transport, $this->middlewares);
-        $result = $pipeline->send($resolvedRequest->toCommunicationRequest());
+        $result = $this->pipeline->send($resolvedRequest->toCommunicationRequest());
 
         if ($this->cookieJar !== null && $result->response instanceof HttpResponse) {
             $this->cookieJar->storeFromResponse($result->response, $resolvedRequest->buildUrl());
@@ -330,38 +333,83 @@ final readonly class HttpClient
         return $this->withMiddleware(new TimeoutMiddleware($seconds));
     }
 
+    private function applyCoreOptionDefaults(HttpRequest $request): HttpRequest
+    {
+        if ($request->options->timeoutSeconds !== $this->defaultOptions->timeoutSeconds) {
+            $request = $request->timeout($this->defaultOptions->timeoutSeconds);
+        }
+
+        if ($request->options->connectTimeoutSeconds !== $this->defaultOptions->connectTimeoutSeconds) {
+            $request = $request->connectTimeout($this->defaultOptions->connectTimeoutSeconds);
+        }
+
+        if (
+            $request->options->followRedirects !== $this->defaultOptions->followRedirects
+            || $request->options->maxRedirects !== $this->defaultOptions->maxRedirects
+        ) {
+            $request = $request->followRedirects(
+                $this->defaultOptions->followRedirects,
+                $this->defaultOptions->maxRedirects,
+            );
+        }
+
+        if (
+            $request->options->verifyPeer !== $this->defaultOptions->verifyPeer
+            || $request->options->verifyHost !== $this->defaultOptions->verifyHost
+        ) {
+            $request = $request->verifyTls(
+                $this->defaultOptions->verifyPeer,
+                $this->defaultOptions->verifyHost,
+            );
+        }
+
+        return $request;
+    }
+
     private function applyDefaults(HttpRequest $request): HttpRequest
     {
-        $request = $request
-            ->timeout($this->defaultOptions->timeoutSeconds)
-            ->connectTimeout($this->defaultOptions->connectTimeoutSeconds)
-            ->followRedirects($this->defaultOptions->followRedirects, $this->defaultOptions->maxRedirects)
-            ->verifyTls($this->defaultOptions->verifyPeer, $this->defaultOptions->verifyHost)
-            ->headers($this->defaultHeaders);
+        $request = $this->applyCoreOptionDefaults($request);
+        $request = $this->applyOptionalOptionDefaults($request);
 
-        if ($this->defaultOptions->proxy !== null) {
-            $request = $request->proxy($this->defaultOptions->proxy);
-        }
-
-        if ($this->defaultOptions->proxyAuth !== null && str_contains($this->defaultOptions->proxyAuth, ':')) {
-            [$username, $password] = explode(':', $this->defaultOptions->proxyAuth, 2);
-            $request = $request->proxyAuth($username, $password);
-        }
-
-        if ($this->defaultOptions->caBundle !== null) {
-            $request = $request->caBundle($this->defaultOptions->caBundle);
-        }
-
-        if ($this->defaultOptions->userAgent !== null) {
-            $request = $request->userAgent($this->defaultOptions->userAgent);
-        }
-
-        if ($this->defaultOptions->maxResponseBytes !== null) {
-            $request = $request->maxResponseBytes($this->defaultOptions->maxResponseBytes);
+        if ($this->defaultHeaders !== []) {
+            $request = $request->headers($this->defaultHeaders);
         }
 
         foreach ($this->authenticators as $authenticator) {
             $request = $request->withAuthenticator($authenticator);
+        }
+
+        return $request;
+    }
+
+    private function applyOptionalOptionDefaults(HttpRequest $request): HttpRequest
+    {
+        if ($this->defaultOptions->proxy !== null && $request->options->proxy !== $this->defaultOptions->proxy) {
+            $request = $request->proxy($this->defaultOptions->proxy);
+        }
+
+        if (
+            $this->defaultOptions->proxyAuth !== null
+            && $request->options->proxyAuth !== $this->defaultOptions->proxyAuth
+            && str_contains($this->defaultOptions->proxyAuth, ':')
+        ) {
+            [$username, $password] = explode(':', $this->defaultOptions->proxyAuth, 2);
+            $request = $request->proxyAuth($username, $password);
+        }
+
+        if ($this->defaultOptions->caBundle !== null && $request->options->caBundle !== $this->defaultOptions->caBundle) {
+            $request = $request->caBundle($this->defaultOptions->caBundle);
+        }
+
+        if ($this->defaultOptions->userAgent !== null && $request->options->userAgent !== $this->defaultOptions->userAgent) {
+            $request = $request->userAgent($this->defaultOptions->userAgent);
+        }
+
+        if (
+            $this->defaultOptions->maxResponseBytes !== null
+            && $request->options->maxResponseBytes !== $this->defaultOptions->maxResponseBytes
+        ) {
+            $request = $request->maxResponseBytes($this->defaultOptions->maxResponseBytes);
         }
 
         return $request;

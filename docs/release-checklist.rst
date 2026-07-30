@@ -4,7 +4,17 @@ Release Checklist
 Pre-release gates
 -----------------
 
+- run ``composer validate --strict`` with zero failures
 - run ``composer ic:ci`` with zero failures
+- run ``composer ic:release:guard`` with zero failures
+- build documentation with warnings treated as errors:
+
+  .. code-block:: bash
+
+     sphinx-build -W --keep-going -b html docs build/docs
+
+- verify the supported PHP and dependency-version matrix is green in CI
+- verify the Mailpit integration job is green
 - verify no sensitive values in emitted events/log metadata
 - verify fake transports and smoke tests stay green
 
@@ -22,9 +32,13 @@ Documentation readiness
 - README examples are current
 - docs/ pages reflect API and module boundaries
 - extension requirements/suggestions are consistent with composer metadata
+- public documentation links resolve for the release version
+- the versioning and compatibility boundary remains accurate
 
 Versioning
 ----------
 
-- update changelog/release notes (if maintained)
-- tag only after CI and docs checks pass
+- update changelog or release notes
+- review the public API snapshot before accepting any breaking change
+- compare component benchmarks with the accepted baseline
+- tag only after CI, integration, release-guard, and documentation checks pass

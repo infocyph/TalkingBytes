@@ -94,6 +94,10 @@ final readonly class HttpRequest
 
     public function applyAuthenticators(): self
     {
+        if ($this->authenticators === []) {
+            return $this;
+        }
+
         $request = $this;
 
         foreach ($this->authenticators as $authenticator) {

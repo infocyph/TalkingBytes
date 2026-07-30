@@ -16,14 +16,18 @@ final class ResponseBodyCollector
     private int $receivedBytes = 0;
 
     /** @var resource|null */
-    private mixed $stream = null;
+    private mixed $stream;
 
-    private ?string $targetPath = null;
+    private ?string $targetPath;
 
-    private ?string $tempPath = null;
+    private ?string $tempPath;
 
     public function __construct(private readonly HttpRequest $request)
     {
+        $this->stream = null;
+        $this->targetPath = null;
+        $this->tempPath = null;
+
         $path = $request->options->streamDownloadPath;
         if ($path === null) {
             return;
