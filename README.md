@@ -6,7 +6,7 @@
 ![Packagist Version](https://img.shields.io/packagist/v/infocyph/TalkingBytes)
 ![Packagist PHP Version](https://img.shields.io/packagist/dependency-v/infocyph/TalkingBytes/php)
 ![GitHub Code Size](https://img.shields.io/github/languages/code-size/infocyph/TalkingBytes)
-[![Documentation](https://img.shields.io/badge/Documentation-TalkingBytes-blue?logo=readthedocs&logoColor=white)](https://github.com/infocyph/TalkingBytes/tree/main/docs)
+[![Documentation](https://img.shields.io/badge/Documentation-TalkingBytes-blue?logo=readthedocs&logoColor=white)](https://docs.infocyph.com/projects/TalkingBytes)
 
 Transport-agnostic communication toolkit for PHP.
 
@@ -114,20 +114,20 @@ Protected by [PHPForge](https://github.com/infocyph/PHPForge) — an automated q
 ## Documentation
 
 The complete guides cover
-[email](https://github.com/infocyph/TalkingBytes/tree/main/docs/email),
-[HTTP](https://github.com/infocyph/TalkingBytes/tree/main/docs/http),
-[webhooks](https://github.com/infocyph/TalkingBytes/tree/main/docs/webhook),
-[gRPC](https://github.com/infocyph/TalkingBytes/tree/main/docs/grpc),
-[middleware and resilience](https://github.com/infocyph/TalkingBytes/blob/main/docs/middleware-and-resilience.rst),
-[security](https://github.com/infocyph/TalkingBytes/blob/main/docs/security.rst), and
-[testing](https://github.com/infocyph/TalkingBytes/blob/main/docs/testing.rst).
+[email](https://docs.infocyph.com/projects/TalkingBytes/en/latest/email/),
+[HTTP](https://docs.infocyph.com/projects/TalkingBytes/en/latest/http/),
+[webhooks](https://docs.infocyph.com/projects/TalkingBytes/en/latest/webhook/),
+[gRPC](https://docs.infocyph.com/projects/TalkingBytes/en/latest/grpc/),
+[middleware and resilience](https://docs.infocyph.com/projects/TalkingBytes/en/latest/middleware-and-resilience.html),
+[security](https://docs.infocyph.com/projects/TalkingBytes/en/latest/security.html), and
+[testing](https://docs.infocyph.com/projects/TalkingBytes/en/latest/testing.html).
 
 ---
 
 <div align="center">
   <sub><strong>Made with ❤️ for the PHP community</strong></sub><br />
   <sub><a href="LICENSE">MIT Licensed</a></sub><br />
-  <a href="https://github.com/infocyph/TalkingBytes/tree/main/docs">Documentation</a> •
+  <a href="https://docs.infocyph.com/projects/TalkingBytes">Documentation</a> •
   <a href="SECURITY.md">Security</a> •
   <a href="CODE_OF_CONDUCT.md">Code of Conduct</a> •
   <a href="CONTRIBUTING.md">Contributing</a> •
