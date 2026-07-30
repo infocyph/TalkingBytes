@@ -38,7 +38,7 @@ it('contains core usage examples in README', function (): void {
     expect($readme)->toContain('### Webhook');
     expect($readme)->toContain('### gRPC');
     expect($readme)->toContain('## Security');
-    expect($readme)->toContain('https://github.com/infocyph/TalkingBytes/tree/main/docs');
+    expect($readme)->toContain('https://docs.infocyph.com/projects/TalkingBytes');
     expect($readme)->toContain('SECURITY.md');
     expect($readme)->toContain('CONTRIBUTING.md');
 });
