@@ -170,13 +170,29 @@ final class FakeImapServerProcess
             throw new RuntimeException('Fake IMAP server did not become ready in time.');
         }
 
-        $ready = json_decode((string) file_get_contents($readyPath), true, flags: JSON_THROW_ON_ERROR);
-        $port = (int) ($ready['port'] ?? 0);
-        if ($port < 1) {
-            throw new RuntimeException('Fake IMAP server reported an invalid port.');
+        while (microtime(true) < $deadline) {
+            $rawReady = file_get_contents($readyPath);
+            if ($rawReady === false || $rawReady === '') {
+                usleep(10000);
+                continue;
+            }
+
+            try {
+                $ready = json_decode($rawReady, true, flags: JSON_THROW_ON_ERROR);
+            } catch (JsonException) {
+                usleep(10000);
+                continue;
+            }
+
+            $port = (int) ($ready['port'] ?? 0);
+            if ($port > 0) {
+                return $port;
+            }
+
+            usleep(10000);
         }
 
-        return $port;
+        throw new RuntimeException('Fake IMAP server reported an invalid port.');
     }
 
     private static function script(): string
@@ -214,7 +230,7 @@ if ($server === false) {
 
 $name = stream_socket_get_name($server, false);
 $port = (int) substr((string) strrchr((string) $name, ':'), 1);
-file_put_contents($readyPath, json_encode(['port' => $port]));
+$writeJson($readyPath, ['port' => $port]);
 
 $client = @stream_socket_accept($server, 15);
 $transcript = ['commands' => [], 'mismatches' => []];

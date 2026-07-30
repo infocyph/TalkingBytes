@@ -165,7 +165,9 @@ if ($server === false) {
 
 $name = stream_socket_get_name($server, false);
 $port = (int) substr((string) strrchr((string) $name, ':'), 1);
-file_put_contents($readyPath, json_encode(['port' => $port]));
+$readyTempPath = $readyPath . '.tmp';
+file_put_contents($readyTempPath, json_encode(['port' => $port]));
+rename($readyTempPath, $readyPath);
 
 $client = @stream_socket_accept($server, 15);
 $transcript = ['commands' => [], 'mismatches' => []];
