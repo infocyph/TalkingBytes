@@ -8,11 +8,11 @@ use Infocyph\TalkingBytes\Email\EmailMessage;
 use Infocyph\TalkingBytes\Email\Enum\SmtpSecurity;
 use Infocyph\TalkingBytes\Email\Parser\RawEmailParser;
 
-beforeEach(function (): void {
-    if (getenv('RUN_MAILPIT_INTEGRATION') !== '1') {
-        test()->markTestSkipped('Mailpit integration test is disabled.');
-    }
+if (getenv('RUN_MAILPIT_INTEGRATION') !== '1') {
+    return;
+}
 
+beforeEach(function (): void {
     $this->mailpitApiBase = rtrim((string) (getenv('MAILPIT_API_BASE') ?: 'http://127.0.0.1:8025'), '/');
     $this->emailer = Email::sender()->usingSmtp(new SmtpConfig(
         host: (string) (getenv('SMTP_HOST') ?: '127.0.0.1'),
@@ -27,10 +27,6 @@ beforeEach(function (): void {
 });
 
 afterEach(function (): void {
-    if (getenv('RUN_MAILPIT_INTEGRATION') !== '1') {
-        return;
-    }
-
     mailpitRequest($this->mailpitApiBase, 'DELETE', '/api/v1/messages', expectJson: false);
 });
 

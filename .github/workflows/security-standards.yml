@@ -30,7 +30,7 @@ jobs:
       benchmark_baseline_file: ""
       benchmark_max_regression_percent: 2
       benchmark_stable_environment: false
-      fail_on_skipped_tests: false
+      fail_on_skipped_tests: true
       enable_redis_service: false
       enable_valkey_service: false
       enable_memcached_service: false
@@ -72,4 +72,4 @@ jobs:
           SMTP_HOST: 127.0.0.1
           SMTP_PORT: 1025
           MAILPIT_API_BASE: http://127.0.0.1:8025
-        run: vendor/bin/pest --configuration=vendor/infocyph/phpforge/resources/pest.xml --bootstrap=vendor/autoload.php tests/MailpitIntegrationTest.php
+        run: vendor/bin/pest --configuration=vendor/infocyph/phpforge/resources/pest.xml --bootstrap=vendor/autoload.php --fail-on-skipped tests/MailpitIntegrationTest.php
