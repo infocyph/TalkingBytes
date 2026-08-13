@@ -4,13 +4,12 @@ declare(strict_types=1);
 
 namespace Infocyph\TalkingBytes\Http\Testing;
 
-use Infocyph\TalkingBytes\Core\Contract\TransportInterface;
-use Infocyph\TalkingBytes\Core\Message\CommunicationRequest;
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
+use Infocyph\TalkingBytes\Http\Contract\HttpTransport;
 use Infocyph\TalkingBytes\Http\HttpRequest;
 use RuntimeException;
 
-final class SequenceHttpTransport implements TransportInterface
+final class SequenceHttpTransport implements HttpTransport
 {
     /**
      * @var list<HttpRequest>
@@ -29,13 +28,9 @@ final class SequenceHttpTransport implements TransportInterface
         return $this;
     }
 
-    public function send(CommunicationRequest $request): CommunicationResult
+    public function send(HttpRequest $request): CommunicationResult
     {
-        if (!$request->payload instanceof HttpRequest) {
-            return CommunicationResult::failure('SequenceHttpTransport expects HttpRequest payload.');
-        }
-
-        $this->sentRequests[] = $request->payload;
+        $this->sentRequests[] = $request;
 
         $next = array_shift($this->sequence);
         if ($next === null) {

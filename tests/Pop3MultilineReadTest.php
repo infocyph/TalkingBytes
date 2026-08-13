@@ -50,7 +50,7 @@ function invokeReadPop3Multiline(Pop3SocketTransport $transport): array
 
 it('parses POP3 multiline response with dot terminator and unescapes dot-stuffed lines', function (): void {
     $transport = new Pop3SocketTransport(new Pop3Config(
-        host: 'pop3.example.com',
+        host: '127.0.0.1',
         port: 110,
         security: Pop3Security::None,
         username: 'user',
@@ -77,7 +77,7 @@ it('parses POP3 multiline response with dot terminator and unescapes dot-stuffed
 
 it('supports POP3 empty multiline body', function (): void {
     $transport = new Pop3SocketTransport(new Pop3Config(
-        host: 'pop3.example.com',
+        host: '127.0.0.1',
         port: 110,
         security: Pop3Security::None,
         username: 'user',
@@ -94,7 +94,7 @@ it('supports POP3 empty multiline body', function (): void {
 
 it('fails POP3 multiline read when terminator is missing', function (): void {
     $transport = new Pop3SocketTransport(new Pop3Config(
-        host: 'pop3.example.com',
+        host: '127.0.0.1',
         port: 110,
         security: Pop3Security::None,
         username: 'user',
@@ -111,7 +111,7 @@ it('fails POP3 multiline read when terminator is missing', function (): void {
 
 it('fails POP3 multiline read when server closes stream mid-response', function (): void {
     $transport = new Pop3SocketTransport(new Pop3Config(
-        host: 'pop3.example.com',
+        host: '127.0.0.1',
         port: 110,
         security: Pop3Security::None,
         username: 'user',

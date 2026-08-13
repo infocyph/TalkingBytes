@@ -15,7 +15,7 @@ it('preserves request keys in concurrent pool results', function (): void {
         'orders' => HttpRequest::get('https://example.com/orders')->blockHosts(['example.com']),
     ];
 
-    $pool = (new CurlMultiTransport())->sendMany($requests, maxConcurrency: 10, failFast: false);
+    $pool = (new CurlMultiTransport())->sendMany($requests, maxConcurrency: 10, stopOnFailure: false);
 
     expect(array_keys($pool->all()))->toBe(['users', 'orders']);
     expect($pool->get('users'))->toBeInstanceOf(CommunicationResult::class);
@@ -36,8 +36,8 @@ it('supports pool result helper methods', function (): void {
     expect($pool->get('missing'))->toBeNull();
 });
 
-it('stops early when fail-fast is enabled in request pool', function (): void {
-    $poolClient = HttpClient::multi(maxConcurrency: 1)->failFast();
+it('stops scheduling new work after a failure when enabled', function (): void {
+    $poolClient = HttpClient::multi(maxConcurrency: 1)->stopSchedulingOnFailure();
     $requests = [
         'first' => HttpRequest::get('https://example.com/first')->blockHosts(['example.com']),
         'second' => HttpRequest::get('https://example.com/second')->blockHosts(['example.com']),
@@ -47,7 +47,7 @@ it('stops early when fail-fast is enabled in request pool', function (): void {
     $result = $poolClient->sendMany($requests);
 
     expect(array_keys($result->all()))->toBe(['first']);
-    expect($result->metadata['fail_fast'] ?? null)->toBeTrue();
+    expect($result->metadata['stopped_scheduling'] ?? null)->toBeTrue();
 });
 
 it('uses the same request configuration path in single and multi transports', function (): void {
@@ -59,7 +59,7 @@ it('uses the same request configuration path in single and multi transports', fu
         ->uploadFromFile($path)
         ->raw('body');
 
-    $singleResult = (new CurlTransport())->sendRequest($request);
+    $singleResult = (new CurlTransport())->send($request);
     $multiResult = (new CurlMultiTransport())->sendMany(['x' => $request])->get('x');
 
     if (is_file($path)) {

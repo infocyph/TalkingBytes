@@ -11,17 +11,12 @@ final readonly class RequestPool
     public function __construct(
         private CurlMultiTransport $transport,
         private int $maxConcurrency = 10,
-        private bool $failFast = false,
+        private bool $stopOnFailure = false,
     ) {}
-
-    public function failFast(bool $enabled = true): self
-    {
-        return new self($this->transport, $this->maxConcurrency, $enabled);
-    }
 
     public function maxConcurrency(int $maxConcurrency): self
     {
-        return new self($this->transport, $maxConcurrency, $this->failFast);
+        return new self($this->transport, $maxConcurrency, $this->stopOnFailure);
     }
 
     /**
@@ -29,6 +24,11 @@ final readonly class RequestPool
      */
     public function sendMany(array $requests): PoolResult
     {
-        return $this->transport->sendMany($requests, $this->maxConcurrency, $this->failFast);
+        return $this->transport->sendMany($requests, $this->maxConcurrency, $this->stopOnFailure);
+    }
+
+    public function stopSchedulingOnFailure(bool $enabled = true): self
+    {
+        return new self($this->transport, $this->maxConcurrency, $enabled);
     }
 }

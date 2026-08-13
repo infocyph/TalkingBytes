@@ -6,10 +6,15 @@ namespace Infocyph\TalkingBytes\Http\Body;
 
 final readonly class FormBody implements HttpBody
 {
+    private string $payload;
+
     /**
      * @param array<string, scalar|list<scalar>> $fields
      */
-    public function __construct(private array $fields) {}
+    public function __construct(array $fields)
+    {
+        $this->payload = http_build_query($fields);
+    }
 
     public function contentType(): string
     {
@@ -18,6 +23,6 @@ final readonly class FormBody implements HttpBody
 
     public function toCurlPayload(): string
     {
-        return http_build_query($this->fields);
+        return $this->payload;
     }
 }

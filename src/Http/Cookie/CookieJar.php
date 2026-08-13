@@ -16,8 +16,10 @@ final class CookieJar
      */
     private array $cookies = [];
 
-    public function __construct(private readonly int $maxCookies = 3000)
-    {
+    public function __construct(
+        private readonly int $maxCookies = 3000,
+        private readonly bool $allowDomainCookies = false,
+    ) {
         if ($this->maxCookies < 1) {
             throw new InvalidArgumentException('Cookie jar maxCookies must be greater than zero.');
         }
@@ -126,7 +128,8 @@ final class CookieJar
      *   expiresAt: ?DateTimeImmutable,
      *   secure: bool,
      *   httpOnly: bool,
-     *   hostOnly: bool
+     *   hostOnly: bool,
+     *   maxAgeApplied: bool
      * } $attributes
      * @return array{
      *   domain: string,
@@ -134,7 +137,8 @@ final class CookieJar
      *   expiresAt: ?DateTimeImmutable,
      *   secure: bool,
      *   httpOnly: bool,
-     *   hostOnly: bool
+     *   hostOnly: bool,
+     *   maxAgeApplied: bool
      * }
      */
     private function applyAttribute(array $attributes, string $segment): array
@@ -156,7 +160,9 @@ final class CookieJar
         return match ($attributeName) {
             'domain' => $this->applyDomainAttribute($attributes, $attributeValue),
             'path' => $this->applyPathAttribute($attributes, $attributeValue),
-            'expires' => $this->applyExpiresAttribute($attributes, $attributeValue),
+            'expires' => $attributes['maxAgeApplied']
+                ? $attributes
+                : $this->applyExpiresAttribute($attributes, $attributeValue),
             'max-age' => $this->applyMaxAgeAttribute($attributes, $attributeValue),
             default => $attributes,
         };
@@ -169,7 +175,8 @@ final class CookieJar
      *   expiresAt: ?DateTimeImmutable,
      *   secure: bool,
      *   httpOnly: bool,
-     *   hostOnly: bool
+     *   hostOnly: bool,
+     *   maxAgeApplied: bool
      * } $attributes
      * @return array{
      *   domain: string,
@@ -177,12 +184,13 @@ final class CookieJar
      *   expiresAt: ?DateTimeImmutable,
      *   secure: bool,
      *   httpOnly: bool,
-     *   hostOnly: bool
+     *   hostOnly: bool,
+     *   maxAgeApplied: bool
      * }
      */
     private function applyDomainAttribute(array $attributes, string $value): array
     {
-        if ($value === '') {
+        if ($value === '' || !$this->allowDomainCookies) {
             return $attributes;
         }
 
@@ -200,7 +208,8 @@ final class CookieJar
      *   expiresAt: ?DateTimeImmutable,
      *   secure: bool,
      *   httpOnly: bool,
-     *   hostOnly: bool
+     *   hostOnly: bool,
+     *   maxAgeApplied: bool
      * } $attributes
      * @return array{
      *   domain: string,
@@ -208,7 +217,8 @@ final class CookieJar
      *   expiresAt: ?DateTimeImmutable,
      *   secure: bool,
      *   httpOnly: bool,
-     *   hostOnly: bool
+     *   hostOnly: bool,
+     *   maxAgeApplied: bool
      * }
      */
     private function applyExpiresAttribute(array $attributes, string $value): array
@@ -230,7 +240,8 @@ final class CookieJar
      *   expiresAt: ?DateTimeImmutable,
      *   secure: bool,
      *   httpOnly: bool,
-     *   hostOnly: bool
+     *   hostOnly: bool,
+     *   maxAgeApplied: bool
      * } $attributes
      * @return array{
      *   domain: string,
@@ -238,7 +249,8 @@ final class CookieJar
      *   expiresAt: ?DateTimeImmutable,
      *   secure: bool,
      *   httpOnly: bool,
-     *   hostOnly: bool
+     *   hostOnly: bool,
+     *   maxAgeApplied: bool
      * }
      */
     private function applyMaxAgeAttribute(array $attributes, string $value): array
@@ -251,6 +263,7 @@ final class CookieJar
         return [
             ...$attributes,
             'expiresAt' => new DateTimeImmutable()->modify(sprintf('%+d seconds', $maxAge)),
+            'maxAgeApplied' => true,
         ];
     }
 
@@ -261,7 +274,8 @@ final class CookieJar
      *   expiresAt: ?DateTimeImmutable,
      *   secure: bool,
      *   httpOnly: bool,
-     *   hostOnly: bool
+     *   hostOnly: bool,
+     *   maxAgeApplied: bool
      * } $attributes
      * @return array{
      *   domain: string,
@@ -269,7 +283,8 @@ final class CookieJar
      *   expiresAt: ?DateTimeImmutable,
      *   secure: bool,
      *   httpOnly: bool,
-     *   hostOnly: bool
+     *   hostOnly: bool,
+     *   maxAgeApplied: bool
      * }
      */
     private function applyPathAttribute(array $attributes, string $value): array
@@ -387,6 +402,7 @@ final class CookieJar
             'secure' => false,
             'httpOnly' => false,
             'hostOnly' => true,
+            'maxAgeApplied' => false,
         ];
 
         foreach ($segments as $segment) {

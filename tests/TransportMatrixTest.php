@@ -59,7 +59,7 @@ it('fails log transport when configured max message size is exceeded', function 
     $result = $transport->send(baselineEmail()->text(str_repeat('x', 256)));
 
     expect($result->successful)->toBeFalse();
-    expect($result->error)->toContain('exceeds configured log max message size');
+    expect($result->error)->toContain('exceeds configured limit');
 
     if (is_dir($directory)) {
         foreach (glob($directory.'/*') ?: [] as $file) {

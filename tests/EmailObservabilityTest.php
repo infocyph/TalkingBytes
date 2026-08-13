@@ -5,9 +5,10 @@ declare(strict_types=1);
 use Infocyph\TalkingBytes\Email\Email;
 use Infocyph\TalkingBytes\Email\Emailer;
 use Infocyph\TalkingBytes\Email\EmailMessage;
-use Infocyph\TalkingBytes\Email\Event\CallableEmailEventDispatcher;
-use Infocyph\TalkingBytes\Email\Event\EmailEventBus;
-use Infocyph\TalkingBytes\Email\Event\NullEmailEventDispatcher;
+use Infocyph\TalkingBytes\Core\Event\CallableEventDispatcher;
+use Infocyph\TalkingBytes\Core\Event\CommunicationEventBus as EmailEventBus;
+use Infocyph\TalkingBytes\Core\Event\NullEventDispatcher;
+use Infocyph\TalkingBytes\Email\Transport\NullEmailTransport;
 use Infocyph\TalkingBytes\Email\Logging\Psr3LoggerAdapter;
 
 final class DummyPsrLogger
@@ -28,7 +29,7 @@ final class DummyPsrLogger
 
 it('dispatches global email lifecycle events', function (): void {
     $events = [];
-    Email::events(static function (string $event, array $payload) use (&$events): void {
+    $dispatcher = new CallableEventDispatcher(static function (string $event, array $payload) use (&$events): void {
         $events[] = ['event' => $event, 'payload' => $payload];
     });
 
@@ -38,9 +39,7 @@ it('dispatches global email lifecycle events', function (): void {
         ->subject('Event')
         ->text('body');
 
-    $result = Emailer::usingNull()->send($message);
-
-    Email::events(null);
+    $result = (new Emailer(new NullEmailTransport(), $dispatcher))->send($message);
 
     expect($result->successful)->toBeTrue();
     expect($events)->toHaveCount(2);
@@ -73,25 +72,24 @@ it('resets event listener and prevents cross-test leakage', function (): void {
     expect($events[0]['event'])->toBe('email.send.start');
 });
 
-it('bubbles listener exceptions by design', function (): void {
+it('isolates listener exceptions from delivery outcomes', function (): void {
     EmailEventBus::listen(static function (): void {
         throw new RuntimeException('listener failed');
     });
 
-    expect(fn () => EmailEventBus::dispatch('email.send.start', []))
-        ->toThrow(RuntimeException::class, 'listener failed');
+    expect(fn () => EmailEventBus::dispatch('email.send.start', []))->not->toThrow(RuntimeException::class);
 
     EmailEventBus::listen(null);
 });
 
 it('supports dispatcher swapping while keeping static facade convenience', function (): void {
     $events = [];
-    EmailEventBus::useDispatcher(new CallableEmailEventDispatcher(static function (string $event, array $payload) use (&$events): void {
+    EmailEventBus::useDispatcher(new CallableEventDispatcher(static function (string $event, array $payload) use (&$events): void {
         $events[] = ['event' => $event, 'payload' => $payload];
     }));
 
     EmailEventBus::dispatch('mailbox.command.start', ['command' => 'NOOP']);
-    EmailEventBus::useDispatcher(new NullEmailEventDispatcher);
+    EmailEventBus::listen(null);
     EmailEventBus::dispatch('mailbox.command.finish', ['command' => 'NOOP']);
 
     expect($events)->toHaveCount(1);

@@ -7,14 +7,14 @@ Scope
 TalkingBytes now supports both directions:
 
 - outbound client calls via ``GrpcClient``
-- inbound request dispatch via ``GrpcServer``
+- inbound request dispatch via ``GrpcInboundDispatcher``
 
 Module layout
 -------------
 
 - ``src/Grpc/GrpcClient.php`` outbound entrypoint
 - ``src/Grpc/Sender/*`` outbound request/response/transport models
-- ``src/Grpc/GrpcServer.php`` inbound entrypoint
+- ``src/Grpc/GrpcInboundDispatcher.php`` inbound entrypoint
 - ``src/Grpc/Receiver/*`` inbound request/response/handler models
 
 Outbound (Node A -> Node B)
@@ -57,11 +57,11 @@ Node A + Node B full flow (framework-agnostic)
    }
 
    // Node B (receiver/handler side)
-   use Infocyph\TalkingBytes\Grpc\GrpcServer;
+   use Infocyph\TalkingBytes\Grpc\GrpcInboundDispatcher;
    use Infocyph\TalkingBytes\Grpc\Receiver\GrpcInboundRequest;
    use Infocyph\TalkingBytes\Grpc\Receiver\GrpcInboundResponse;
 
-   $receiver = GrpcServer::new()->withHandler(
+   $receiver = GrpcInboundDispatcher::new()->withHandler(
        '/orders.v1.OrderService/Create',
        static function (GrpcInboundRequest $request): GrpcInboundResponse {
            return GrpcInboundResponse::ok([
@@ -85,9 +85,9 @@ Inbound (Node B request handling)
 
    use Infocyph\TalkingBytes\Grpc\Receiver\GrpcInboundRequest;
    use Infocyph\TalkingBytes\Grpc\Receiver\GrpcInboundResponse;
-   use Infocyph\TalkingBytes\Grpc\GrpcServer;
+   use Infocyph\TalkingBytes\Grpc\GrpcInboundDispatcher;
 
-   $server = GrpcServer::new()->withHandler(
+   $server = GrpcInboundDispatcher::new()->withHandler(
        '/orders.v1.OrderService/Create',
        static function (GrpcInboundRequest $request): GrpcInboundResponse {
            return GrpcInboundResponse::ok([

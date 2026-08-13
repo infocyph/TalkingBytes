@@ -27,7 +27,7 @@ final class SpoolEmailTransport extends AbstractRawEmailTransport implements Ema
 
     public function send(EmailMessage $message): CommunicationResult
     {
-        $message->assertReadyToSend();
+        $message = $message->prepare();
 
         $messageId = $this->headerBuilder->resolveMessageId($message);
         $recipients = array_map(static fn($address): string => $address->email, $message->envelope()->recipients());
@@ -53,7 +53,7 @@ final class SpoolEmailTransport extends AbstractRawEmailTransport implements Ema
 
     private function ensureWritableDirectory(string $directory): void
     {
-        if (!is_dir($directory) && !mkdir($directory, 0775, true) && !is_dir($directory)) {
+        if (!is_dir($directory) && !mkdir($directory, 0700, true) && !is_dir($directory)) {
             throw new RuntimeException(sprintf('Unable to create spool directory: %s', $directory));
         }
 
@@ -133,6 +133,7 @@ final class SpoolEmailTransport extends AbstractRawEmailTransport implements Ema
         if (file_put_contents($metadataPath, $encoded, LOCK_EX) === false) {
             throw new RuntimeException(sprintf('Unable to write spool metadata file: %s', $metadataPath));
         }
+        chmod($metadataPath, 0600);
     }
 
     /**
@@ -159,6 +160,7 @@ final class SpoolEmailTransport extends AbstractRawEmailTransport implements Ema
         if (!is_resource($stream)) {
             throw new RuntimeException(sprintf('Unable to open spool temp file for writing: %s', $tempPath));
         }
+        chmod($tempPath, 0600);
 
         if (!flock($stream, LOCK_EX)) {
             fclose($stream);

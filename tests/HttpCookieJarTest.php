@@ -103,7 +103,7 @@ it('accepts parent-domain cookies and applies rfc path boundaries', function ():
         ->pushJson(['ok' => true], 200)
         ->pushJson(['ok' => true], 200);
 
-    $client = HttpClient::fake($transport)->withCookieJar(new CookieJar);
+    $client = HttpClient::fake($transport)->withCookieJar(new CookieJar(allowDomainCookies: true));
 
     $client->get('https://api.example.test/api/login');
     $client->get('https://www.example.test/apix');

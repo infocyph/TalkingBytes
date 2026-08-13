@@ -11,6 +11,11 @@ use InvalidArgumentException;
 
 final readonly class EmailHeaders
 {
+    private const array STRUCTURAL_HEADERS = [
+        'from', 'to', 'cc', 'bcc', 'sender', 'reply-to', 'date', 'message-id',
+        'mime-version', 'content-type', 'content-transfer-encoding', 'dkim-signature',
+    ];
+
     /**
      * @param list<string> $references
      * @param array<string, string|list<string>> $customHeaders
@@ -60,6 +65,7 @@ final readonly class EmailHeaders
     public function withCustomHeader(string $name, string|array $value): self
     {
         HeaderValueGuard::assertHeaderName($name);
+        $this->assertNotStructuralHeader($name);
 
         $headers = $this->customHeaders;
         $headers[$name] = $this->normalizeHeaderValue($value);
@@ -76,6 +82,7 @@ final readonly class EmailHeaders
 
         foreach ($headers as $name => $value) {
             HeaderValueGuard::assertHeaderName($name);
+            $this->assertNotStructuralHeader($name);
             $current[$name] = $this->normalizeHeaderValue($value);
         }
 
@@ -201,6 +208,16 @@ final readonly class EmailHeaders
     public function withSubject(string $subject): self
     {
         return $this->copy(['subject' => $subject]);
+    }
+
+    private function assertNotStructuralHeader(string $name): void
+    {
+        if (in_array(strtolower(trim($name)), self::STRUCTURAL_HEADERS, true)) {
+            throw new InvalidArgumentException(sprintf(
+                'Structural email header "%s" must be configured through its dedicated API.',
+                $name,
+            ));
+        }
     }
 
     /**
@@ -493,6 +510,7 @@ final readonly class EmailHeaders
     {
         foreach ($this->customHeaders as $name => $value) {
             HeaderValueGuard::assertHeaderName($name);
+            $this->assertNotStructuralHeader($name);
 
             if (is_array($value)) {
                 foreach ($value as $singleValue) {

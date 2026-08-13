@@ -65,6 +65,13 @@ final class EmailBench
         $this->parser->parse($this->rawMultipartEmail);
     }
 
+    #[Iterations(5)]
+    #[Revs(50)]
+    public function benchPrepareEmail(): void
+    {
+        $this->message->prepare();
+    }
+
     private function createRawMultipartEmail(): string
     {
         $mixedBoundary = 'mixed-bench';

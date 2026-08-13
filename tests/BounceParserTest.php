@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 use Infocyph\TalkingBytes\Email\Enum\BounceType;
-use Infocyph\TalkingBytes\Email\Event\EmailEventBus;
+use Infocyph\TalkingBytes\Core\Event\CommunicationEventBus as EmailEventBus;
 use Infocyph\TalkingBytes\Email\Parser\BounceParser;
 use Infocyph\TalkingBytes\Email\Parser\DeliveryStatusParser;
 use Infocyph\TalkingBytes\Email\Parser\RawEmailParser;

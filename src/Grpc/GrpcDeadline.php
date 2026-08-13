@@ -10,10 +10,10 @@ final class GrpcDeadline
 {
     public static function secondsToMicros(float $seconds): int
     {
-        if ($seconds <= 0.0) {
-            throw new InvalidArgumentException('gRPC deadline seconds must be greater than zero.');
+        if (!is_finite($seconds) || $seconds <= 0.0 || $seconds > PHP_INT_MAX / 1_000_000) {
+            throw new InvalidArgumentException('gRPC deadline seconds must be finite, greater than zero, and representable in microseconds.');
         }
 
-        return (int) round($seconds * 1_000_000);
+        return max(1, (int) ceil($seconds * 1_000_000));
     }
 }

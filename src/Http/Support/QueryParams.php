@@ -8,97 +8,127 @@ use InvalidArgumentException;
 
 final readonly class QueryParams
 {
-    /**
-     * @param array<string, scalar|list<scalar>|null> $params
-     */
-    public function __construct(private array $params = [])
-    {
-        foreach ($params as $name => $value) {
-            $this->assertValidName($name);
-            $this->normalizeValue($value);
-        }
-    }
+    /** @var list<array{name: string, value: int|float|string|null}> */
+    private array $entries;
 
     /**
-     * @return array<string, scalar|list<scalar>|null>
+     * @param array<string, scalar|list<scalar>|null>|list<array{name: string, value: int|float|string|null}> $params
+     * @internal The normalized flag is reserved for immutable copies.
      */
+    public function __construct(array $params = [], bool $normalized = false)
+    {
+        if ($normalized) {
+            /** @var list<array{name: string, value: int|float|string|null}> $params */
+            $this->entries = $params;
+
+            return;
+        }
+
+        $entries = [];
+        foreach ($params as $name => $value) {
+            if (!is_string($name)) {
+                throw new InvalidArgumentException('Query parameter names must be strings.');
+            }
+            self::appendNormalized($entries, $name, $value);
+        }
+        $this->entries = $entries;
+    }
+
+    /** @return list<array{name: string, value: int|float|string|null}> */
     public function all(): array
     {
-        return $this->params;
+        return $this->entries;
+    }
+
+    public function append(string $name, mixed $value): self
+    {
+        $entries = $this->entries;
+        self::appendNormalized($entries, $name, $value);
+
+        return self::hydrate($entries);
+    }
+
+    public function applyTo(string $existingQuery): string
+    {
+        $overridden = [];
+        foreach ($this->entries as $entry) {
+            $overridden[$entry['name']] = true;
+        }
+
+        $parts = [];
+        if ($existingQuery !== '') {
+            foreach (explode('&', $existingQuery) as $part) {
+                $encodedName = explode('=', $part, 2)[0];
+                if (!isset($overridden[rawurldecode($encodedName)])) {
+                    $parts[] = $part;
+                }
+            }
+        }
+
+        foreach ($this->entries as $entry) {
+            if ($entry['value'] === null) {
+                continue;
+            }
+
+            $parts[] = rawurlencode($entry['name']) . '=' . rawurlencode((string) $entry['value']);
+        }
+
+        return implode('&', $parts);
     }
 
     public function toQueryString(): string
     {
-        $flattened = [];
-        foreach ($this->params as $key => $value) {
-            if ($value === null) {
-                continue;
-            }
-
-            $flattened[$key] = $this->normalizeValue($value);
-        }
-
-        return http_build_query($flattened, '', '&', PHP_QUERY_RFC3986);
+        return $this->applyTo('');
     }
 
-    /**
-     * @param scalar|list<scalar>|null $value
-     */
+    /** @param scalar|list<scalar>|null $value */
     public function with(string $name, mixed $value): self
     {
-        $this->assertValidName($name);
-        $params = $this->params;
-        $params[$name] = $value === null ? null : $this->normalizeValue($value);
-        /** @var array<string, scalar|list<scalar>|null> $params */
+        self::assertValidName($name);
+        $entries = array_values(array_filter(
+            $this->entries,
+            static fn(array $entry): bool => $entry['name'] !== $name,
+        ));
+        self::appendNormalized($entries, $name, $value);
 
-        return new self($params);
+        return self::hydrate($entries);
     }
 
     public function without(string $name): self
     {
-        $params = $this->params;
-        unset($params[$name]);
-
-        return new self($params);
+        return $this->with($name, null);
     }
 
-    private function assertValidName(string $name): void
+    /** @param list<array{name: string, value: int|float|string|null}> $entries */
+    private static function appendNormalized(array &$entries, string $name, mixed $value): void
     {
-        if (trim($name) === '') {
+        self::assertValidName($name);
+
+        if (is_array($value)) {
+            foreach ($value as $item) {
+                $entries[] = ['name' => $name, 'value' => self::normalizeScalar($item)];
+            }
+
+            return;
+        }
+
+        $entries[] = ['name' => $name, 'value' => self::normalizeScalar($value)];
+    }
+
+    private static function assertValidName(string $name): void
+    {
+        if ($name === '') {
             throw new InvalidArgumentException('Query parameter name must not be empty.');
         }
     }
 
-    /**
-     * @param array<mixed> $values
-     * @return list<int|float|string>
-     */
-    private function normalizeList(array $values): array
+    /** @param list<array{name: string, value: int|float|string|null}> $entries */
+    private static function hydrate(array $entries): self
     {
-        $normalized = [];
-        foreach ($values as $item) {
-            if (is_bool($item)) {
-                $normalized[] = $item ? 1 : 0;
-
-                continue;
-            }
-
-            if (is_int($item) || is_float($item) || is_string($item)) {
-                $normalized[] = $item;
-
-                continue;
-            }
-
-            throw new InvalidArgumentException('Query list values must be scalar.');
-        }
-
-        return $normalized;
+        return new self($entries, true);
     }
 
-    /**
-     * @return int|float|string|list<int|float|string>|null
-     */
-    private function normalizeValue(mixed $value): int|float|string|array|null
+    private static function normalizeScalar(mixed $value): int|float|string|null
     {
         if ($value === null) {
             return null;
@@ -110,10 +140,6 @@ final readonly class QueryParams
 
         if (is_int($value) || is_float($value) || is_string($value)) {
             return $value;
-        }
-
-        if (is_array($value)) {
-            return $this->normalizeList($value);
         }
 
         throw new InvalidArgumentException('Query parameter values must be scalar, list<scalar>, or null.');

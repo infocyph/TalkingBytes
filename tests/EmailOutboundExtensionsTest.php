@@ -234,10 +234,10 @@ it('dkim header parser unfolds lines and preserves duplicate headers', function 
     $signer = new DkimSigner;
     $reflection = new ReflectionMethod($signer, 'parseHeaders');
 
-    /** @var array<string, list<string>> $parsed */
+    /** @var array<string, list<array{name:string,value:string}>> $parsed */
     $parsed = $reflection->invoke($signer, $headers);
 
     expect($parsed)->toHaveKey('received');
     expect($parsed['received'])->toHaveCount(2);
-    expect($parsed['received'][0])->toContain('with ESMTP');
+    expect($parsed['received'][0]['value'])->toContain('with ESMTP');
 });

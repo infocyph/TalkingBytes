@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Infocyph\TalkingBytes\Webhook;
 
-use Infocyph\TalkingBytes\Core\Event\CommunicationEventBus;
+use Infocyph\TalkingBytes\Core\Event\BestEffortEventDispatcher;
+use Infocyph\TalkingBytes\Core\Event\EventDispatcher;
+use Infocyph\TalkingBytes\Core\Event\NullEventDispatcher;
 use Infocyph\TalkingBytes\Webhook\Contracts\WebhookReplayStore;
 use Infocyph\TalkingBytes\Webhook\Model\WebhookEvent;
 use Infocyph\TalkingBytes\Webhook\Support\WebhookHeaders;
@@ -15,17 +17,32 @@ use RuntimeException;
 
 final readonly class WebhookReceiver
 {
+    private EventDispatcher $events;
+
     public function __construct(
         private WebhookVerifier $verifier,
         private ?WebhookReplayStore $replayStore = null,
         private int $replayTtlSeconds = 86400,
-    ) {}
+        private string $replayNamespace = 'default',
+        private int $maxPayloadBytes = 1_048_576,
+        ?EventDispatcher $events = null,
+    ) {
+        WebhookNameGuard::assertNamespace($this->replayNamespace);
+        if ($this->replayTtlSeconds < 1 || $this->maxPayloadBytes < 1) {
+            throw new InvalidArgumentException('Webhook replay TTL and payload limit must be greater than zero.');
+        }
+        $this->events = new BestEffortEventDispatcher($events ?? new NullEventDispatcher());
+    }
 
     /**
      * @param array<array-key, mixed> $headers
      */
     public function receive(string $rawBody, array $headers): WebhookEvent
     {
+        if (strlen($rawBody) > $this->maxPayloadBytes) {
+            throw new InvalidArgumentException(sprintf('Webhook payload exceeded %d bytes.', $this->maxPayloadBytes));
+        }
+
         $signatureHeader = $this->header($headers, WebhookHeaders::SIGNATURE) ?? '';
         $timestampHeader = $this->header($headers, WebhookHeaders::TIMESTAMP);
 
@@ -58,11 +75,9 @@ final readonly class WebhookReceiver
         WebhookNameGuard::assertDeliveryId($deliveryId);
 
         if ($this->replayStore !== null) {
-            if ($this->replayStore->seen($deliveryId)) {
+            if (!$this->replayStore->claim($this->replayNamespace, $deliveryId, $this->replayTtlSeconds)) {
                 throw new RuntimeException(sprintf('Webhook delivery "%s" has already been processed.', $deliveryId));
             }
-
-            $this->replayStore->remember($deliveryId, $this->replayTtlSeconds);
         }
 
         $timestamp = $verification->timestamp ?? time();
@@ -78,7 +93,7 @@ final readonly class WebhookReceiver
             ],
         );
 
-        CommunicationEventBus::dispatch('webhook.received', [
+        $this->events->dispatch('webhook.received', [
             'event' => $received->event,
             'delivery_id' => $received->deliveryId,
             'timestamp' => $received->timestamp,
@@ -87,13 +102,15 @@ final readonly class WebhookReceiver
         return $received;
     }
 
-    public function withReplayStore(WebhookReplayStore $store, int $ttlSeconds = 86400): self
+    public function withReplayStore(WebhookReplayStore $store, int $ttlSeconds = 86400, string $namespace = 'default'): self
     {
         if ($ttlSeconds < 1) {
             throw new InvalidArgumentException('Webhook replay TTL must be greater than zero.');
         }
 
-        return new self($this->verifier, $store, $ttlSeconds);
+        WebhookNameGuard::assertNamespace($namespace);
+
+        return new self($this->verifier, $store, $ttlSeconds, $namespace, $this->maxPayloadBytes, $this->events);
     }
 
     /**

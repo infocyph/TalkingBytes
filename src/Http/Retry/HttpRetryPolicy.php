@@ -6,17 +6,14 @@ namespace Infocyph\TalkingBytes\Http\Retry;
 
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
 use Infocyph\TalkingBytes\Http\HttpResponse;
+use Infocyph\TalkingBytes\Retry\RetryContext;
+use Infocyph\TalkingBytes\Retry\RetryDecision;
+use Infocyph\TalkingBytes\Retry\RetryDelay;
 use Infocyph\TalkingBytes\Retry\RetryPolicy;
 use InvalidArgumentException;
-use Throwable;
 
-final class HttpRetryPolicy implements RetryPolicy
+final readonly class HttpRetryPolicy implements RetryPolicy
 {
-    /**
-     * @var array<int, int>
-     */
-    private array $delaysByAttempt = [];
-
     /**
      * @var array<int, true>
      */
@@ -26,11 +23,11 @@ final class HttpRetryPolicy implements RetryPolicy
      * @param list<int> $retryStatuses
      */
     public function __construct(
-        private readonly int $maxAttempts = 3,
-        private readonly int $baseDelayMs = 250,
+        private int $maxAttempts = 3,
+        private int $baseDelayMs = 250,
         array $retryStatuses = [408, 425, 429, 500, 502, 503, 504],
-        private readonly ?int $maxRetryAfterSeconds = 30,
-        private readonly bool $retryOnTransportError = true,
+        private ?int $maxRetryAfterSeconds = 30,
+        private bool $retryOnTransportError = true,
     ) {
         if ($this->maxAttempts < 1) {
             throw new InvalidArgumentException('maxAttempts must be at least 1.');
@@ -62,60 +59,40 @@ final class HttpRetryPolicy implements RetryPolicy
         );
     }
 
-    public function delayMs(int $attempt): int
+    public function decide(RetryContext $context): RetryDecision
     {
-        return $this->delaysByAttempt[$attempt] ?? $this->exponentialDelayMs($attempt);
-    }
-
-    public function shouldRetry(int $attempt, ?CommunicationResult $result = null, ?Throwable $error = null): bool
-    {
-        if ($attempt >= $this->maxAttempts) {
-            return false;
+        if ($context->attempt >= $this->maxAttempts) {
+            return RetryDecision::stop();
         }
 
-        if ($error !== null) {
-            if (!$this->retryOnTransportError) {
-                return false;
-            }
-
-            $this->delaysByAttempt[$attempt] = $this->exponentialDelayMs($attempt);
-
-            return true;
+        if ($context->error !== null) {
+            return $this->retryOnTransportError
+                ? RetryDecision::retryAfter($this->exponentialDelayMs($context->attempt))
+                : RetryDecision::stop();
         }
 
-        if ($result === null) {
-            return false;
-        }
-
-        if ($result->successful) {
-            return false;
+        $result = $context->result;
+        if ($result === null || $result->successful) {
+            return RetryDecision::stop();
         }
 
         $status = $result->statusCode;
         if ($status === null) {
-            if (!$this->retryOnTransportError) {
-                return false;
-            }
-
-            $this->delaysByAttempt[$attempt] = $this->exponentialDelayMs($attempt);
-
-            return true;
+            return $this->retryOnTransportError
+                ? RetryDecision::retryAfter($this->exponentialDelayMs($context->attempt))
+                : RetryDecision::stop();
         }
 
         if (!isset($this->retryStatuses[$status])) {
-            return false;
+            return RetryDecision::stop();
         }
 
-        $this->delaysByAttempt[$attempt] = $this->resolveRetryDelayMs($attempt, $result);
-
-        return true;
+        return RetryDecision::retryAfter($this->resolveRetryDelayMs($context->attempt, $result));
     }
 
     private function exponentialDelayMs(int $attempt): int
     {
-        $power = max(0, $attempt - 1);
-
-        return $this->baseDelayMs * (2 ** $power);
+        return RetryDelay::exponential($this->baseDelayMs, $attempt);
     }
 
     private function resolveRetryDelayMs(int $attempt, CommunicationResult $result): int
@@ -137,6 +114,10 @@ final class HttpRetryPolicy implements RetryPolicy
 
         if ($this->maxRetryAfterSeconds !== null) {
             $seconds = min($seconds, $this->maxRetryAfterSeconds);
+        }
+
+        if ($seconds > intdiv(\Infocyph\TalkingBytes\Core\Support\Sleeper::MAX_DELAY_MS, 1000)) {
+            return \Infocyph\TalkingBytes\Core\Support\Sleeper::MAX_DELAY_MS;
         }
 
         return $seconds * 1000;

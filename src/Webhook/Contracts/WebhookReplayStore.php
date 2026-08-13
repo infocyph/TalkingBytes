@@ -6,7 +6,10 @@ namespace Infocyph\TalkingBytes\Webhook\Contracts;
 
 interface WebhookReplayStore
 {
-    public function remember(string $deliveryId, int $ttlSeconds): void;
-
-    public function seen(string $deliveryId): bool;
+    /**
+     * Atomically claim a delivery identity for the TTL.
+     *
+     * Returns true only for the first claimant.
+     */
+    public function claim(string $namespace, string $deliveryId, int $ttlSeconds): bool;
 }

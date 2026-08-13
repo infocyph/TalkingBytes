@@ -14,16 +14,17 @@ final readonly class MimeMessageBuilder
 
     public function build(EmailMessage $message): MimeMessage
     {
+        $message = $message->prepare();
         [$textBody, $htmlBody, $hasText, $hasHtml] = $this->extractBodies($message);
         [$inlineAttachments, $regularAttachments] = $this->splitAttachments($message->attachments());
-        $bodyPart = $this->buildBodyPart($textBody, $htmlBody, $hasText, $hasHtml);
+        $bodyPart = $this->buildBodyPart($message, $textBody, $htmlBody, $hasText, $hasHtml);
 
         if ($inlineAttachments !== []) {
-            $bodyPart = $this->wrapMultipart($bodyPart, $inlineAttachments, 'related');
+            $bodyPart = $this->wrapMultipart($message, $bodyPart, $inlineAttachments, 'related');
         }
 
         if ($regularAttachments !== []) {
-            return $this->wrapMultipart($bodyPart, $regularAttachments, 'mixed');
+            return $this->wrapMultipart($message, $bodyPart, $regularAttachments, 'mixed');
         }
 
         if ($bodyPart->contentTransferEncoding !== null) {
@@ -38,9 +39,10 @@ final readonly class MimeMessageBuilder
      */
     public function buildToStream(EmailMessage $message, callable $write): MimeMessage
     {
+        $message = $message->prepare();
         [$textBody, $htmlBody, $hasText, $hasHtml] = $this->extractBodies($message);
         [$inlineAttachments, $regularAttachments] = $this->splitAttachments($message->attachments());
-        $bodyPart = $this->buildBodyPart($textBody, $htmlBody, $hasText, $hasHtml);
+        $bodyPart = $this->buildBodyPart($message, $textBody, $htmlBody, $hasText, $hasHtml);
 
         if ($inlineAttachments === [] && $regularAttachments === []) {
             $write($bodyPart->body);
@@ -55,11 +57,11 @@ final readonly class MimeMessageBuilder
         $streamState = $this->initialStreamState($bodyPart);
 
         if ($inlineAttachments !== []) {
-            $streamState = $this->wrapStreamState($streamState, $inlineAttachments, 'related');
+            $streamState = $this->wrapStreamState($message, $streamState, $inlineAttachments, 'related');
         }
 
         if ($regularAttachments !== []) {
-            $streamState = $this->wrapStreamState($streamState, $regularAttachments, 'mixed');
+            $streamState = $this->wrapStreamState($message, $streamState, $regularAttachments, 'mixed');
         }
 
         $streamState['writer']($write);
@@ -67,8 +69,13 @@ final readonly class MimeMessageBuilder
         return new MimeMessage($streamState['contentType'], '', $streamState['encoding']);
     }
 
-    private function buildBodyPart(string $textBody, string $htmlBody, bool $hasText, bool $hasHtml): MimeMessage
-    {
+    private function buildBodyPart(
+        EmailMessage $message,
+        string $textBody,
+        string $htmlBody,
+        bool $hasText,
+        bool $hasHtml,
+    ): MimeMessage {
         if ($hasText && !$hasHtml) {
             return new MimeMessage(
                 'text/plain; charset=UTF-8',
@@ -85,7 +92,7 @@ final readonly class MimeMessageBuilder
             );
         }
 
-        $alternativeBoundary = MimeBoundary::generate();
+        $alternativeBoundary = $message->mimeBoundary('alternative');
         $parts = [
             $this->createTextPart($textBody),
             $this->createHtmlPart($htmlBody),
@@ -185,9 +192,13 @@ final readonly class MimeMessageBuilder
     /**
      * @param list<EmailAttachment> $attachments
      */
-    private function wrapMultipart(MimeMessage $rootPart, array $attachments, string $multipartType): MimeMessage
-    {
-        $boundary = MimeBoundary::generate();
+    private function wrapMultipart(
+        EmailMessage $message,
+        MimeMessage $rootPart,
+        array $attachments,
+        string $multipartType,
+    ): MimeMessage {
+        $boundary = $message->mimeBoundary($multipartType);
         $body = sprintf(
             "--%s\r\n%s\r\n\r\n%s\r\n",
             $boundary,
@@ -212,9 +223,13 @@ final readonly class MimeMessageBuilder
      * @param list<EmailAttachment> $attachments
      * @return array{contentType:string,encoding:?ContentTransferEncoding,writer:callable(callable(string):void):void}
      */
-    private function wrapStreamState(array $state, array $attachments, string $multipartType): array
-    {
-        $boundary = MimeBoundary::generate();
+    private function wrapStreamState(
+        EmailMessage $message,
+        array $state,
+        array $attachments,
+        string $multipartType,
+    ): array {
+        $boundary = $message->mimeBoundary($multipartType);
         $previousContentType = $state['contentType'];
         $previousEncoding = $state['encoding'];
         $previousWriter = $state['writer'];

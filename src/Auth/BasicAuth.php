@@ -10,7 +10,9 @@ use InvalidArgumentException;
 final readonly class BasicAuth implements AuthenticatorInterface
 {
     public function __construct(
+        #[\SensitiveParameter]
         private string $username,
+        #[\SensitiveParameter]
         private string $password,
     ) {
         if (trim($this->username) === '') {

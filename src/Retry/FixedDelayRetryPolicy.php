@@ -4,9 +4,7 @@ declare(strict_types=1);
 
 namespace Infocyph\TalkingBytes\Retry;
 
-use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
 use InvalidArgumentException;
-use Throwable;
 
 final readonly class FixedDelayRetryPolicy implements RetryPolicy
 {
@@ -23,23 +21,16 @@ final readonly class FixedDelayRetryPolicy implements RetryPolicy
         }
     }
 
-    public function delayMs(int $attempt): int
+    public function decide(RetryContext $context): RetryDecision
     {
-        unset($attempt);
-
-        return $this->delayMsValue;
-    }
-
-    public function shouldRetry(int $attempt, ?CommunicationResult $result = null, ?Throwable $error = null): bool
-    {
-        if ($attempt >= $this->maxAttempts) {
-            return false;
+        if ($context->attempt >= $this->maxAttempts) {
+            return RetryDecision::stop();
         }
 
-        if ($error !== null) {
-            return true;
+        if ($context->error !== null || ($context->result !== null && !$context->result->successful)) {
+            return RetryDecision::retryAfter($this->delayMsValue);
         }
 
-        return $result !== null && !$result->successful;
+        return RetryDecision::stop();
     }
 }

@@ -5,12 +5,13 @@ declare(strict_types=1);
 namespace Infocyph\TalkingBytes\Benchmarks;
 
 use Closure;
-use Infocyph\TalkingBytes\Core\Contract\MiddlewareInterface;
-use Infocyph\TalkingBytes\Core\Message\CommunicationRequest;
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
+use Infocyph\TalkingBytes\Http\Contract\HttpMiddleware;
+use Infocyph\TalkingBytes\Http\Contract\HttpTransport;
 use Infocyph\TalkingBytes\Http\HttpClient;
 use Infocyph\TalkingBytes\Http\HttpRequest;
-use Infocyph\TalkingBytes\Testing\NullTransport;
+use Infocyph\TalkingBytes\Http\Support\HeaderBag;
+use Infocyph\TalkingBytes\Http\Support\QueryParams;
 use PhpBench\Attributes\BeforeMethods;
 use PhpBench\Attributes\Iterations;
 use PhpBench\Attributes\Revs;
@@ -24,13 +25,19 @@ final class HttpBench
 
     public function setUp(): void
     {
-        $middleware = new class implements MiddlewareInterface {
-            public function handle(CommunicationRequest $request, Closure $next): CommunicationResult
+        $middleware = new class implements HttpMiddleware {
+            public function handle(HttpRequest $request, Closure $next): CommunicationResult
             {
                 return $next($request);
             }
         };
-        $this->client = HttpClient::using(new NullTransport())
+        $transport = new class implements HttpTransport {
+            public function send(HttpRequest $request): CommunicationResult
+            {
+                return CommunicationResult::success(response: $request);
+            }
+        };
+        $this->client = HttpClient::using($transport)
             ->withMiddleware($middleware)
             ->withMiddleware($middleware)
             ->withMiddleware($middleware);
@@ -73,8 +80,22 @@ final class HttpBench
 
     #[Iterations(5)]
     #[Revs(1000)]
+    public function benchHeaderBag(): void
+    {
+        new HeaderBag(['Accept' => 'application/json', 'X-Trace' => ['one', 'two']]);
+    }
+
+    #[Iterations(5)]
+    #[Revs(1000)]
     public function benchMiddlewarePipeline(): void
     {
         $this->client->send($this->request);
+    }
+
+    #[Iterations(5)]
+    #[Revs(1000)]
+    public function benchOrderedQueryParams(): void
+    {
+        new QueryParams(['a' => [1, 2], 'active' => true]);
     }
 }

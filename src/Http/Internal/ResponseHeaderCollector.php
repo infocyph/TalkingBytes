@@ -16,6 +16,8 @@ final class ResponseHeaderCollector
      */
     private array $headers = [];
 
+    private ?int $statusCode = null;
+
     public function collect(string $line): int
     {
         $trimmed = trim($line);
@@ -30,6 +32,9 @@ final class ResponseHeaderCollector
 
         if (str_starts_with($trimmed, 'HTTP/')) {
             $this->activeHeaders = [];
+            if (preg_match('/^HTTP\/\S+\s+(\d{3})/', $trimmed, $matches) === 1) {
+                $this->statusCode = (int) $matches[1];
+            }
 
             return strlen($line);
         }
@@ -39,10 +44,10 @@ final class ResponseHeaderCollector
             return strlen($line);
         }
 
-        $name = trim(substr($line, 0, $position));
+        $name = strtolower(trim(substr($line, 0, $position)));
         $value = trim(substr($line, $position + 1));
 
-        if (!array_key_exists($name, $this->activeHeaders)) {
+        if (!isset($this->activeHeaders[$name])) {
             $this->activeHeaders[$name] = $value;
 
             return strlen($line);
@@ -67,5 +72,10 @@ final class ResponseHeaderCollector
     public function headers(): array
     {
         return $this->headers;
+    }
+
+    public function statusCode(): ?int
+    {
+        return $this->statusCode;
     }
 }

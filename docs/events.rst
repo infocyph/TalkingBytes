@@ -4,25 +4,35 @@ Events
 Overview
 --------
 
-TalkingBytes dispatches lifecycle events through a shared communication event bus.
+TalkingBytes dispatches lifecycle events through an injected ``EventDispatcher``.
+Entrypoints wrap dispatchers with ``BestEffortEventDispatcher`` so monitoring
+failures never change protocol outcomes.
 
-Set dispatcher
---------------
+Inject a dispatcher
+-------------------
 
 .. code-block:: php
 
-   \Infocyph\TalkingBytes\Core\Event\CommunicationEventBus::listen(
+   use Infocyph\TalkingBytes\Core\Event\CallableEventDispatcher;
+   use Infocyph\TalkingBytes\Http\HttpClient;
+
+   $events = new CallableEventDispatcher(
        static function (string $event, array $payload): void {
            // route to logger/metrics
-       }
+       },
    );
 
-Reset dispatcher
-----------------
+   $client = HttpClient::curl($events);
+
+Compatibility adapter
+---------------------
 
 .. code-block:: php
 
-   \Infocyph\TalkingBytes\Core\Event\CommunicationEventBus::reset();
+   \Infocyph\TalkingBytes\Core\Event\CommunicationEventBus::listen($listener);
+
+The static bus is retained for compatibility. Prefer constructor/factory
+injection in long-running workers and tests to avoid global state leakage.
 
 Event families
 --------------

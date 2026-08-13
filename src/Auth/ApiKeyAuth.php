@@ -12,6 +12,7 @@ final readonly class ApiKeyAuth implements AuthenticatorInterface
 {
     public function __construct(
         private string $key,
+        #[\SensitiveParameter]
         private string $value,
         private bool $inQuery = false,
     ) {

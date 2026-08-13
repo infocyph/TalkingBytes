@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Infocyph\TalkingBytes\Core\Event\CommunicationEventBus;
+use Infocyph\TalkingBytes\Core\Event\CallableEventDispatcher;
 use Infocyph\TalkingBytes\Http\HttpClient;
 use Infocyph\TalkingBytes\Http\Testing\FakeHttpTransport;
 use Infocyph\TalkingBytes\Webhook\Webhook;
@@ -11,7 +12,7 @@ use Infocyph\TalkingBytes\Webhook\WebhookMessage;
 
 it('does not leak webhook secret, raw payload, or signature in event payloads', function (): void {
     $events = [];
-    CommunicationEventBus::listen(static function (string $event, array $payload) use (&$events): void {
+    $dispatcher = new CallableEventDispatcher(static function (string $event, array $payload) use (&$events): void {
         if (str_starts_with($event, 'webhook.')) {
             $events[] = ['event' => $event, 'payload' => $payload];
         }
@@ -21,7 +22,7 @@ it('does not leak webhook secret, raw payload, or signature in event payloads', 
     $rawPayload = '{"order_id":1001,"token":"payload-secret"}';
 
     $transport = new FakeHttpTransport();
-    $sender = Webhook::sender(HttpClient::using($transport))->withSecret($secret);
+    $sender = Webhook::sender(HttpClient::using($transport), $dispatcher)->withSecret($secret);
 
     $delivery = $sender->send(
         WebhookMessage::new('order.created')
@@ -36,10 +37,8 @@ it('does not leak webhook secret, raw payload, or signature in event payloads', 
     $signatureHeader = (string) $sent[0]->headers->get(WebhookHeaders::SIGNATURE);
 
     // Trigger verifier events as well.
-    Webhook::verifier($secret)->verifyResult($rawPayload, $signatureHeader);
-    Webhook::verifier($secret)->verifyResult($rawPayload, 't=1,v1=not-a-real-signature');
-
-    CommunicationEventBus::listen(null);
+    Webhook::verifier($secret, events: $dispatcher)->verifyResult($rawPayload, $signatureHeader);
+    Webhook::verifier($secret, events: $dispatcher)->verifyResult($rawPayload, 't=1,v1=not-a-real-signature');
 
     expect($delivery->result->successful)->toBeTrue()
         ->and($events)->not->toBeEmpty();

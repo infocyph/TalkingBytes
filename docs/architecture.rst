@@ -4,17 +4,21 @@ Architecture
 Core design
 -----------
 
-TalkingBytes uses a shared communication core.
+TalkingBytes keeps protocol semantics in protocol-owned APIs.
 
-- ``CommunicationRequest`` is the platform request envelope.
-- ``CommunicationResult`` is the shared result shape.
+- ``HttpRequest`` and ``GrpcRequest`` are distinct request types.
+- ``HttpMiddleware`` and ``GrpcMiddleware`` expose typed pipelines.
+- ``CommunicationResult`` is the small shared result shape.
 - protocol responses (``HttpResponse``, ``GrpcResponse``, email result objects) remain protocol-specific.
-- middleware (retry, timeout, auth, logging, rate limit, circuit breaker) is transport-agnostic.
+- retry decisions use shared timing primitives, while retry eligibility remains protocol-specific.
 
 Event model
 -----------
 
-A shared event bus dispatches protocol events.
+Protocol entrypoints accept an ``EventDispatcher``. Dispatch is best effort:
+listener failures cannot change a delivery outcome. The static
+``CommunicationEventBus`` remains a compatibility adapter, not the primary
+dependency path.
 
 Examples:
 
@@ -29,9 +33,9 @@ Sensitive values are redacted before dispatch.
 Module boundaries
 -----------------
 
-- ``Core``: contracts, middleware pipeline, common result/error types.
-- ``Http``: cURL and cURL-multi transport layer.
-- ``Grpc``: adapter for callback/native gRPC invocation.
+- ``Core``: event, result, clock, sleeper, and retry-execution primitives.
+- ``Http``: typed pipeline, cURL/cURL-multi transports, signing, redirects, and SSRF controls.
+- ``Grpc``: typed pipeline plus callback/native gRPC invocation.
 - ``Webhook``: send/verify/receive workflows on top of HTTP.
 - ``Email``: outbound transports + inbound parser + mailbox operations.
 

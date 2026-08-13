@@ -17,7 +17,11 @@ final class RetryAfter
         }
 
         if (ctype_digit($trimmed)) {
-            return max(0, (int) $trimmed);
+            if (strlen($trimmed) > 9) {
+                return PHP_INT_MAX;
+            }
+
+            return (int) $trimmed;
         }
 
         try {

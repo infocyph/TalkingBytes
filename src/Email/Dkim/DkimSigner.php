@@ -4,16 +4,29 @@ declare(strict_types=1);
 
 namespace Infocyph\TalkingBytes\Email\Dkim;
 
+use Infocyph\TalkingBytes\Core\Support\Clock;
 use Infocyph\TalkingBytes\Email\Config\DkimConfig;
+use Infocyph\TalkingBytes\Email\Enum\DkimAlgorithm;
 use Infocyph\TalkingBytes\Email\Exception\DkimException;
 
 final readonly class DkimSigner
 {
-    public function __construct(private DkimCanonicalizer $canonicalizer = new DkimCanonicalizer()) {}
+    private Clock $clock;
+
+    public function __construct(
+        private DkimCanonicalizer $canonicalizer = new DkimCanonicalizer(),
+        ?Clock $clock = null,
+    ) {
+        $this->clock = $clock ?? Clock::system();
+    }
 
     public function buildSignatureHeader(string $headers, string $body, DkimConfig $config): string
     {
-        $bodyHash = base64_encode(hash('sha256', $this->canonicalizer->canonicalizeBody($body), true));
+        $bodyHash = base64_encode(hash(
+            'sha256',
+            $this->canonicalizer->canonicalizeBody($body, $config->bodyCanonicalization),
+            true,
+        ));
         $headerMap = $this->parseHeaders($headers);
 
         $signedHeaders = [];
@@ -25,51 +38,54 @@ final readonly class DkimSigner
                 continue;
             }
 
-            $values = $headerMap[$normalized];
-            $lastIndex = array_key_last($values);
-            if ($lastIndex === null) {
+            $field = array_pop($headerMap[$normalized]);
+            if (!is_array($field)) {
                 continue;
             }
-
-            $value = $values[$lastIndex];
+            $value = $field['value'];
             $signedHeaders[] = $normalized;
-            $canonicalizedSignedHeaders[] = $this->canonicalizer->canonicalizeHeader($normalized, $value);
+            $canonicalizedSignedHeaders[] = $this->canonicalizer->canonicalizeHeader(
+                $config->headerCanonicalization === 'simple' ? $field['name'] : $normalized,
+                $value,
+                $config->headerCanonicalization,
+            );
         }
 
         if ($signedHeaders === []) {
             throw new DkimException('Unable to build DKIM signature: no configured headers found in message.');
         }
 
-        if ($config->algorithm->value !== 'rsa-sha256') {
-            throw new DkimException(sprintf('Unsupported DKIM algorithm for signer: %s', $config->algorithm->value));
-        }
-
         $dkimWithoutSignature = sprintf(
-            'v=1; a=%s; c=relaxed/relaxed; d=%s; s=%s; t=%d; h=%s; bh=%s; b=',
+            'v=1; a=%s; c=%s/%s; d=%s; s=%s; t=%d; h=%s; bh=%s; b=',
             $config->algorithm->value,
+            $config->headerCanonicalization,
+            $config->bodyCanonicalization,
             $config->domain,
             $config->selector,
-            time(),
+            (int) floor($this->clock->timestamp()),
             implode(':', $signedHeaders),
             $bodyHash,
         );
 
-        $canonicalizedDkimHeader = $this->canonicalizer->canonicalizeHeader('dkim-signature', $dkimWithoutSignature);
+        $canonicalizedDkimHeader = $this->canonicalizer->canonicalizeHeader(
+            $config->headerCanonicalization === 'simple' ? 'DKIM-Signature' : 'dkim-signature',
+            $config->headerCanonicalization === 'simple' ? ' ' . $dkimWithoutSignature : $dkimWithoutSignature,
+            $config->headerCanonicalization,
+        );
         $signingInput = implode("\r\n", [...$canonicalizedSignedHeaders, $canonicalizedDkimHeader]);
-        $signature = $this->sign($signingInput, $config->privateKey);
+        $signature = $this->sign($signingInput, $config);
 
         return 'DKIM-Signature: ' . $dkimWithoutSignature . $signature;
     }
 
     /**
-     * @return array<string, list<string>>
+     * @return array<string, list<array{name:string,value:string}>>
      */
     private function parseHeaders(string $headers): array
     {
-        $lines = $this->unfoldHeaderLines($headers);
         $parsed = [];
 
-        foreach ($lines as $line) {
+        foreach ($this->rawHeaderFields($headers) as $line) {
             if ($line === '' || !str_contains($line, ':')) {
                 continue;
             }
@@ -81,15 +97,38 @@ final readonly class DkimSigner
                 $parsed[$normalizedName] = [];
             }
 
-            $parsed[$normalizedName][] = ltrim($value);
+            $parsed[$normalizedName][] = ['name' => trim($name), 'value' => $value];
         }
 
         return $parsed;
     }
 
-    private function sign(string $input, string $privateKey): string
+    /** @return list<string> */
+    private function rawHeaderFields(string $headers): array
     {
-        $resource = openssl_pkey_get_private($privateKey);
+        $fields = [];
+        foreach (preg_split('/\r\n/', $headers) ?: [] as $line) {
+            if (($line[0] ?? '') === ' ' || ($line[0] ?? '') === "\t") {
+                $index = array_key_last($fields);
+                if ($index !== null) {
+                    $fields[$index] .= "\r\n" . $line;
+                }
+
+                continue;
+            }
+            $fields[] = $line;
+        }
+
+        return $fields;
+    }
+
+    private function sign(string $input, DkimConfig $config): string
+    {
+        if ($config->algorithm === DkimAlgorithm::Ed25519Sha256) {
+            return $this->signEd25519($input, $config->privateKey);
+        }
+
+        $resource = openssl_pkey_get_private($config->privateKey);
 
         if ($resource === false) {
             throw new DkimException('Invalid DKIM private key.');
@@ -98,7 +137,7 @@ final readonly class DkimSigner
         $signature = '';
         $result = openssl_sign($input, $signature, $resource, OPENSSL_ALGO_SHA256);
 
-        if ($result !== true) {
+        if (!$result) {
             throw new DkimException('Failed to generate DKIM signature.');
         }
 
@@ -109,11 +148,20 @@ final readonly class DkimSigner
         return base64_encode($signature);
     }
 
-    /**
-     * @return list<string>
-     */
-    private function unfoldHeaderLines(string $headers): array
+    private function signEd25519(string $input, string $encodedKey): string
     {
-        return DkimHeaderTools::unfoldLines($headers);
+        $key = base64_decode(trim($encodedKey), true);
+        if (!is_string($key)) {
+            throw new DkimException('Invalid Ed25519 DKIM private key encoding.');
+        }
+        if (strlen($key) === 32) {
+            $keyPair = sodium_crypto_sign_seed_keypair($key);
+            $key = sodium_crypto_sign_secretkey($keyPair);
+        }
+        if (strlen($key) !== SODIUM_CRYPTO_SIGN_SECRETKEYBYTES) {
+            throw new DkimException('Invalid Ed25519 DKIM private key length.');
+        }
+
+        return base64_encode(sodium_crypto_sign_detached($input, $key));
     }
 }

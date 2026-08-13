@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Infocyph\TalkingBytes\Email;
 
+use DateTimeImmutable;
+use DateTimeZone;
 use Infocyph\TalkingBytes\Email\Enum\Priority;
 use Infocyph\TalkingBytes\Email\Template\ArrayVariableRenderer;
 use Infocyph\TalkingBytes\Email\Template\TemplateRendererInterface;
@@ -11,6 +13,7 @@ use Infocyph\TalkingBytes\Email\ValueObject\EmailAddress;
 use Infocyph\TalkingBytes\Email\ValueObject\EmailAttachment;
 use Infocyph\TalkingBytes\Email\ValueObject\EmailEnvelope;
 use Infocyph\TalkingBytes\Email\ValueObject\EmailHeaders;
+use InvalidArgumentException;
 
 final readonly class EmailMessage
 {
@@ -99,9 +102,18 @@ final readonly class EmailMessage
         string $contentId,
         string $mimeType = 'application/octet-stream',
         int $maxSizeBytes = 26214400,
+        ?int $knownSize = null,
     ): self {
         $attachments = $this->attachments;
-        $attachments[] = EmailAttachment::fromStream($stream, $name, $mimeType, 'inline', $contentId, $maxSizeBytes);
+        $attachments[] = EmailAttachment::fromStream(
+            $stream,
+            $name,
+            $mimeType,
+            'inline',
+            $contentId,
+            $maxSizeBytes,
+            $knownSize,
+        );
 
         return new self($this->envelope, $this->headers, $this->htmlBody, $this->textBody, $attachments, $this->metadata);
     }
@@ -122,9 +134,16 @@ final readonly class EmailMessage
         string $name,
         string $mimeType = 'application/octet-stream',
         int $maxSizeBytes = 26214400,
+        ?int $knownSize = null,
     ): self {
         $attachments = $this->attachments;
-        $attachments[] = EmailAttachment::fromStream($stream, $name, $mimeType, maxSizeBytes: $maxSizeBytes);
+        $attachments[] = EmailAttachment::fromStream(
+            $stream,
+            $name,
+            $mimeType,
+            maxSizeBytes: $maxSizeBytes,
+            knownSize: $knownSize,
+        );
 
         return new self($this->envelope, $this->headers, $this->htmlBody, $this->textBody, $attachments, $this->metadata);
     }
@@ -179,6 +198,17 @@ final readonly class EmailMessage
         );
     }
 
+    /** @return list<string> */
+    public function dkimSignatures(): array
+    {
+        $values = $this->metadata['_dkim_signatures'] ?? [];
+        if (!is_array($values)) {
+            return [];
+        }
+
+        return array_values(array_filter($values, is_string(...)));
+    }
+
     public function dsnEnvelopeId(?string $envelopeId): self
     {
         return new self(
@@ -216,13 +246,8 @@ final readonly class EmailMessage
     public function from(string $email, ?string $name = null): self
     {
         $from = new EmailAddress($email, $name);
-        $nextHeaders = $this->headers;
 
-        if ($this->headers->replyTo === null) {
-            $nextHeaders = $nextHeaders->withReplyTo($from);
-        }
-
-        return new self($this->envelope->withFrom($from), $nextHeaders, $this->htmlBody, $this->textBody, $this->attachments, $this->metadata);
+        return new self($this->envelope->withFrom($from), $this->headers, $this->htmlBody, $this->textBody, $this->attachments, $this->metadata);
     }
 
     public function generalHeaders(string $language = '', ?Priority $priority = null, string $mailer = ''): self
@@ -322,6 +347,16 @@ final readonly class EmailMessage
         return $this->metadata;
     }
 
+    public function mimeBoundary(string $role): string
+    {
+        $seed = $this->metadata['_mime_boundary_seed'] ?? null;
+        if (!is_string($seed) || $seed === '') {
+            throw new \LogicException('Email must be prepared before MIME boundaries are resolved.');
+        }
+
+        return substr(hash_hmac('sha256', $role, $seed), 0, 32);
+    }
+
     public function miscHeaders(
         ?bool $confirmedOptIn = null,
         ?string $spamStatus = null,
@@ -345,6 +380,43 @@ final readonly class EmailMessage
     public function oneClickUnsubscribe(string $url): self
     {
         return $this->withHeadersData($this->headers->withOneClickUnsubscribe($url));
+    }
+
+    public function prepare(): self
+    {
+        if (isset($this->metadata['_prepared_date'], $this->metadata['_mime_boundary_seed'])) {
+            return $this;
+        }
+
+        $this->assertReadyToSend();
+        $from = $this->envelope->from;
+        if ($from === null) {
+            throw new \LogicException('Email From address is required before preparation.');
+        }
+
+        $messageId = $this->headers->messageId;
+        if ($messageId === null || trim($messageId) === '') {
+            $domain = substr(strrchr($from->email, '@') ?: '@localhost', 1);
+            $messageId = sprintf('<%s@%s>', bin2hex(random_bytes(16)), $domain);
+        }
+
+        $headers = $this->headers->withMessageDetails(
+            $messageId,
+            $this->headers->inReplyTo,
+            $this->headers->references,
+        );
+        $metadata = $this->metadata;
+        $metadata['_prepared_date'] = new DateTimeImmutable('now', new DateTimeZone('UTC'))->format('r');
+        $metadata['_mime_boundary_seed'] = bin2hex(random_bytes(32));
+
+        return new self($this->envelope, $headers, $this->htmlBody, $this->textBody, $this->attachments, $metadata);
+    }
+
+    public function preparedDateHeader(): ?string
+    {
+        $value = $this->metadata['_prepared_date'] ?? null;
+
+        return is_string($value) ? $value : null;
     }
 
     public function readReceiptTo(string $mailbox): self
@@ -451,6 +523,23 @@ final readonly class EmailMessage
             $this->attachments,
             $this->metadata,
         );
+    }
+
+    public function withDkimSignature(string $value): self
+    {
+        if ($value === '' || preg_match('/[\r\n\0]/', $value) === 1) {
+            throw new InvalidArgumentException('DKIM signature value must not be empty or contain control characters.');
+        }
+
+        $metadata = $this->metadata;
+        $signatures = $metadata['_dkim_signatures'] ?? [];
+        if (!is_array($signatures)) {
+            $signatures = [];
+        }
+        $signatures[] = $value;
+        $metadata['_dkim_signatures'] = $signatures;
+
+        return new self($this->envelope, $this->headers, $this->htmlBody, $this->textBody, $this->attachments, $metadata);
     }
 
     /**

@@ -13,6 +13,8 @@ use RuntimeException;
 
 final readonly class SendmailTransport implements EmailTransport
 {
+    private const int MAX_DIAGNOSTIC_BYTES = 65_536;
+
     public function __construct(
         private SendmailConfig $config = new SendmailConfig(),
         private RawEmailBuilder $rawEmailBuilder = new RawEmailBuilder(),
@@ -21,7 +23,7 @@ final readonly class SendmailTransport implements EmailTransport
 
     public function send(EmailMessage $message): CommunicationResult
     {
-        $message->assertReadyToSend();
+        $message = $message->prepare();
 
         if (!is_executable($this->config->path)) {
             return CommunicationResult::failure(sprintf('Sendmail binary is not executable: %s', $this->config->path));
@@ -42,6 +44,15 @@ final readonly class SendmailTransport implements EmailTransport
         }
 
         return EmailTransportResultFactory::success('sendmail', $messageId, $recipients, ['size_bytes' => $sizeBytes]);
+    }
+
+    private function appendDiagnostic(string $buffer, string|false $chunk): string
+    {
+        if (!is_string($chunk) || $chunk === '' || strlen($buffer) >= self::MAX_DIAGNOSTIC_BYTES) {
+            return $buffer;
+        }
+
+        return $buffer . substr($chunk, 0, self::MAX_DIAGNOSTIC_BYTES - strlen($buffer));
     }
 
     /**
@@ -152,10 +163,10 @@ final readonly class SendmailTransport implements EmailTransport
 
         while (true) {
             $status = proc_get_status($process);
-            $stdoutBuffer .= stream_get_contents($stdout) ?: '';
-            $stderrBuffer .= stream_get_contents($stderr) ?: '';
+            $stdoutBuffer = $this->appendDiagnostic($stdoutBuffer, stream_get_contents($stdout));
+            $stderrBuffer = $this->appendDiagnostic($stderrBuffer, stream_get_contents($stderr));
 
-            if ($status['running'] !== true) {
+            if (!$status['running']) {
                 break;
             }
 
@@ -164,14 +175,19 @@ final readonly class SendmailTransport implements EmailTransport
                 proc_terminate($process);
                 usleep(100000);
 
+                $statusAfterGrace = proc_get_status($process);
+                if ($statusAfterGrace['running']) {
+                    proc_terminate($process, 9);
+                }
+
                 break;
             }
 
             usleep(10000);
         }
 
-        $stdoutBuffer .= stream_get_contents($stdout) ?: '';
-        $stderrBuffer .= stream_get_contents($stderr) ?: '';
+        $stdoutBuffer = $this->appendDiagnostic($stdoutBuffer, stream_get_contents($stdout));
+        $stderrBuffer = $this->appendDiagnostic($stderrBuffer, stream_get_contents($stderr));
 
         $exitCode = proc_close($process);
 

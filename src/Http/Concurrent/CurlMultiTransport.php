@@ -4,8 +4,11 @@ declare(strict_types=1);
 
 namespace Infocyph\TalkingBytes\Http\Concurrent;
 
-use Infocyph\TalkingBytes\Core\Event\CommunicationEventBus;
+use Infocyph\TalkingBytes\Core\Event\BestEffortEventDispatcher;
+use Infocyph\TalkingBytes\Core\Event\EventDispatcher;
+use Infocyph\TalkingBytes\Core\Event\NullEventDispatcher;
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
+use Infocyph\TalkingBytes\Core\Support\Sleeper;
 use Infocyph\TalkingBytes\Http\HttpRequest;
 use Infocyph\TalkingBytes\Http\Internal\CurlHandleConfigurator;
 use Infocyph\TalkingBytes\Http\Internal\CurlResultFactory;
@@ -18,15 +21,25 @@ use InvalidArgumentException;
 
 final readonly class CurlMultiTransport
 {
+    private EventDispatcher $events;
+
+    private Sleeper $sleeper;
+
+    public function __construct(?Sleeper $sleeper = null, ?EventDispatcher $events = null)
+    {
+        $this->sleeper = $sleeper ?? Sleeper::system();
+        $this->events = new BestEffortEventDispatcher($events ?? new NullEventDispatcher());
+    }
+
     /**
      * @param array<int|string, HttpRequest> $requests
      */
-    public function sendMany(array $requests, int $maxConcurrency = 10, bool $failFast = false): PoolResult
+    public function sendMany(array $requests, int $maxConcurrency = 10, bool $stopOnFailure = false): PoolResult
     {
-        CommunicationEventBus::dispatch('http.pool.start', [
+        $this->events->dispatch('http.pool.start', [
             'request_count' => count($requests),
             'max_concurrency' => $maxConcurrency,
-            'fail_fast' => $failFast,
+            'stop_on_failure' => $stopOnFailure,
             'transport' => 'curl-multi',
         ]);
 
@@ -41,17 +54,17 @@ final readonly class CurlMultiTransport
                 $results[$key] = $result;
             }
 
-            if ($failFast && $this->containsFailure($chunkResults)) {
+            if ($stopOnFailure && $this->containsFailure($chunkResults)) {
                 $pool = new PoolResult(
                     $results,
-                    ['duration_ms' => (int) ((microtime(true) - $start) * 1000), 'fail_fast' => true],
+                    ['duration_ms' => (int) ((microtime(true) - $start) * 1000), 'stopped_scheduling' => true],
                 );
-                CommunicationEventBus::dispatch('http.pool.finish', [
+                $this->events->dispatch('http.pool.finish', [
                     'request_count' => count($requests),
                     'successful_count' => $pool->successfulCount(),
                     'failed_count' => $pool->failedCount(),
                     'duration_ms' => $pool->metadata['duration_ms'] ?? null,
-                    'fail_fast' => true,
+                    'stopped_scheduling' => true,
                     'transport' => 'curl-multi',
                 ]);
 
@@ -61,14 +74,14 @@ final readonly class CurlMultiTransport
 
         $pool = new PoolResult(
             $results,
-            ['duration_ms' => (int) ((microtime(true) - $start) * 1000), 'fail_fast' => false],
+            ['duration_ms' => (int) ((microtime(true) - $start) * 1000), 'stopped_scheduling' => false],
         );
-        CommunicationEventBus::dispatch('http.pool.finish', [
+        $this->events->dispatch('http.pool.finish', [
             'request_count' => count($requests),
             'successful_count' => $pool->successfulCount(),
             'failed_count' => $pool->failedCount(),
             'duration_ms' => $pool->metadata['duration_ms'] ?? null,
-            'fail_fast' => false,
+            'stopped_scheduling' => false,
             'transport' => 'curl-multi',
         ]);
 
@@ -90,7 +103,7 @@ final readonly class CurlMultiTransport
 
     private function dispatchRequestResultEvent(HttpRequest $request, CommunicationResult $result): void
     {
-        CommunicationEventBus::dispatch($result->successful ? 'http.request.finish' : 'http.request.failed', [
+        $this->events->dispatch($result->successful ? 'http.request.finish' : 'http.request.failed', [
             'method' => $request->method->value,
             'url' => HttpRedactor::redactUrl($request->buildUrl()),
             'status' => $result->statusCode,
@@ -158,10 +171,16 @@ final readonly class CurlMultiTransport
         array &$results,
         int|string $index,
     ): ?array {
-        $prepared = $request->applyAuthenticators();
+        $prepared = $request->prepareForTransport();
 
         try {
             RequestSecurityGuard::assertAllowed($prepared);
+            if ($prepared->options->followRedirects) {
+                throw new InvalidArgumentException(
+                    'Concurrent HTTP requests do not follow redirects; use CurlTransport for manually validated redirect chains.',
+                );
+            }
+            $pinnedResolution = RequestSecurityGuard::pinnedResolution($prepared, $prepared->buildUrl());
         } catch (InvalidArgumentException $exception) {
             $results[$index] = CommunicationResult::failure($exception->getMessage(), metadata: ['transport' => 'curl-multi']);
 
@@ -179,8 +198,8 @@ final readonly class CurlMultiTransport
         $bodyCollector = null;
 
         try {
-            $bodyCollector = new ResponseBodyCollector($prepared);
-            $prepared = $configurator->configure($handle, $prepared, $collector, $bodyCollector);
+            $bodyCollector = new ResponseBodyCollector($prepared, $collector);
+            $prepared = $configurator->configure($handle, $prepared, $collector, $bodyCollector, $pinnedResolution);
         } catch (InvalidArgumentException $exception) {
             $bodyCollector?->finalize();
             unset($handle);
@@ -189,14 +208,24 @@ final readonly class CurlMultiTransport
             return null;
         }
 
-        CommunicationEventBus::dispatch('http.request.start', [
+        $this->events->dispatch('http.request.start', [
             'method' => $prepared->method->value,
             'url' => HttpRedactor::redactUrl($prepared->buildUrl()),
             'headers' => HttpRedactor::redactHeaders($prepared->headers->all()),
             'transport' => 'curl-multi',
         ]);
 
-        curl_multi_add_handle($multiHandle, $handle);
+        $status = curl_multi_add_handle($multiHandle, $handle);
+        if ($status !== CURLM_OK) {
+            $bodyCollector->finalize();
+            UploadHandleManager::cleanup($prepared);
+            unset($handle);
+            $results[$index] = CommunicationResult::failure(
+                sprintf('Unable to add request to cURL multi handle (%d).', $status),
+            );
+
+            return null;
+        }
 
         return [
             'handle' => $handle,
@@ -206,16 +235,20 @@ final readonly class CurlMultiTransport
         ];
     }
 
-    private function runMultiLoop(\CurlMultiHandle $multiHandle): void
+    private function runMultiLoop(\CurlMultiHandle $multiHandle): ?string
     {
         do {
             $status = curl_multi_exec($multiHandle, $running);
             if ($status !== CURLM_OK) {
-                break;
+                return sprintf('cURL multi execution failed with status %d.', $status);
             }
 
-            curl_multi_select($multiHandle, 1.0);
+            if ($running > 0 && curl_multi_select($multiHandle, 1.0) === -1) {
+                $this->sleeper->milliseconds(10);
+            }
         } while ($running > 0);
+
+        return null;
     }
 
     /**
@@ -236,27 +269,32 @@ final readonly class CurlMultiTransport
 
         $configurator = new CurlHandleConfigurator();
 
-        foreach ($requests as $index => $request) {
-            $context = $this->prepareContext($multiHandle, $configurator, $request, $results, $index);
-            if ($context === null) {
-                continue;
+        try {
+            foreach ($requests as $index => $request) {
+                $context = $this->prepareContext($multiHandle, $configurator, $request, $results, $index);
+                if ($context === null) {
+                    continue;
+                }
+
+                $contexts[$index] = $context;
             }
 
-            $contexts[$index] = $context;
+            $multiError = $this->runMultiLoop($multiHandle);
+
+            foreach ($contexts as $index => $context) {
+                $results[$index] = $multiError === null
+                    ? $this->finalizeContext($context)
+                    : CommunicationResult::failure($multiError, metadata: ['transport' => 'curl-multi']);
+                $this->dispatchRequestResultEvent($context['request'], $results[$index]);
+            }
+        } finally {
+            foreach ($contexts as $context) {
+                $context['bodyCollector']->finalize();
+                UploadHandleManager::cleanup($context['request']);
+                curl_multi_remove_handle($multiHandle, $context['handle']);
+            }
+            curl_multi_close($multiHandle);
         }
-
-        $this->runMultiLoop($multiHandle);
-
-        foreach ($contexts as $index => $context) {
-            $results[$index] = $this->finalizeContext($context);
-            $this->dispatchRequestResultEvent($context['request'], $results[$index]);
-        }
-
-        foreach ($contexts as $context) {
-            curl_multi_remove_handle($multiHandle, $context['handle']);
-        }
-
-        curl_multi_close($multiHandle);
 
         $orderedResults = [];
         foreach (array_keys($requests) as $key) {

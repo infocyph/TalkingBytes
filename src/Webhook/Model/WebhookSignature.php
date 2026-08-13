@@ -9,7 +9,7 @@ use InvalidArgumentException;
 
 final readonly class WebhookSignature
 {
-    public function __construct(private string $secret)
+    public function __construct(#[\SensitiveParameter] private string $secret)
     {
         if ($this->secret === '') {
             throw new InvalidArgumentException('Webhook signing secret must not be empty.');

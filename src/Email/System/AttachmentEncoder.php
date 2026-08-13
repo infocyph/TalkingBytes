@@ -122,8 +122,10 @@ final readonly class AttachmentEncoder
         if (is_resource($attachment->stream)) {
             $meta = stream_get_meta_data($attachment->stream);
 
-            if ($meta['seekable'] === true) {
-                rewind($attachment->stream);
+            if (!$meta['seekable'] || !is_int($attachment->streamOffset)
+                || fseek($attachment->stream, $attachment->streamOffset) !== 0
+            ) {
+                throw new AttachmentException(sprintf('Unable to rewind attachment stream: %s', $attachment->name));
             }
 
             return ['stream' => $attachment->stream, 'owned' => false];

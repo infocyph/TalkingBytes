@@ -15,6 +15,8 @@ use Infocyph\TalkingBytes\Email\System\RawEmailBuilder;
 use Infocyph\TalkingBytes\Email\System\SmtpCapabilities;
 use Infocyph\TalkingBytes\Email\System\SmtpCapabilityParser;
 use Infocyph\TalkingBytes\Email\System\SmtpEnvelopePlanner;
+use Infocyph\TalkingBytes\Email\System\SmtpMessageStreamPreparer;
+use Infocyph\TalkingBytes\Email\System\SmtpTlsContext;
 use Infocyph\TalkingBytes\Email\ValueObject\EmailHeaders;
 use RuntimeException;
 
@@ -25,26 +27,15 @@ final readonly class SmtpTransport implements EmailTransport
         private RawEmailBuilder $rawEmailBuilder = new RawEmailBuilder(),
         private SmtpCapabilityParser $capabilityParser = new SmtpCapabilityParser(),
         private ?SmtpEnvelopePlanner $envelopePlanner = null,
+        private SmtpTlsContext $tlsContext = new SmtpTlsContext(),
     ) {}
 
     public function send(EmailMessage $message): CommunicationResult
     {
-        $message->assertReadyToSend();
-
-        $inspection = $this->rawEmailBuilder->inspect($message, includeSubject: true);
-        if (
-            $this->config->maxMessageBytes !== null
-            && $inspection['sizeBytes'] > $this->config->maxMessageBytes
-        ) {
-            return CommunicationResult::failure(sprintf(
-                'Email size %d bytes exceeds configured SMTP max message size %d bytes.',
-                $inspection['sizeBytes'],
-                $this->config->maxMessageBytes,
-            ));
-        }
-
-        $messageId = $inspection['messageId'];
+        $message = $message->prepare();
+        $messageId = $message->headersData()->messageId;
         $connection = null;
+        $messageStream = null;
         $capabilities = new SmtpCapabilities();
         $start = microtime(true);
         $serverGreeting = null;
@@ -54,6 +45,11 @@ final readonly class SmtpTransport implements EmailTransport
         $transcript = [];
 
         try {
+            $prepared = new SmtpMessageStreamPreparer(
+                $this->rawEmailBuilder,
+                $this->config->maxMessageBytes,
+            )->prepare($message);
+            $messageStream = $prepared['stream'];
             $connection = $this->openConnection();
             [, $serverGreeting] = $this->expect($connection, [220], 'server greeting', $transcript);
             $sessionStarted = true;
@@ -63,8 +59,9 @@ final readonly class SmtpTransport implements EmailTransport
             $report = $this->sendEmailData(
                 $connection,
                 $message,
-                $inspection['sizeBytes'],
-                $inspection['containsNonAscii'],
+                $messageStream,
+                $prepared['sizeBytes'],
+                $prepared['containsNonAscii'],
                 $capabilities,
                 $messageId,
                 $transcript,
@@ -121,6 +118,9 @@ final readonly class SmtpTransport implements EmailTransport
                 }
 
                 fclose($connection);
+            }
+            if (is_resource($messageStream)) {
+                fclose($messageStream);
             }
         }
     }
@@ -266,6 +266,10 @@ final readonly class SmtpTransport implements EmailTransport
         }
 
         if (!$hasStartTls) {
+            if ($this->config->credentials !== null) {
+                throw new RuntimeException('SMTP STARTTLS is unavailable; refusing to send credentials.');
+            }
+
             return $capabilities;
         }
 
@@ -287,9 +291,12 @@ final readonly class SmtpTransport implements EmailTransport
      */
     private function openConnection()
     {
-        $host = $this->config->security === SmtpSecurity::Ssl
-            ? sprintf('ssl://%s', $this->config->host)
-            : $this->config->host;
+        $host = sprintf(
+            '%s://%s:%d',
+            $this->config->security === SmtpSecurity::Ssl ? 'ssl' : 'tcp',
+            $this->config->host,
+            $this->config->port,
+        );
 
         $errno = 0;
         $errstr = '';
@@ -301,7 +308,14 @@ final readonly class SmtpTransport implements EmailTransport
         set_error_handler($handler);
 
         try {
-            $connection = fsockopen($host, $this->config->port, $errno, $errstr, $this->config->timeoutSeconds);
+            $connection = stream_socket_client(
+                $host,
+                $errno,
+                $errstr,
+                $this->config->timeoutSeconds,
+                STREAM_CLIENT_CONNECT,
+                stream_context_create(['ssl' => $this->tlsContext->options($this->config)]),
+            );
         } finally {
             restore_error_handler();
         }
@@ -325,21 +339,33 @@ final readonly class SmtpTransport implements EmailTransport
         $response = '';
         $lines = [];
         $code = 0;
+        $deadline = microtime(true) + $this->config->timeoutSeconds;
 
         while (true) {
+            if (microtime(true) >= $deadline) {
+                throw new RuntimeException('SMTP command deadline exceeded.');
+            }
+
             $line = fgets($connection, 1024);
             if ($line === false) {
                 $metadata = stream_get_meta_data($connection);
-                if ($metadata['timed_out'] === true) {
+                if ($metadata['timed_out']) {
                     throw new RuntimeException('SMTP server response timed out.');
                 }
 
                 throw new RuntimeException('Failed to read SMTP server response.');
             }
 
+            if (!str_ends_with($line, "\n") && !feof($connection)) {
+                throw new RuntimeException('SMTP response line exceeds 1023 bytes.');
+            }
+
             $response .= $line;
             $this->recordTranscriptResponse($transcript, $line);
             $lines[] = rtrim($line, "\r\n");
+            if (count($lines) > 100 || strlen($response) > 65_536) {
+                throw new RuntimeException('SMTP response exceeds protocol bounds.');
+            }
 
             if (preg_match('/^(\d{3})([\s-])/', $line, $matches) !== 1) {
                 continue;
@@ -408,7 +434,7 @@ final readonly class SmtpTransport implements EmailTransport
     private function resolveAuthMechanism(SmtpCapabilities $capabilities): SmtpAuthMechanism
     {
         if ($this->config->authMechanism !== SmtpAuthMechanism::Auto) {
-            if ($capabilities->authMechanisms !== [] && !in_array(strtoupper($this->config->authMechanism->value), $capabilities->authMechanisms, true)) {
+            if (!in_array(strtoupper($this->config->authMechanism->value), $capabilities->authMechanisms, true)) {
                 throw new RuntimeException(sprintf(
                     'SMTP server does not advertise AUTH %s.',
                     strtoupper($this->config->authMechanism->value),
@@ -422,7 +448,7 @@ final readonly class SmtpTransport implements EmailTransport
             return SmtpAuthMechanism::Plain;
         }
 
-        if (in_array('LOGIN', $capabilities->authMechanisms, true) || $capabilities->authMechanisms === []) {
+        if (in_array('LOGIN', $capabilities->authMechanisms, true)) {
             return SmtpAuthMechanism::Login;
         }
 
@@ -431,11 +457,13 @@ final readonly class SmtpTransport implements EmailTransport
 
     /**
      * @param resource $connection
+     * @param resource $messageStream
      * @param list<string> $transcript
      */
     private function sendEmailData(
         $connection,
         EmailMessage $message,
+        $messageStream,
         int $messageSizeBytes,
         bool $messageContainsNonAscii,
         SmtpCapabilities $capabilities,
@@ -510,7 +538,7 @@ final readonly class SmtpTransport implements EmailTransport
         $this->write($connection, "DATA\r\n", $transcript);
         $this->expect($connection, [354], 'DATA', $transcript);
 
-        $this->writeDataPayloadFromMessage($connection, $message, $messageSizeBytes, $transcript);
+        $this->writeDataPayloadFromStream($connection, $messageStream, $messageSizeBytes, $transcript);
         [, $messageResponse] = $this->expect($connection, [250], 'message body', $transcript);
 
         return new EmailDeliveryReport(
@@ -729,40 +757,22 @@ final readonly class SmtpTransport implements EmailTransport
 
     /**
      * @param resource $connection
+     * @param resource $messageStream
      * @param list<string> $transcript
      */
-    private function writeDataPayloadFromMessage($connection, EmailMessage $message, int $messageSizeBytes, array &$transcript): void
+    private function writeDataPayloadFromStream($connection, $messageStream, int $messageSizeBytes, array &$transcript): void
     {
         if ($this->config->captureTranscript) {
             $transcript[] = sprintf('C: [DATA %d bytes]', $messageSizeBytes);
         }
 
-        $lineBuffer = '';
-        $this->rawEmailBuilder->buildToStream(
-            $message,
-            function (string $chunk) use (&$lineBuffer, $connection): void {
-                $lineBuffer .= str_replace(["\r\n", "\r"], "\n", $chunk);
-
-                while (($newlinePosition = strpos($lineBuffer, "\n")) !== false) {
-                    $line = substr($lineBuffer, 0, $newlinePosition);
-                    $lineBuffer = substr($lineBuffer, $newlinePosition + 1);
-
-                    if ($line !== '' && $line[0] === '.') {
-                        $line = '.' . $line;
-                    }
-
-                    $this->write($connection, $line . "\r\n");
-                }
-            },
-            includeSubject: true,
-        );
-
-        if ($lineBuffer !== '') {
-            if ($lineBuffer[0] === '.') {
-                $lineBuffer = '.' . $lineBuffer;
+        rewind($messageStream);
+        while (($line = fgets($messageStream)) !== false) {
+            $line = rtrim($line, "\r\n");
+            if ($line !== '' && $line[0] === '.') {
+                $line = '.' . $line;
             }
-
-            $this->write($connection, $lineBuffer . "\r\n");
+            $this->write($connection, $line . "\r\n");
         }
 
         $this->write($connection, ".\r\n");

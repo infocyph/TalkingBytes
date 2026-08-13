@@ -10,6 +10,15 @@ final class UploadHandleManager
 {
     public static function cleanup(HttpRequest $request): void
     {
+        $paths = $request->metadata['_multipart_temp_paths'] ?? [];
+        if (is_array($paths)) {
+            foreach ($paths as $path) {
+                if (is_string($path) && is_file($path)) {
+                    unlink($path);
+                }
+            }
+        }
+
         $openedByConfigurator = $request->metadata['_upload_opened_by_configurator'] ?? false;
         $resource = $request->metadata['_upload_handle'] ?? null;
 

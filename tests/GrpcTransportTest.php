@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 use Infocyph\TalkingBytes\Core\Event\CommunicationEventBus;
-use Infocyph\TalkingBytes\Core\Message\CommunicationRequest;
+use Infocyph\TalkingBytes\Core\Event\CallableEventDispatcher;
 use Infocyph\TalkingBytes\Grpc\Sender\GrpcCallError;
 use Infocyph\TalkingBytes\Grpc\GrpcClient;
 use Infocyph\TalkingBytes\Grpc\GrpcDeadline;
@@ -19,7 +19,7 @@ use Infocyph\TalkingBytes\Grpc\Native\NativeGrpcStreamingInvoker;
 
 it('sends grpc requests successfully and emits lifecycle events', function (): void {
     $events = [];
-    CommunicationEventBus::listen(static function (string $event, array $payload) use (&$events): void {
+    $dispatcher = new CallableEventDispatcher(static function (string $event, array $payload) use (&$events): void {
         if (str_starts_with($event, 'grpc.request.')) {
             $events[] = ['event' => $event, 'payload' => $payload];
         }
@@ -27,11 +27,10 @@ it('sends grpc requests successfully and emits lifecycle events', function (): v
 
     $client = GrpcClient::using(
         static fn(GrpcRequest $request): GrpcResponse => new GrpcResponse(GrpcStatus::Ok, ['echo' => $request->message]),
+        $dispatcher,
     );
 
     $result = $client->send(new GrpcRequest('Echo/Send', ['ping' => true]));
-    CommunicationEventBus::listen(null);
-
     expect($result->successful)->toBeTrue()
         ->and($result->statusCode)->toBe(0)
         ->and($events)->toHaveCount(2)
@@ -55,7 +54,7 @@ it('maps non-ok grpc response to failure result', function (): void {
 
 it('maps grpc caller exceptions to failure results and failed event', function (): void {
     $events = [];
-    CommunicationEventBus::listen(static function (string $event, array $payload) use (&$events): void {
+    $dispatcher = new CallableEventDispatcher(static function (string $event, array $payload) use (&$events): void {
         if (str_starts_with($event, 'grpc.request.')) {
             $events[] = ['event' => $event, 'payload' => $payload];
         }
@@ -63,24 +62,14 @@ it('maps grpc caller exceptions to failure results and failed event', function (
 
     $client = GrpcClient::using(static function (): GrpcResponse {
         throw new RuntimeException('network down');
-    });
+    }, $dispatcher);
 
     $result = $client->send(new GrpcRequest('Echo/Send', ['ping' => true]));
-    CommunicationEventBus::listen(null);
-
     expect($result->successful)->toBeFalse()
         ->and($result->error)->toContain('network down')
         ->and($result->response)->toBeInstanceOf(GrpcCallError::class)
         ->and($events[0]['event'])->toBe('grpc.request.start')
         ->and($events[1]['event'])->toBe('grpc.request.failed');
-});
-
-it('fails when grpc transport receives non-grpc payload', function (): void {
-    $transport = new GrpcTransport(static fn(GrpcRequest $request): GrpcResponse => new GrpcResponse(GrpcStatus::Ok, $request->message));
-    $result = $transport->send(new CommunicationRequest('grpc', ['invalid' => true]));
-
-    expect($result->successful)->toBeFalse()
-        ->and($result->error)->toContain('expects GrpcRequest payload');
 });
 
 it('validates grpc request method and deadline', function (): void {
@@ -94,6 +83,7 @@ it('validates grpc request method and deadline', function (): void {
     $request = new GrpcRequest('/Orders.Service/Create', ['x' => 1], deadlineSeconds: 1.2);
     expect($request->deadlineMicros())->toBe(1_200_000);
     expect(GrpcDeadline::secondsToMicros(0.5))->toBe(500_000);
+    expect(GrpcDeadline::secondsToMicros(0.0000001))->toBe(1);
 });
 
 it('validates grpc metadata names and values and supports helper accessors', function (): void {
@@ -107,6 +97,8 @@ it('validates grpc metadata names and values and supports helper accessors', fun
 
     expect(fn() => new GrpcMetadata(['Bad Header' => ['x']]))->toThrow(InvalidArgumentException::class);
     expect(fn() => new GrpcMetadata(['x-token' => ["bad\r\nvalue"]]))->toThrow(InvalidArgumentException::class);
+    expect(fn() => new GrpcMetadata(['x-token' => ['bad' => 'shape']]))->toThrow(InvalidArgumentException::class);
+    expect(fn() => new GrpcMetadata(['x-token' => ["bad\x01value"]]))->toThrow(InvalidArgumentException::class);
     expect(fn() => (new GrpcMetadata())->withValue('trace-bin', 'bytes'))->toThrow(InvalidArgumentException::class);
 
     $bin = (new GrpcMetadata())
@@ -156,7 +148,7 @@ it('maps native grpc invoker contract and propagates deadline and metadata', fun
 
     expect($result->successful)->toBeTrue()
         ->and($invoker->captured)->toBeArray()
-        ->and($invoker->captured['method'])->toBe('Orders/Create')
+        ->and($invoker->captured['method'])->toBe('/Orders/Create')
         ->and($invoker->captured['headers']['x-request-id'][0])->toBe('req-1')
         ->and($invoker->captured['deadline'])->toBe(1.25)
         ->and($result->response)->toBeInstanceOf(GrpcResponse::class)
@@ -277,7 +269,7 @@ it('supports native grpc streaming for server/client/bidi calls', function (): v
         ->and($bidiResult->response->message['done'])->toBeTrue()
         ->and($serverChunks)->toHaveCount(2)
         ->and($bidiChunks)->toHaveCount(3)
-        ->and($bidiChunks[0]['method'])->toBe('Orders/Bidi');
+        ->and($bidiChunks[0]['method'])->toBe('/Orders/Bidi');
 });
 
 it('fails streaming calls when native streaming invoker is not configured', function (): void {

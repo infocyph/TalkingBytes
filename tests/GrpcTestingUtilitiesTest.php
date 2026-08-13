@@ -19,7 +19,7 @@ it('records grpc calls and supports assertions', function (): void {
     $second = $client->send(new GrpcRequest('Billing/Create', ['id' => 2]));
 
     $fake->assert()->assertCallCount(2);
-    $fake->assert()->assertCalledMethod('Billing/Create');
+    $fake->assert()->assertCalledMethod('/Billing/Create');
 
     expect($first->successful)->toBeTrue()
         ->and($second->successful)->toBeFalse()
@@ -45,8 +45,8 @@ it('supports richer grpc fake caller assertions', function (): void {
     ));
 
     $assert = $fake->assert();
-    $assert->assertCalledWithMessage('Billing/Create', ['id' => 7]);
-    $assert->assertCalledWithMetadata('Billing/Create', 'X-Request-Id', 'req-7');
-    expect($assert->firstRequest()?->method)->toBe('Billing/Create')
-        ->and($assert->lastRequest()?->method)->toBe('Billing/Create');
+    $assert->assertCalledWithMessage('/Billing/Create', ['id' => 7]);
+    $assert->assertCalledWithMetadata('/Billing/Create', 'X-Request-Id', 'req-7');
+    expect($assert->firstRequest()?->method)->toBe('/Billing/Create')
+        ->and($assert->lastRequest()?->method)->toBe('/Billing/Create');
 });

@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace Infocyph\TalkingBytes\Auth;
 
 use Closure;
+use Infocyph\TalkingBytes\Http\Body\MultipartBody;
 use Infocyph\TalkingBytes\Http\HttpRequest;
+use Infocyph\TalkingBytes\Http\Signing\RequestSigner;
 use Infocyph\TalkingBytes\Http\Support\HeaderBag;
-use Infocyph\TalkingBytes\Signing\RequestSignerInterface;
+use InvalidArgumentException;
 
 final readonly class SignedRequestAuth implements AuthenticatorInterface
 {
@@ -16,7 +18,7 @@ final readonly class SignedRequestAuth implements AuthenticatorInterface
      * @param Closure():string $nonceGenerator
      */
     public function __construct(
-        private RequestSignerInterface $signer,
+        private RequestSigner $signer,
         private ?Closure $clock = null,
         private ?Closure $nonceGenerator = null,
         private string $signatureHeader = 'X-TB-Signature',
@@ -30,8 +32,17 @@ final readonly class SignedRequestAuth implements AuthenticatorInterface
 
     public function apply(HttpRequest $request): HttpRequest
     {
-        $timestamp = (string) (($this->clock ?? time(...))());
+        $timestampValue = ($this->clock ?? time(...))();
+        if ($timestampValue < 0) {
+            throw new InvalidArgumentException('HTTP signing timestamp must be greater than or equal to zero.');
+        }
+
+        $timestamp = (string) $timestampValue;
         $nonce = ($this->nonceGenerator ?? static fn(): string => bin2hex(random_bytes(16)))();
+        if ($nonce === '' || strlen($nonce) > 256) {
+            throw new InvalidArgumentException('HTTP signing nonce must contain between 1 and 256 bytes.');
+        }
+        HeaderBag::assertValidHeaderValue($nonce);
 
         $canonical = implode("\n", [
             strtoupper($request->method->value),
@@ -67,6 +78,12 @@ final readonly class SignedRequestAuth implements AuthenticatorInterface
     {
         if ($request->body === null) {
             return hash('sha256', '');
+        }
+
+        // cURL chooses the multipart boundary and wire encoding. Signing the PHP
+        // field map would not authenticate the bytes sent over the network.
+        if ($request->body instanceof MultipartBody) {
+            return 'UNSIGNED-PAYLOAD';
         }
 
         $payload = $request->body->toCurlPayload();

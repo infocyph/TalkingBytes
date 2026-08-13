@@ -7,9 +7,6 @@ use Infocyph\TalkingBytes\Auth\BasicAuth;
 use Infocyph\TalkingBytes\Auth\BearerTokenAuth;
 use Infocyph\TalkingBytes\Auth\HeaderAuth;
 use Infocyph\TalkingBytes\Auth\QueryAuth;
-use Infocyph\TalkingBytes\Core\Contract\MiddlewareInterface;
-use Infocyph\TalkingBytes\Core\Message\CommunicationRequest;
-use Infocyph\TalkingBytes\Core\Middleware\HeaderMiddleware;
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
 use Infocyph\TalkingBytes\Email\Config\ImapConfig;
 use Infocyph\TalkingBytes\Email\Config\Pop3Config;
@@ -31,6 +28,8 @@ use Infocyph\TalkingBytes\Email\System\SmtpCapabilityParser;
 use Infocyph\TalkingBytes\Email\Transport\MailFunctionTransport;
 use Infocyph\TalkingBytes\Email\Transport\SmtpTransport;
 use Infocyph\TalkingBytes\Grpc\GrpcClient;
+use Infocyph\TalkingBytes\Grpc\Contract\GrpcMiddleware;
+use Infocyph\TalkingBytes\Grpc\GrpcMetadata;
 use Infocyph\TalkingBytes\Grpc\GrpcStatus;
 use Infocyph\TalkingBytes\Grpc\Sender\GrpcRequest;
 use Infocyph\TalkingBytes\Grpc\Sender\GrpcResponse;
@@ -104,14 +103,18 @@ it('grpc client supports middleware extension', function (): void {
     $client = GrpcClient::using(
         static fn(GrpcRequest $request): GrpcResponse => new GrpcResponse(GrpcStatus::Ok, $request->message),
     )
-        ->withMiddleware(new HeaderMiddleware(['X-Trace' => '1']))
-        ->withMiddleware(new class ($headerSeen) implements MiddlewareInterface {
+        ->withMiddleware(new class implements GrpcMiddleware {
+            public function handle(GrpcRequest $request, Closure $next): CommunicationResult
+            {
+                return $next($request->withHeaders($request->headers->withValue('x-trace', '1')));
+            }
+        })
+        ->withMiddleware(new class ($headerSeen) implements GrpcMiddleware {
             public function __construct(private ?string &$headerSeen) {}
 
-            public function handle(CommunicationRequest $request, Closure $next): CommunicationResult
+            public function handle(GrpcRequest $request, Closure $next): CommunicationResult
             {
-                $header = $request->headers['X-Trace'] ?? null;
-                $this->headerSeen = is_string($header) ? $header : null;
+                $this->headerSeen = $request->headers->first('x-trace');
 
                 return $next($request);
             }
@@ -253,7 +256,7 @@ it('validates mailbox flags and allows system/custom forms', function (): void {
     expect(fn() => MailboxFlagGuard::assertValid(str_repeat('a', 65)))->toThrow(InvalidArgumentException::class);
 
     $transport = new ImapSocketTransport(new ImapConfig(
-        host: 'imap.example.com',
+        host: '127.0.0.1',
         port: 143,
         security: ImapSecurity::None,
         username: 'user',

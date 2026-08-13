@@ -1,6 +1,6 @@
 {
     "name": "infocyph/talkingbytes",
-    "description": "Transport-agnostic communication toolkit for PHP.",
+    "description": "Protocol-focused communication toolkit for PHP.",
     "license": "MIT",
     "type": "library",
     "keywords": [
@@ -38,6 +38,7 @@
         "ext-iconv": "Optional fallback for inbound charset conversion when mbstring is unavailable.",
         "ext-imap": "Optional for imap_* address parsing and UTF7-IMAP fallback helpers.",
         "ext-mbstring": "Recommended for robust charset conversion and encoded header handling.",
+        "ext-sodium": "Required for Ed25519-SHA256 DKIM signing and verification.",
         "grpc/grpc": "Required for generated PHP gRPC clients."
     },
     "minimum-stability": "stable",

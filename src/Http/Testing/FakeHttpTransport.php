@@ -5,13 +5,12 @@ declare(strict_types=1);
 namespace Infocyph\TalkingBytes\Http\Testing;
 
 use Closure;
-use Infocyph\TalkingBytes\Core\Contract\TransportInterface;
-use Infocyph\TalkingBytes\Core\Message\CommunicationRequest;
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
+use Infocyph\TalkingBytes\Http\Contract\HttpTransport;
 use Infocyph\TalkingBytes\Http\HttpRequest;
 use Infocyph\TalkingBytes\Http\HttpResponse;
 
-final class FakeHttpTransport implements TransportInterface
+final class FakeHttpTransport implements HttpTransport
 {
     /**
      * @var list<CommunicationResult>
@@ -65,13 +64,9 @@ final class FakeHttpTransport implements TransportInterface
         return $this->push($result);
     }
 
-    public function send(CommunicationRequest $request): CommunicationResult
+    public function send(HttpRequest $request): CommunicationResult
     {
-        if (!$request->payload instanceof HttpRequest) {
-            return CommunicationResult::failure('FakeHttpTransport expects HttpRequest payload.');
-        }
-
-        $this->sentRequests[] = $request->payload;
+        $this->sentRequests[] = $request;
 
         if ($this->queuedResults === []) {
             return CommunicationResult::success(

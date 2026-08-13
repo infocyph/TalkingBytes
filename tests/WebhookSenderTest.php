@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Infocyph\TalkingBytes\Core\Event\CommunicationEventBus;
+use Infocyph\TalkingBytes\Core\Event\CallableEventDispatcher;
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
 use Infocyph\TalkingBytes\Http\HttpClient;
 use Infocyph\TalkingBytes\Http\HttpResponse;
@@ -74,7 +75,7 @@ it('retries transport errors in webhook retry profile', function (): void {
 
 it('tracks webhook retry attempts and emits redacted retry events', function (): void {
     $events = [];
-    CommunicationEventBus::listen(static function (string $event, array $payload) use (&$events): void {
+    $dispatcher = new CallableEventDispatcher(static function (string $event, array $payload) use (&$events): void {
         if (str_starts_with($event, 'webhook.')) {
             $events[] = ['event' => $event, 'payload' => $payload];
         }
@@ -85,7 +86,12 @@ it('tracks webhook retry attempts and emits redacted retry events', function ():
         CommunicationResult::success(200, new HttpResponse(200, '{"ok":true}')),
     ]);
 
-    $sender = WebhookSender::usingHttpWithRetryProfile(HttpClient::using($transport), attempts: 2, baseDelayMs: 0)
+    $sender = WebhookSender::usingHttpWithRetryProfile(
+        HttpClient::using($transport),
+        attempts: 2,
+        baseDelayMs: 0,
+        events: $dispatcher,
+    )
         ->withSecret('whsec_test');
 
     $delivery = $sender->send(
@@ -93,8 +99,6 @@ it('tracks webhook retry attempts and emits redacted retry events', function ():
             ->url('https://hooks.example.test/orders?token=secret-value')
             ->payload(['order_id' => 1001]),
     );
-
-    CommunicationEventBus::listen(null);
 
     $requests = $transport->sentRequests();
     expect($delivery->delivery?->attempts)->toBe(2)

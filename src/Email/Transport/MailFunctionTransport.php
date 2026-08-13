@@ -25,7 +25,7 @@ final readonly class MailFunctionTransport implements EmailTransport
 
     public function send(EmailMessage $message): CommunicationResult
     {
-        $message->assertReadyToSend();
+        $message = $message->prepare();
 
         $rawEmail = $this->rawEmailBuilder->build($message, includeSubject: false);
         if ($this->maxMessageBytes !== null && $rawEmail->sizeBytes > $this->maxMessageBytes) {

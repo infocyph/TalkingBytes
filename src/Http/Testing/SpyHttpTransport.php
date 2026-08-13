@@ -4,25 +4,22 @@ declare(strict_types=1);
 
 namespace Infocyph\TalkingBytes\Http\Testing;
 
-use Infocyph\TalkingBytes\Core\Contract\TransportInterface;
-use Infocyph\TalkingBytes\Core\Message\CommunicationRequest;
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
+use Infocyph\TalkingBytes\Http\Contract\HttpTransport;
 use Infocyph\TalkingBytes\Http\HttpRequest;
 
-final class SpyHttpTransport implements TransportInterface
+final class SpyHttpTransport implements HttpTransport
 {
     /**
      * @var list<HttpRequest>
      */
     private array $sentRequests = [];
 
-    public function __construct(private readonly TransportInterface $inner) {}
+    public function __construct(private readonly HttpTransport $inner) {}
 
-    public function send(CommunicationRequest $request): CommunicationResult
+    public function send(HttpRequest $request): CommunicationResult
     {
-        if ($request->payload instanceof HttpRequest) {
-            $this->sentRequests[] = $request->payload;
-        }
+        $this->sentRequests[] = $request;
 
         return $this->inner->send($request);
     }

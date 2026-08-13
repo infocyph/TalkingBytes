@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Infocyph\TalkingBytes\Email\Parser;
 
+use Infocyph\TalkingBytes\Email\Config\EmailLimits;
+use Infocyph\TalkingBytes\Email\Exception\EmailParseException;
 use Infocyph\TalkingBytes\Email\ValueObject\HeaderBag;
 use Infocyph\TalkingBytes\Email\ValueObject\ParsedEmailPart;
 
@@ -13,66 +15,41 @@ final readonly class MimePartParser
         private HeaderParser $headerParser = new HeaderParser(),
         private TransferDecoder $transferDecoder = new TransferDecoder(),
         private CharsetDecoder $charsetDecoder = new CharsetDecoder(),
+        private EmailLimits $limits = new EmailLimits(),
     ) {}
 
     public function parse(string $rawPart, ?string $partNumber = null): ParsedEmailPart
     {
-        [$rawHeaders, $rawBody] = $this->splitRawMessage($rawPart);
-        $headers = $this->headerParser->parse($rawHeaders);
+        $partCount = 0;
+        $decodedBytes = 0;
 
-        return $this->parseFromHeadersAndBody($headers, $rawBody, $partNumber);
+        return $this->parseRawPart($rawPart, $partNumber, 1, $partCount, $decodedBytes);
     }
 
     public function parseFromHeadersAndBody(HeaderBag $headers, string $body, ?string $partNumber = null): ParsedEmailPart
     {
-        $contentTypeHeader = $headers->first('Content-Type') ?? 'text/plain';
-        $transferEncoding = $headers->first('Content-Transfer-Encoding');
-        $contentDisposition = $headers->first('Content-Disposition');
+        $partCount = 0;
+        $decodedBytes = 0;
 
-        $contentType = $this->headerValueToken($contentTypeHeader);
-        $contentTypeParams = $this->headerParameters($contentTypeHeader);
-        $dispositionParams = $this->headerParameters($contentDisposition);
+        return $this->parsePart($headers, $body, $partNumber, 1, $partCount, $decodedBytes);
+    }
 
-        $boundary = $contentTypeParams['boundary'] ?? null;
-        $charset = $contentTypeParams['charset'] ?? null;
-        $nameFromContentType = $contentTypeParams['name'] ?? null;
-        $disposition = $contentDisposition !== null ? $this->headerValueToken($contentDisposition) : null;
-        $filename = $dispositionParams['filename'] ?? $nameFromContentType;
-
+    private function contentId(HeaderBag $headers): ?string
+    {
         $contentId = $headers->first('Content-ID');
-        if ($contentId !== null) {
-            $contentId = trim($contentId, '<>');
+
+        return $contentId === null ? null : trim($contentId, '<>');
+    }
+
+    private function countPart(int $depth, int &$partCount): void
+    {
+        $partCount++;
+        if ($depth > $this->limits->maxMimeDepth) {
+            throw new EmailParseException(sprintf('MIME nesting depth exceeds limit (%d).', $this->limits->maxMimeDepth));
         }
-
-        $children = [];
-        $decodedBody = '';
-
-        if (str_starts_with($contentType, 'multipart/') && $boundary !== null && $boundary !== '') {
-            foreach ($this->splitMultipartBody($body, $boundary) as $index => $partBody) {
-                $childNumber = $partNumber === null
-                    ? (string) ($index + 1)
-                    : sprintf('%s.%d', $partNumber, $index + 1);
-                $children[] = $this->parse($partBody, $childNumber);
-            }
-        } else {
-            $decodedBody = $this->transferDecoder->decode($body, $transferEncoding);
-            $decodedBody = $this->charsetDecoder->toUtf8($decodedBody, $charset);
+        if ($partCount > $this->limits->maxMimeParts) {
+            throw new EmailParseException(sprintf('MIME part count exceeds limit (%d).', $this->limits->maxMimeParts));
         }
-
-        $isInline = $disposition === 'inline';
-
-        return new ParsedEmailPart(
-            $headers->asMap(),
-            $contentType,
-            $charset,
-            $disposition,
-            $filename,
-            $contentId,
-            $decodedBody,
-            $isInline,
-            $partNumber,
-            $children,
-        );
     }
 
     private function decodeParameterValue(string $value, bool $encoded): string
@@ -127,6 +104,41 @@ final readonly class MimePartParser
         return $token !== '' ? $token : 'text/plain';
     }
 
+    /** @return array{0:string,1:list<ParsedEmailPart>} */
+    private function parseBody(
+        string $body,
+        string $contentType,
+        ?string $boundary,
+        ?string $transferEncoding,
+        ?string $charset,
+        ?string $partNumber,
+        int $depth,
+        int &$partCount,
+        int &$decodedBytes,
+    ): array {
+        if (!str_starts_with($contentType, 'multipart/') || $boundary === null || $boundary === '') {
+            $remainingBytes = max(0, $this->limits->maxDecodedBodyBytes - $decodedBytes);
+            $decodedBody = $this->transferDecoder->decode($body, $transferEncoding, $remainingBytes);
+            $decodedBody = $this->charsetDecoder->toUtf8($decodedBody, $charset);
+            $decodedBytes += strlen($decodedBody);
+            if ($decodedBytes > $this->limits->maxDecodedBodyBytes) {
+                throw new EmailParseException('Decoded MIME bodies exceed the configured aggregate limit.');
+            }
+
+            return [$decodedBody, []];
+        }
+
+        $children = [];
+        foreach ($this->splitMultipartBody($body, $boundary) as $index => $partBody) {
+            $childNumber = $partNumber === null
+                ? (string) ($index + 1)
+                : sprintf('%s.%d', $partNumber, $index + 1);
+            $children[] = $this->parseRawPart($partBody, $childNumber, $depth + 1, $partCount, $decodedBytes);
+        }
+
+        return ['', $children];
+    }
+
     /**
      * @param array<string, string> $parameters
      * @param array<string, array<int, string>> $continuations
@@ -154,6 +166,72 @@ final readonly class MimePartParser
         $isEncoded = str_ends_with($name, '*');
         $baseName = $isEncoded ? substr($name, 0, -1) : $name;
         $parameters[$baseName] = $this->decodeParameterValue($parameterValue, $isEncoded);
+    }
+
+    private function parsePart(
+        HeaderBag $headers,
+        string $body,
+        ?string $partNumber,
+        int $depth,
+        int &$partCount,
+        int &$decodedBytes,
+    ): ParsedEmailPart {
+        $this->countPart($depth, $partCount);
+
+        $contentTypeHeader = $headers->first('Content-Type') ?? 'text/plain';
+        $transferEncoding = $headers->first('Content-Transfer-Encoding');
+        $contentDisposition = $headers->first('Content-Disposition');
+
+        $contentType = $this->headerValueToken($contentTypeHeader);
+        $contentTypeParams = $this->headerParameters($contentTypeHeader);
+        $dispositionParams = $this->headerParameters($contentDisposition);
+
+        $boundary = $contentTypeParams['boundary'] ?? null;
+        $charset = $contentTypeParams['charset'] ?? null;
+        $nameFromContentType = $contentTypeParams['name'] ?? null;
+        $disposition = $contentDisposition !== null ? $this->headerValueToken($contentDisposition) : null;
+        $filename = $dispositionParams['filename'] ?? $nameFromContentType;
+
+        $contentId = $this->contentId($headers);
+        [$decodedBody, $children] = $this->parseBody(
+            $body,
+            $contentType,
+            $boundary,
+            $transferEncoding,
+            $charset,
+            $partNumber,
+            $depth,
+            $partCount,
+            $decodedBytes,
+        );
+
+        $isInline = $disposition === 'inline';
+
+        return new ParsedEmailPart(
+            $headers->asMap(),
+            $contentType,
+            $charset,
+            $disposition,
+            $filename,
+            $contentId,
+            $decodedBody,
+            $isInline,
+            $partNumber,
+            $children,
+        );
+    }
+
+    private function parseRawPart(
+        string $rawPart,
+        ?string $partNumber,
+        int $depth,
+        int &$partCount,
+        int &$decodedBytes,
+    ): ParsedEmailPart {
+        [$rawHeaders, $rawBody] = $this->splitRawMessage($rawPart);
+        $headers = $this->headerParser->parse($rawHeaders);
+
+        return $this->parsePart($headers, $rawBody, $partNumber, $depth, $partCount, $decodedBytes);
     }
 
     /**

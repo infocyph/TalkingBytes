@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-use Infocyph\TalkingBytes\Email\Event\EmailEventBus;
+use Infocyph\TalkingBytes\Core\Event\CommunicationEventBus as EmailEventBus;
 use Infocyph\TalkingBytes\Email\Mailbox\MailboxCommandRedactor;
 
 it('redacts sensitive imap login and authenticate commands', function (): void {

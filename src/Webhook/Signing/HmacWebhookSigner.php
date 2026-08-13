@@ -8,7 +8,7 @@ use InvalidArgumentException;
 
 final class HmacWebhookSigner implements WebhookSigner
 {
-    public function sign(string $payload, int $timestamp, string $secret): string
+    public function sign(string $payload, int $timestamp, #[\SensitiveParameter] string $secret): string
     {
         if ($secret === '') {
             throw new InvalidArgumentException('Webhook signing secret must not be empty.');

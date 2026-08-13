@@ -21,29 +21,16 @@ final class LogEmailTransport extends AbstractRawEmailTransport implements Email
 
     public function send(EmailMessage $message): CommunicationResult
     {
-        $message->assertReadyToSend();
-
-        $rawEmail = $this->rawEmailBuilder->build($message, includeSubject: true);
-        if (
-            $this->config->maxMessageBytes !== null
-            && $rawEmail->sizeBytes > $this->config->maxMessageBytes
-        ) {
-            return CommunicationResult::failure(sprintf(
-                'Email size %d bytes exceeds configured log max message size %d bytes.',
-                $rawEmail->sizeBytes,
-                $this->config->maxMessageBytes,
-            ));
-        }
-
-        $messageId = $this->extractMessageId($rawEmail->headers) ?? $this->headerBuilder->resolveMessageId($message);
+        $message = $message->prepare();
+        $messageId = $this->headerBuilder->resolveMessageId($message);
         $path = '';
-        $written = false;
+        $sizeBytes = 0;
 
         $recipients = array_map(static fn($address): string => $address->email, $message->envelope()->recipients());
 
         try {
             $path = $this->resolvePath();
-            $written = $this->writeLog($path, $rawEmail->raw);
+            $sizeBytes = $this->writeLog($path, $message);
         } catch (RuntimeException $exception) {
             return EmailTransportResultFactory::failure(
                 'log-email',
@@ -54,29 +41,10 @@ final class LogEmailTransport extends AbstractRawEmailTransport implements Email
             );
         }
 
-        if (!$written) {
-            return EmailTransportResultFactory::failure(
-                'log-email',
-                $messageId,
-                sprintf('Unable to write email log file: %s', $path),
-                $recipients,
-                ['log_path' => $path],
-            );
-        }
-
         return EmailTransportResultFactory::success('log-email', $messageId, $recipients, [
             'log_path' => $path,
-            'size_bytes' => $rawEmail->sizeBytes,
+            'size_bytes' => $sizeBytes,
         ]);
-    }
-
-    private function extractMessageId(string $headers): ?string
-    {
-        if (preg_match('/^Message-ID:\s*(.+)$/mi', $headers, $matches) !== 1) {
-            return null;
-        }
-
-        return trim($matches[1]);
     }
 
     private function resolvePath(): string
@@ -85,7 +53,7 @@ final class LogEmailTransport extends AbstractRawEmailTransport implements Email
             throw new RuntimeException(sprintf('Log path is not a directory: %s', $this->config->directory));
         }
 
-        if (!is_dir($this->config->directory) && !mkdir($this->config->directory, 0775, true) && !is_dir($this->config->directory)) {
+        if (!is_dir($this->config->directory) && !mkdir($this->config->directory, 0700, true) && !is_dir($this->config->directory)) {
             throw new RuntimeException(sprintf('Unable to create log directory: %s', $this->config->directory));
         }
 
@@ -100,10 +68,47 @@ final class LogEmailTransport extends AbstractRawEmailTransport implements Email
         return rtrim($this->config->directory, '/\\') . '/' . $this->config->filenamePrefix . '-' . $suffix . '.log';
     }
 
-    private function writeLog(string $path, string $rawEmail): bool
+    /** @param resource $stream */
+    private function writeChunk($stream, string $chunk): void
     {
-        $payload = sprintf("----- %s -----\n%s\n\n", new DateTimeImmutable()->format(DATE_ATOM), $rawEmail);
+        $remaining = $chunk;
+        while ($remaining !== '') {
+            $written = fwrite($stream, $remaining);
+            if (!is_int($written) || $written < 1) {
+                throw new RuntimeException('Unable to stream email log payload.');
+            }
+            $remaining = substr($remaining, $written);
+        }
+    }
 
-        return file_put_contents($path, $payload, FILE_APPEND | LOCK_EX) !== false;
+    private function writeLog(string $path, EmailMessage $message): int
+    {
+        $stream = fopen($path, 'ab');
+        if (!is_resource($stream)) {
+            throw new RuntimeException(sprintf('Unable to open email log file: %s', $path));
+        }
+        chmod($path, 0600);
+
+        try {
+            if (!flock($stream, LOCK_EX)) {
+                throw new RuntimeException(sprintf('Unable to lock email log file: %s', $path));
+            }
+            $this->writeChunk($stream, sprintf("----- %s -----\n", new DateTimeImmutable()->format(DATE_ATOM)));
+            $sizeBytes = $this->rawEmailBuilder->buildToStream(
+                $message,
+                function (string $chunk) use ($stream): void {
+                    $this->writeChunk($stream, $chunk);
+                },
+                includeSubject: true,
+                maxBytes: $this->config->maxMessageBytes,
+            );
+            $this->writeChunk($stream, "\n\n");
+            fflush($stream);
+            flock($stream, LOCK_UN);
+
+            return $sizeBytes;
+        } finally {
+            fclose($stream);
+        }
     }
 }

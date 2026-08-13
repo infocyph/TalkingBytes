@@ -65,11 +65,10 @@ it('supports replay store duplicate detection', function (): void {
 
 it('bounds the in-memory replay store and fails closed at capacity', function (): void {
     $store = new InMemoryWebhookReplayStore(maxEntries: 1);
-    $store->remember('evt_1', 3600);
-    $store->remember('evt_1', 3600);
+    expect($store->claim('tenant-a', 'evt_1', 3600))->toBeTrue();
 
-    expect($store->seen('evt_1'))->toBeTrue();
-    expect(fn() => $store->remember('evt_2', 3600))
+    expect($store->claim('tenant-a', 'evt_1', 3600))->toBeFalse();
+    expect(fn() => $store->claim('tenant-a', 'evt_2', 3600))
         ->toThrow(RuntimeException::class, 'capacity has been exhausted');
     expect(fn() => new InMemoryWebhookReplayStore(maxEntries: 0))
         ->toThrow(InvalidArgumentException::class);
@@ -93,4 +92,9 @@ it('validates event and delivery header values using name guard', function (): v
     $badDelivery['X-TB-Delivery'] = '';
     expect(fn() => $receiver->receive($payload, $badDelivery))
         ->toThrow(InvalidArgumentException::class, 'Webhook delivery ID must not be empty.');
+
+    $spacedEvent = $headers;
+    $spacedEvent['X-TB-Event'] = ' order.created';
+    expect(fn() => $receiver->receive($payload, $spacedEvent))
+        ->toThrow(InvalidArgumentException::class, 'surrounding whitespace');
 });

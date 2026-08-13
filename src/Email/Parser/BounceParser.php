@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Infocyph\TalkingBytes\Email\Parser;
 
+use Infocyph\TalkingBytes\Core\Event\CommunicationEventBus;
 use Infocyph\TalkingBytes\Email\Enum\BounceType;
-use Infocyph\TalkingBytes\Email\Event\EmailEventBus;
 use Infocyph\TalkingBytes\Email\ValueObject\BounceReport;
 use Infocyph\TalkingBytes\Email\ValueObject\ParsedEmail;
 
@@ -190,7 +190,7 @@ final readonly class BounceParser
 
     private function dispatchDetectedEvent(BounceReport $report): void
     {
-        EmailEventBus::dispatch('bounce.detected', [
+        CommunicationEventBus::dispatch('bounce.detected', [
             'type' => $report->type->value,
             'recipient' => $report->recipient,
             'status' => $report->status,

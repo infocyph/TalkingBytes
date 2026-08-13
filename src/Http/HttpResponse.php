@@ -9,6 +9,9 @@ use JsonException;
 
 final readonly class HttpResponse
 {
+    /** @var array<string, string|list<string>> */
+    public array $headers;
+
     /**
      * @param array<string, string|list<string>> $headers
      * @param array<string, mixed> $metadata
@@ -16,9 +19,28 @@ final readonly class HttpResponse
     public function __construct(
         public ?int $statusCode,
         public string $body,
-        public array $headers = [],
+        array $headers = [],
         public array $metadata = [],
-    ) {}
+    ) {
+        $normalized = [];
+        foreach ($headers as $name => $values) {
+            $key = strtolower($name);
+            $incoming = is_array($values) ? $values : [$values];
+            if (!isset($normalized[$key])) {
+                $normalized[$key] = $incoming;
+
+                continue;
+            }
+
+            $normalized[$key] = [...$normalized[$key], ...$incoming];
+        }
+
+        foreach ($normalized as $name => $values) {
+            $normalized[$name] = count($values) === 1 ? $values[0] : $values;
+        }
+
+        $this->headers = $normalized;
+    }
 
     public function accepted(): bool
     {
@@ -45,13 +67,7 @@ final readonly class HttpResponse
      */
     public function header(string $name): string|array|null
     {
-        foreach ($this->headers as $key => $value) {
-            if (strcasecmp($key, $name) === 0) {
-                return $value;
-            }
-        }
-
-        return null;
+        return $this->headers[strtolower($name)] ?? null;
     }
 
     public function headerLine(string $name): ?string

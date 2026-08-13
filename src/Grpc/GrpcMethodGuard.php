@@ -10,6 +10,11 @@ final class GrpcMethodGuard
 {
     public static function assertValid(string $method): void
     {
+        self::normalize($method);
+    }
+
+    public static function normalize(string $method): string
+    {
         $trimmed = trim($method);
         if ($trimmed === '') {
             throw new InvalidArgumentException('gRPC method must not be empty.');
@@ -26,5 +31,7 @@ final class GrpcMethodGuard
         if (preg_match('#^/?[A-Za-z][A-Za-z0-9_.]*/[A-Za-z][A-Za-z0-9_]*$#', $trimmed) !== 1) {
             throw new InvalidArgumentException(sprintf('Invalid gRPC method format "%s".', $method));
         }
+
+        return str_starts_with($trimmed, '/') ? $trimmed : '/' . $trimmed;
     }
 }
