@@ -15,6 +15,7 @@ final readonly class RawEmailBuilder
 
     public function build(EmailMessage $message, bool $includeSubject = true): RawEmailMessage
     {
+        $message = $message->prepare();
         $mimeMessage = $this->mimeMessageBuilder->build($message);
         $headers = $this->normalizeLineEndings($this->headerBuilder->build($message, $mimeMessage, $includeSubject));
         $body = $this->normalizeLineEndings($mimeMessage->body);
@@ -32,18 +33,20 @@ final readonly class RawEmailBuilder
         bool $includeSubject = true,
         ?int $maxBytes = null,
     ): int {
+        $message = $message->prepare();
         $bodyStream = fopen('php://temp', 'w+b');
         if (!is_resource($bodyStream)) {
             throw new \RuntimeException('Unable to open temporary stream for raw email body.');
         }
 
         $bodySizeBytes = 0;
+        $normalizer = new LineEndingNormalizer();
 
         try {
             $mimeMessage = $this->mimeMessageBuilder->buildToStream(
                 $message,
-                function (string $chunk) use (&$bodySizeBytes, $bodyStream): void {
-                    $normalizedChunk = $this->normalizeLineEndings($chunk);
+                function (string $chunk) use (&$bodySizeBytes, $bodyStream, $normalizer): void {
+                    $normalizedChunk = $normalizer->push($chunk);
                     if ($normalizedChunk === '') {
                         return;
                     }
@@ -56,6 +59,14 @@ final readonly class RawEmailBuilder
                     $bodySizeBytes += $written;
                 },
             );
+            $finalChunk = $normalizer->finish();
+            if ($finalChunk !== '') {
+                $written = fwrite($bodyStream, $finalChunk);
+                if ($written === false || $written !== strlen($finalChunk)) {
+                    throw new \RuntimeException('Unable to finish raw email line normalization.');
+                }
+                $bodySizeBytes += $written;
+            }
             $headers = $this->normalizeLineEndings($this->headerBuilder->build($message, $mimeMessage, $includeSubject));
         } catch (\Throwable $exception) {
             fclose($bodyStream);
@@ -63,23 +74,25 @@ final readonly class RawEmailBuilder
             throw $exception;
         }
 
-        $sizeBytes = 0;
-        $this->writeWithLimit($headers, $write, $sizeBytes, $maxBytes);
-        $this->writeWithLimit("\r\n\r\n", $write, $sizeBytes, $maxBytes);
+        try {
+            $sizeBytes = 0;
+            $this->writeWithLimit($headers, $write, $sizeBytes, $maxBytes);
+            $this->writeWithLimit("\r\n\r\n", $write, $sizeBytes, $maxBytes);
 
-        rewind($bodyStream);
-        while (!feof($bodyStream)) {
-            $chunk = fread($bodyStream, 8192);
-            if ($chunk === false || $chunk === '') {
-                continue;
+            rewind($bodyStream);
+            while (!feof($bodyStream)) {
+                $chunk = fread($bodyStream, 8192);
+                if ($chunk === false || $chunk === '') {
+                    continue;
+                }
+
+                $this->writeWithLimit($chunk, $write, $sizeBytes, $maxBytes);
             }
 
-            $this->writeWithLimit($chunk, $write, $sizeBytes, $maxBytes);
+            return $sizeBytes;
+        } finally {
+            fclose($bodyStream);
         }
-
-        fclose($bodyStream);
-
-        return $sizeBytes;
     }
 
     /**
@@ -87,6 +100,7 @@ final readonly class RawEmailBuilder
      */
     public function inspect(EmailMessage $message, bool $includeSubject = true): array
     {
+        $message = $message->prepare();
         $sizeBytes = 0;
         $containsNonAscii = false;
 

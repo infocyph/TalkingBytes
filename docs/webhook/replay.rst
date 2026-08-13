@@ -10,9 +10,15 @@ Use ``WebhookReplayStore`` to prevent duplicate processing.
 
    interface WebhookReplayStore
    {
-       public function seen(string $deliveryId): bool;
-       public function remember(string $deliveryId, int $ttlSeconds): void;
+       public function claim(
+           string $namespace,
+           string $deliveryId,
+           int $ttlSeconds,
+       ): bool;
    }
+
+``claim()`` must be atomic and returns true only for the first claimant. The
+namespace isolates tenants/endpoints that may legitimately reuse a delivery ID.
 
 Built-in implementation
 -----------------------
@@ -25,5 +31,5 @@ smaller bound for constrained processes.
 Production guidance
 -------------------
 
-Use Redis/database-backed store with TTL. The module intentionally avoids
-hard-coding persistence dependencies.
+Use a Redis/database-backed atomic insert-if-absent operation with TTL. A
+separate check-then-write implementation is race-prone and is not sufficient.

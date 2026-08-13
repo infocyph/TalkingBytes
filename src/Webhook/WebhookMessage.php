@@ -9,6 +9,7 @@ use Infocyph\TalkingBytes\Webhook\Support\WebhookHeaders;
 use Infocyph\TalkingBytes\Webhook\Support\WebhookNameGuard;
 use InvalidArgumentException;
 use JsonSerializable;
+use LogicException;
 
 final readonly class WebhookMessage
 {
@@ -50,6 +51,15 @@ final readonly class WebhookMessage
         WebhookNameGuard::assertDeliveryId($deliveryId);
 
         return new self($this->event, $this->url, $this->payload, $this->headers, $deliveryId, $this->metadata);
+    }
+
+    public function deliveryUrl(): string
+    {
+        if ($this->url === null || $this->url === '') {
+            throw new LogicException('Webhook URL is required before sending.');
+        }
+
+        return $this->url;
     }
 
     public function header(string $name, string $value): self
@@ -102,6 +112,25 @@ final readonly class WebhookMessage
         }
 
         return new self($this->event, $this->url, $payload, $this->headers, $this->deliveryId, $this->metadata);
+    }
+
+    public function payloadForDelivery(int $maxBytes = 1_048_576): string
+    {
+        if ($this->url === null || $this->url === '') {
+            throw new LogicException('Webhook URL is required before sending.');
+        }
+        if ($maxBytes < 1) {
+            throw new InvalidArgumentException('Webhook max payload bytes must be greater than zero.');
+        }
+
+        $payload = is_string($this->payload)
+            ? $this->payload
+            : json_encode($this->payload, JSON_THROW_ON_ERROR);
+        if (strlen($payload) > $maxBytes) {
+            throw new InvalidArgumentException(sprintf('Webhook payload exceeded %d bytes.', $maxBytes));
+        }
+
+        return $payload;
     }
 
     public function rawJsonPayload(string $payload): self

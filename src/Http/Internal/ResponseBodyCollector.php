@@ -13,6 +13,8 @@ final class ResponseBodyCollector
 
     private ?string $error = null;
 
+    private bool $finalized = false;
+
     private int $receivedBytes = 0;
 
     /** @var resource|null */
@@ -22,46 +24,34 @@ final class ResponseBodyCollector
 
     private ?string $tempPath;
 
-    public function __construct(private readonly HttpRequest $request)
-    {
+    public function __construct(
+        private readonly HttpRequest $request,
+        private readonly ResponseHeaderCollector $headers = new ResponseHeaderCollector(),
+    ) {
         $this->stream = null;
         $this->targetPath = null;
         $this->tempPath = null;
-
-        $path = $request->options->streamDownloadPath;
-        if ($path === null) {
-            return;
-        }
-
-        $this->prepareStreamDownload($path);
     }
 
     public function collect(string $chunk): int
     {
+        if ($this->finalized) {
+            return 0;
+        }
+
         if ($this->error !== null) {
             return 0;
         }
 
         $length = strlen($chunk);
         $this->receivedBytes += $length;
+        $redirectResponse = $this->isRedirectResponse();
 
-        if (
-            $this->request->options->maxResponseBytes !== null
-            && $this->request->options->streamDownloadPath === null
-            && $this->receivedBytes > $this->request->options->maxResponseBytes
-        ) {
-            $this->error = sprintf('HTTP response exceeded max allowed bytes (%d).', $this->request->options->maxResponseBytes);
-
-            return 0;
+        if ($this->stream === null && $this->request->options->streamDownloadPath !== null && !$redirectResponse) {
+            $this->prepareStreamDownload($this->request->options->streamDownloadPath);
         }
 
-        if (
-            $this->request->options->maxDownloadBytes !== null
-            && $this->request->options->streamDownloadPath !== null
-            && $this->receivedBytes > $this->request->options->maxDownloadBytes
-        ) {
-            $this->error = sprintf('HTTP download exceeded max allowed bytes (%d).', $this->request->options->maxDownloadBytes);
-
+        if (!$this->withinConfiguredLimit($redirectResponse)) {
             return 0;
         }
 
@@ -89,10 +79,27 @@ final class ResponseBodyCollector
 
     public function finalize(): ?string
     {
+        if ($this->finalized) {
+            return $this->error;
+        }
+
+        $this->finalized = true;
+        $redirectResponse = $this->isRedirectResponse();
+        if ($this->stream === null
+            && $this->request->options->streamDownloadPath !== null
+            && !$redirectResponse
+            && $this->error === null
+        ) {
+            $this->prepareStreamDownload($this->request->options->streamDownloadPath);
+        }
+
         if ($this->stream === null) {
             return $this->error;
         }
 
+        if (!fflush($this->stream)) {
+            $this->error = sprintf('Failed to flush streamed download file: %s', (string) $this->targetPath);
+        }
         fclose($this->stream);
         $this->stream = null;
 
@@ -134,6 +141,13 @@ final class ResponseBodyCollector
         $this->tempPath = null;
     }
 
+    private function isRedirectResponse(): bool
+    {
+        $statusCode = $this->headers->statusCode();
+
+        return $statusCode !== null && $statusCode >= 300 && $statusCode < 400;
+    }
+
     private function prepareStreamDownload(string $path): void
     {
         if (is_dir($path)) {
@@ -163,8 +177,32 @@ final class ResponseBodyCollector
             throw new InvalidArgumentException(sprintf('Unable to open stream download temp file for writing: %s', $tempPath));
         }
 
+        chmod($tempPath, 0600);
+
         $this->targetPath = $path;
         $this->tempPath = $tempPath;
         $this->stream = $stream;
+    }
+
+    private function withinConfiguredLimit(bool $redirectResponse): bool
+    {
+        $maxResponseBytes = $this->request->options->maxResponseBytes;
+        if ($maxResponseBytes !== null
+            && ($this->request->options->streamDownloadPath === null || $redirectResponse)
+            && $this->receivedBytes > $maxResponseBytes
+        ) {
+            $this->error = sprintf('HTTP response exceeded max allowed bytes (%d).', $maxResponseBytes);
+
+            return false;
+        }
+
+        $maxDownloadBytes = $this->request->options->maxDownloadBytes;
+        if ($maxDownloadBytes !== null && $this->stream !== null && $this->receivedBytes > $maxDownloadBytes) {
+            $this->error = sprintf('HTTP download exceeded max allowed bytes (%d).', $maxDownloadBytes);
+
+            return false;
+        }
+
+        return true;
     }
 }

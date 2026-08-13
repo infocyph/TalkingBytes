@@ -22,6 +22,7 @@ final class FakeSmtpServerProcess
         private array $pipes,
         private string $workDir,
         public int $port,
+        public ?string $caBundle,
     ) {}
 
     public function __destruct()
@@ -40,6 +41,13 @@ final class FakeSmtpServerProcess
         $scriptPath = $workDir.'/server.php';
         $scenarioPath = $workDir.'/scenario.json';
         $readyPath = $workDir.'/ready.json';
+        $caBundle = null;
+        if (($scenario['tls'] ?? false) === true) {
+            ['certificate' => $certificate, 'privateKey' => $privateKey] = self::createTlsMaterial($workDir);
+            $scenario['tls_certificate'] = $certificate;
+            $scenario['tls_private_key'] = $privateKey;
+            $caBundle = $certificate;
+        }
         file_put_contents($scriptPath, self::script());
         file_put_contents($scenarioPath, json_encode($scenario, JSON_THROW_ON_ERROR));
 
@@ -62,7 +70,7 @@ final class FakeSmtpServerProcess
 
         $port = self::waitForReadyPort($readyPath, $process, $pipes);
 
-        return new self($process, $pipes, $workDir, $port);
+        return new self($process, $pipes, $workDir, $port, $caBundle);
     }
 
     public function stop(): void
@@ -141,6 +149,52 @@ final class FakeSmtpServerProcess
         }
     }
 
+    /** @return array{certificate:string,privateKey:string} */
+    private static function createTlsMaterial(string $directory): array
+    {
+        $configPath = $directory.'/openssl.cnf';
+        $certificatePath = $directory.'/server.crt';
+        $privateKeyPath = $directory.'/server.key';
+        file_put_contents($configPath, <<<'CONFIG'
+[req]
+distinguished_name = subject
+req_extensions = extensions
+prompt = no
+
+[subject]
+CN = 127.0.0.1
+
+[extensions]
+subjectAltName = @alternate_names
+basicConstraints = CA:TRUE
+keyUsage = digitalSignature,keyEncipherment,keyCertSign
+extendedKeyUsage = serverAuth
+
+[alternate_names]
+IP.1 = 127.0.0.1
+DNS.1 = localhost
+CONFIG);
+
+        $options = ['config' => $configPath, 'req_extensions' => 'extensions', 'x509_extensions' => 'extensions'];
+        $privateKey = openssl_pkey_new(['private_key_bits' => 2048, 'private_key_type' => OPENSSL_KEYTYPE_RSA]);
+        $request = $privateKey === false ? false : openssl_csr_new([], $privateKey, $options);
+        $certificate = $request === false ? false : openssl_csr_sign($request, null, $privateKey, 1, $options, 1);
+        if ($privateKey === false || $request === false || $certificate === false) {
+            throw new RuntimeException('Unable to create fake SMTP TLS certificate.');
+        }
+
+        if (!openssl_x509_export_to_file($certificate, $certificatePath)
+            || !openssl_pkey_export_to_file($privateKey, $privateKeyPath)
+        ) {
+            throw new RuntimeException('Unable to export fake SMTP TLS certificate.');
+        }
+
+        chmod($certificatePath, 0600);
+        chmod($privateKeyPath, 0600);
+
+        return ['certificate' => $certificatePath, 'privateKey' => $privateKeyPath];
+    }
+
     private static function script(): string
     {
         return <<<'PHP'
@@ -158,7 +212,18 @@ if (!is_array($scenario)) {
     exit(1);
 }
 
-$server = @stream_socket_server('tcp://127.0.0.1:0', $errno, $errstr);
+$context = stream_context_create(['ssl' => [
+    'local_cert' => $scenario['tls_certificate'] ?? null,
+    'local_pk' => $scenario['tls_private_key'] ?? null,
+    'verify_peer' => false,
+]]);
+$server = @stream_socket_server(
+    'tcp://127.0.0.1:0',
+    $errno,
+    $errstr,
+    STREAM_SERVER_BIND | STREAM_SERVER_LISTEN,
+    $context,
+);
 if ($server === false) {
     file_put_contents($reportPath, json_encode(['commands' => [], 'data' => [], 'mismatches' => [sprintf('bind failed: %s (%d)', $errstr, $errno)]]));
     exit(1);
@@ -270,6 +335,14 @@ foreach ($expect as $entry) {
     foreach ($entryResponses as $response) {
         fwrite($client, $response . "\r\n");
     }
+
+    if (($entry['enable_tls'] ?? false) === true) {
+        fflush($client);
+        if (stream_socket_enable_crypto($client, true, STREAM_CRYPTO_METHOD_TLS_SERVER) !== true) {
+            $transcript['mismatches'][] = 'TLS server negotiation failed';
+            break;
+        }
+    }
 }
 
 foreach ($deferredResponses as $response) {
@@ -369,6 +442,7 @@ function smtpTransportFor(
             utf8Policy: $utf8Policy,
             captureTranscript: $captureTranscript,
             maxMessageBytes: $maxMessageBytes,
+            caBundle: $server->caBundle,
         ),
     );
 }
@@ -448,7 +522,10 @@ it('authenticates with AUTH PLAIN when available', function (): void {
     $plainPayload = base64_encode("\0user\0pass");
 
     $server = FakeSmtpServerProcess::start([
+        'tls' => true,
         'expect' => [
+            ['equals' => 'EHLO localhost', 'responses' => ['250-localhost', '250 STARTTLS']],
+            ['equals' => 'STARTTLS', 'responses' => ['220 Ready to start TLS'], 'enable_tls' => true],
             ['equals' => 'EHLO localhost', 'responses' => ['250-localhost', '250 AUTH PLAIN LOGIN']],
             ['equals' => 'AUTH PLAIN '.$plainPayload, 'responses' => ['235 Auth successful']],
             ['equals' => 'MAIL FROM:<sender@example.com>', 'responses' => ['250 Sender OK']],
@@ -459,7 +536,7 @@ it('authenticates with AUTH PLAIN when available', function (): void {
         ],
     ]);
 
-    $result = smtpTransportFor($server, credentials: $credentials)->send(smtpMessage());
+    $result = smtpTransportFor($server, SmtpSecurity::StartTlsRequired, credentials: $credentials)->send(smtpMessage());
     $server->stop();
 
     expect($result->successful)->toBeTrue();
@@ -470,7 +547,10 @@ it('authenticates with AUTH LOGIN when plain is unavailable', function (): void 
     $credentials = new SmtpCredentials('user', 'pass');
 
     $server = FakeSmtpServerProcess::start([
+        'tls' => true,
         'expect' => [
+            ['equals' => 'EHLO localhost', 'responses' => ['250-localhost', '250 STARTTLS']],
+            ['equals' => 'STARTTLS', 'responses' => ['220 Ready to start TLS'], 'enable_tls' => true],
             ['equals' => 'EHLO localhost', 'responses' => ['250-localhost', '250 AUTH LOGIN']],
             ['equals' => 'AUTH LOGIN', 'responses' => ['334 VXNlcm5hbWU6']],
             ['equals' => base64_encode('user'), 'responses' => ['334 UGFzc3dvcmQ6']],
@@ -483,7 +563,7 @@ it('authenticates with AUTH LOGIN when plain is unavailable', function (): void 
         ],
     ]);
 
-    $result = smtpTransportFor($server, credentials: $credentials)->send(smtpMessage());
+    $result = smtpTransportFor($server, SmtpSecurity::StartTlsRequired, credentials: $credentials)->send(smtpMessage());
     $server->stop();
 
     expect($result->successful)->toBeTrue();
@@ -494,14 +574,22 @@ it('fails when explicit auth mechanism is not advertised', function (): void {
     $credentials = new SmtpCredentials('user', 'pass');
 
     $server = FakeSmtpServerProcess::start([
+        'tls' => true,
         'expect' => [
+            ['equals' => 'EHLO localhost', 'responses' => ['250-localhost', '250 STARTTLS']],
+            ['equals' => 'STARTTLS', 'responses' => ['220 Ready to start TLS'], 'enable_tls' => true],
             ['equals' => 'EHLO localhost', 'responses' => ['250-localhost', '250 AUTH LOGIN']],
             ['equals' => 'RSET', 'responses' => ['250 Reset']],
             ['equals' => 'QUIT', 'responses' => ['221 Bye']],
         ],
     ]);
 
-    $result = smtpTransportFor($server, credentials: $credentials, authMechanism: SmtpAuthMechanism::Plain)->send(smtpMessage());
+    $result = smtpTransportFor(
+        $server,
+        SmtpSecurity::StartTlsRequired,
+        credentials: $credentials,
+        authMechanism: SmtpAuthMechanism::Plain,
+    )->send(smtpMessage());
     $server->stop();
 
     expect($result->successful)->toBeFalse();
@@ -704,7 +792,10 @@ it('captures redacted SMTP transcript metadata when enabled', function (): void 
     $credentials = new SmtpCredentials('user', 'pass');
 
     $server = FakeSmtpServerProcess::start([
+        'tls' => true,
         'expect' => [
+            ['equals' => 'EHLO localhost', 'responses' => ['250-localhost', '250 STARTTLS']],
+            ['equals' => 'STARTTLS', 'responses' => ['220 Ready to start TLS'], 'enable_tls' => true],
             ['equals' => 'EHLO localhost', 'responses' => ['250-localhost', '250 AUTH LOGIN']],
             ['equals' => 'AUTH LOGIN', 'responses' => ['334 VXNlcm5hbWU6']],
             ['equals' => base64_encode('user'), 'responses' => ['334 UGFzc3dvcmQ6']],
@@ -717,7 +808,12 @@ it('captures redacted SMTP transcript metadata when enabled', function (): void 
         ],
     ]);
 
-    $result = smtpTransportFor($server, credentials: $credentials, captureTranscript: true)->send(smtpMessage());
+    $result = smtpTransportFor(
+        $server,
+        SmtpSecurity::StartTlsRequired,
+        credentials: $credentials,
+        captureTranscript: true,
+    )->send(smtpMessage());
     $server->stop();
 
     expect($result->successful)->toBeTrue();

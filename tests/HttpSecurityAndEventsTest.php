@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Infocyph\TalkingBytes\Core\Event\CommunicationEventBus;
+use Infocyph\TalkingBytes\Core\Event\CallableEventDispatcher;
 use Infocyph\TalkingBytes\Http\Concurrent\CurlMultiTransport;
 use Infocyph\TalkingBytes\Http\HttpRequest;
 use Infocyph\TalkingBytes\Http\Internal\RequestSecurityGuard;
@@ -38,13 +39,13 @@ it('redacts sensitive http headers and query parameters', function (): void {
 it('enforces host allow and block lists before sending request', function (): void {
     $transport = new CurlTransport();
 
-    $blocked = $transport->sendRequest(
+    $blocked = $transport->send(
         HttpRequest::get('https://example.com')->blockHosts(['example.com']),
     );
     expect($blocked->successful)->toBeFalse();
     expect($blocked->error)->toContain('host is blocked');
 
-    $notAllowed = $transport->sendRequest(
+    $notAllowed = $transport->send(
         HttpRequest::get('https://example.com')->allowHosts(['api.example.com']),
     );
     expect($notAllowed->successful)->toBeFalse();
@@ -54,12 +55,23 @@ it('enforces host allow and block lists before sending request', function (): vo
 it('blocks private networks when configured', function (): void {
     $transport = new CurlTransport();
 
-    $result = $transport->sendRequest(
+    $result = $transport->send(
         HttpRequest::get('http://127.0.0.1')->blockPrivateNetworks(),
     );
 
     expect($result->successful)->toBeFalse();
     expect($result->error)->toContain('private or reserved');
+});
+
+it('rejects surrounding URL whitespace before security inspection', function (): void {
+    expect(fn() => HttpRequest::get(' http://127.0.0.1'))
+        ->toThrow(InvalidArgumentException::class, 'surrounding whitespace');
+});
+
+it('canonicalizes a trailing root label in host block lists', function (): void {
+    expect(fn() => RequestSecurityGuard::assertAllowed(
+        HttpRequest::get('https://example.com./')->blockHosts(['example.com']),
+    ))->toThrow(InvalidArgumentException::class, 'host is blocked');
 });
 
 it('blocks additional reserved host ranges when private network blocking is enabled', function (): void {
@@ -91,16 +103,14 @@ it('applies security guard checks to redirect destinations as well', function ()
 
 it('dispatches http pool lifecycle events', function (): void {
     $events = [];
-    CommunicationEventBus::listen(static function (string $event, array $payload) use (&$events): void {
+    $dispatcher = new CallableEventDispatcher(static function (string $event, array $payload) use (&$events): void {
         if (str_starts_with($event, 'http.pool.')) {
             $events[] = ['event' => $event, 'payload' => $payload];
         }
     });
 
-    $pool = new CurlMultiTransport();
+    $pool = new CurlMultiTransport(events: $dispatcher);
     $result = $pool->sendMany([], 5);
-
-    CommunicationEventBus::listen(null);
 
     expect($result->results)->toBe([]);
     expect($events[0]['event'] ?? null)->toBe('http.pool.start');
@@ -110,7 +120,7 @@ it('dispatches http pool lifecycle events', function (): void {
 
 it('dispatches http request start and failure events for curl transport', function (): void {
     $events = [];
-    CommunicationEventBus::listen(static function (string $event, array $payload) use (&$events): void {
+    $dispatcher = new CallableEventDispatcher(static function (string $event, array $payload) use (&$events): void {
         if (str_starts_with($event, 'http.request.')) {
             $events[] = ['event' => $event, 'payload' => $payload];
         }
@@ -125,8 +135,7 @@ it('dispatches http request start and failure events for curl transport', functi
         ->timeout(1)
         ->connectTimeout(1);
 
-    $result = (new CurlTransport())->sendRequest($request);
-    CommunicationEventBus::listen(null);
+    $result = (new CurlTransport($dispatcher))->send($request);
 
     expect($result->successful)->toBeFalse();
     expect($events[0]['event'] ?? null)->toBe('http.request.start');

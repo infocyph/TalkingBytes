@@ -4,10 +4,15 @@ declare(strict_types=1);
 
 namespace Infocyph\TalkingBytes\Webhook;
 
-use Infocyph\TalkingBytes\Core\Event\CommunicationEventBus;
+use Infocyph\TalkingBytes\Core\Event\BestEffortEventDispatcher;
+use Infocyph\TalkingBytes\Core\Event\EventDispatcher;
+use Infocyph\TalkingBytes\Core\Event\NullEventDispatcher;
+use Infocyph\TalkingBytes\Core\Support\Clock;
+use Infocyph\TalkingBytes\Core\Support\Sleeper;
 use Infocyph\TalkingBytes\Http\HttpClient;
 use Infocyph\TalkingBytes\Http\HttpRequest;
 use Infocyph\TalkingBytes\Http\Support\HttpRedactor;
+use Infocyph\TalkingBytes\Retry\RetryContext;
 use Infocyph\TalkingBytes\Webhook\Model\WebhookDelivery;
 use Infocyph\TalkingBytes\Webhook\Model\WebhookDeliveryResult;
 use Infocyph\TalkingBytes\Webhook\Retry\WebhookRetryProfile;
@@ -19,12 +24,37 @@ use LogicException;
 
 final readonly class WebhookSender
 {
+    private Clock $clock;
+
+    private EventDispatcher $events;
+
+    private WebhookSigner $resolvedSigner;
+
+    private Sleeper $sleeper;
+
     public function __construct(
         private HttpClient $httpClient,
+        #[\SensitiveParameter]
         private ?string $signingSecret = null,
         private ?WebhookSigner $signer = null,
         private ?WebhookRetryProfile $retryProfile = null,
-    ) {}
+        private int $maxPayloadBytes = 1_048_576,
+        ?EventDispatcher $events = null,
+        ?Clock $clock = null,
+        ?Sleeper $sleeper = null,
+    ) {
+        if ($this->maxPayloadBytes < 1) {
+            throw new InvalidArgumentException('Webhook max payload bytes must be greater than zero.');
+        }
+        if ($this->retryProfile !== null && $this->httpClient->hasRetryMiddleware()) {
+            throw new InvalidArgumentException('Webhook and HTTP retry layers cannot both be enabled.');
+        }
+
+        $this->events = new BestEffortEventDispatcher($events ?? new NullEventDispatcher());
+        $this->clock = $clock ?? Clock::system();
+        $this->sleeper = $sleeper ?? Sleeper::system();
+        $this->resolvedSigner = $this->signer ?? new HmacWebhookSigner();
+    }
 
     public static function usingHttp(HttpClient $httpClient): self
     {
@@ -36,25 +66,22 @@ final readonly class WebhookSender
         int $attempts = 3,
         int $baseDelayMs = 250,
         int $maxRetryAfterSeconds = 30,
+        ?EventDispatcher $events = null,
+        ?Clock $clock = null,
+        ?Sleeper $sleeper = null,
     ): self {
         $profile = WebhookRetryProfile::standard($attempts, $baseDelayMs, $maxRetryAfterSeconds);
 
-        return new self($httpClient, null, null, $profile);
+        return new self($httpClient, null, null, $profile, events: $events, clock: $clock, sleeper: $sleeper);
     }
 
     public function send(WebhookMessage $webhook): WebhookDelivery
     {
-        if ($webhook->url === null || $webhook->url === '') {
-            throw new LogicException('Webhook URL is required before sending.');
-        }
+        $payload = $webhook->payloadForDelivery($this->maxPayloadBytes);
+        $url = $webhook->deliveryUrl();
 
-        $timestamp = time();
-        $payload = is_string($webhook->payload)
-            ? $webhook->payload
-            : json_encode($webhook->payload, JSON_THROW_ON_ERROR);
-
-        $redactedUrl = HttpRedactor::redactUrl($webhook->url);
-        CommunicationEventBus::dispatch('webhook.send.start', [
+        $redactedUrl = HttpRedactor::redactUrl($url);
+        $this->events->dispatch('webhook.send.start', [
             'event' => $webhook->event,
             'delivery_id' => $webhook->deliveryId,
             'url' => $redactedUrl,
@@ -65,14 +92,14 @@ final readonly class WebhookSender
         $retryPolicy = $this->retryProfile?->toHttpRetryPolicy();
 
         while (true) {
-            $request = HttpRequest::post($webhook->url)
+            $timestamp = (int) floor($this->clock->timestamp());
+            $request = HttpRequest::post($url)
                 ->raw($payload, 'application/json')
                 ->headers($webhook->headers)
                 ->header(WebhookHeaders::EVENT, $webhook->event)
                 ->header(WebhookHeaders::DELIVERY, $webhook->deliveryId)
                 ->header(WebhookHeaders::TIMESTAMP, (string) $timestamp)
                 ->header(WebhookHeaders::ATTEMPT, (string) $attempt)
-                ->header(WebhookHeaders::USER_AGENT, 'TalkingBytes/1.0')
                 ->header(WebhookHeaders::CONTENT_TYPE, 'application/json');
 
             if ($this->signingSecret !== null) {
@@ -82,11 +109,12 @@ final readonly class WebhookSender
 
             $result = $this->httpClient->send($request);
 
-            if ($retryPolicy === null || !$retryPolicy->shouldRetry($attempt, $result)) {
+            $decision = $retryPolicy?->decide(new RetryContext($attempt, $result));
+            if ($decision === null || !$decision->retry) {
                 break;
             }
 
-            CommunicationEventBus::dispatch('webhook.retry', [
+            $this->events->dispatch('webhook.retry', [
                 'event' => $webhook->event,
                 'delivery_id' => $webhook->deliveryId,
                 'url' => $redactedUrl,
@@ -95,9 +123,9 @@ final readonly class WebhookSender
                 'error' => $result->error,
             ]);
 
-            $delayMs = $retryPolicy->delayMs($attempt);
+            $delayMs = $decision->delayMs;
             if ($delayMs > 0) {
-                usleep($delayMs * 1000);
+                $this->sleeper->milliseconds($delayMs);
             }
 
             $attempt++;
@@ -105,7 +133,7 @@ final readonly class WebhookSender
         $delivery = new WebhookDeliveryResult(
             deliveryId: $webhook->deliveryId,
             event: $webhook->event,
-            url: $webhook->url,
+            url: $url,
             attempts: $attempt,
             delivered: $result->successful,
             statusCode: $result->statusCode,
@@ -116,7 +144,7 @@ final readonly class WebhookSender
             ],
         );
 
-        CommunicationEventBus::dispatch(
+        $this->events->dispatch(
             $result->successful ? 'webhook.send.finish' : 'webhook.send.failed',
             [
                 'event' => $webhook->event,
@@ -132,13 +160,13 @@ final readonly class WebhookSender
         return new WebhookDelivery($webhook, $result, $delivery);
     }
 
-    public function signingSecret(string $secret): self
+    public function signingSecret(#[\SensitiveParameter] string $secret): self
     {
         if ($secret === '') {
             throw new InvalidArgumentException('Webhook signing secret must not be empty.');
         }
 
-        return new self($this->httpClient, $secret, $this->signer, $this->retryProfile);
+        return new self($this->httpClient, $secret, $this->signer, $this->retryProfile, $this->maxPayloadBytes, $this->events, $this->clock, $this->sleeper);
     }
 
     public function withRetryProfile(
@@ -148,17 +176,17 @@ final readonly class WebhookSender
     ): self {
         $profile = WebhookRetryProfile::standard($attempts, $baseDelayMs, $maxRetryAfterSeconds);
 
-        return new self($this->httpClient, $this->signingSecret, $this->signer, $profile);
+        return new self($this->httpClient, $this->signingSecret, $this->signer, $profile, $this->maxPayloadBytes, $this->events, $this->clock, $this->sleeper);
     }
 
-    public function withSecret(string $secret): self
+    public function withSecret(#[\SensitiveParameter] string $secret): self
     {
         return $this->signingSecret($secret);
     }
 
     public function withSigner(WebhookSigner $signer): self
     {
-        return new self($this->httpClient, $this->signingSecret, $signer, $this->retryProfile);
+        return new self($this->httpClient, $this->signingSecret, $signer, $this->retryProfile, $this->maxPayloadBytes, $this->events, $this->clock, $this->sleeper);
     }
 
     private function signature(string $payload, int $timestamp): string
@@ -167,7 +195,6 @@ final readonly class WebhookSender
             throw new LogicException('Webhook signing secret is not configured.');
         }
 
-        return ($this->signer ?? new HmacWebhookSigner())
-            ->sign($payload, $timestamp, $this->signingSecret);
+        return $this->resolvedSigner->sign($payload, $timestamp, $this->signingSecret);
     }
 }

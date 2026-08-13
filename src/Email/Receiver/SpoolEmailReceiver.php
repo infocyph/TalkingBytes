@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace Infocyph\TalkingBytes\Email\Receiver;
 
+use FilesystemIterator;
+use Infocyph\TalkingBytes\Core\Event\CommunicationEventBus;
 use Infocyph\TalkingBytes\Email\Config\SpoolConfig;
-use Infocyph\TalkingBytes\Email\Event\EmailEventBus;
 use Infocyph\TalkingBytes\Email\Parser\EmailParser;
 use Infocyph\TalkingBytes\Email\Parser\RawEmailParser;
 use Infocyph\TalkingBytes\Email\ValueObject\ParsedEmail;
 use RuntimeException;
+use SplFileInfo;
 
 final readonly class SpoolEmailReceiver implements EmailReceiver
 {
@@ -19,7 +21,21 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
         private bool $deleteAfterRead = false,
         private ?string $moveAfterRead = null,
         private ?string $failedDirectory = null,
-    ) {}
+    ) {
+        $directories = array_filter([
+            $this->config->directory,
+            $this->config->processingDirectory,
+            $this->moveAfterRead,
+            $this->failedDirectory,
+        ], is_string(...));
+        $normalized = array_map(
+            static fn(string $path): string => rtrim(str_replace('\\', '/', $path), '/'),
+            $directories,
+        );
+        if (count($normalized) !== count(array_unique($normalized))) {
+            throw new \InvalidArgumentException('Spool source, processing, success, and failure directories must be distinct.');
+        }
+    }
 
     public function peek(): ?ParsedEmail
     {
@@ -98,7 +114,7 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
 
     private function ensureDirectory(string $directory): void
     {
-        if (!is_dir($directory) && !mkdir($directory, 0775, true) && !is_dir($directory)) {
+        if (!is_dir($directory) && !mkdir($directory, 0700, true) && !is_dir($directory)) {
             throw new RuntimeException(sprintf('Unable to create directory: %s', $directory));
         }
     }
@@ -124,15 +140,16 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
         }
 
         $extension = ltrim($this->config->extension, '.');
-        $files = glob(sprintf('%s/*.%s', $directory, $extension));
-        if ($files === false || $files === []) {
-            return null;
-        }
-
         $now = time();
-        $candidates = [];
-
-        foreach ($files as $file) {
+        $candidate = null;
+        foreach (new FilesystemIterator($directory, FilesystemIterator::SKIP_DOTS) as $entry) {
+            if (!$entry instanceof SplFileInfo) {
+                continue;
+            }
+            if (!$entry->isFile() || strtolower($entry->getExtension()) !== strtolower($extension)) {
+                continue;
+            }
+            $file = $entry->getPathname();
             $mtime = filemtime($file);
             if ($mtime === false) {
                 continue;
@@ -148,16 +165,12 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
                 continue;
             }
 
-            $candidates[] = $file;
+            if ($candidate === null || strcmp($file, $candidate) < 0) {
+                $candidate = $file;
+            }
         }
 
-        if ($candidates === []) {
-            return null;
-        }
-
-        sort($candidates);
-
-        return $candidates[0];
+        return $candidate;
     }
 
     private function markFailed(string $file, string $reason): void
@@ -166,7 +179,9 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
             try {
                 $target = $this->moveFileToDirectory($file, $this->failedDirectory);
                 $errorPath = $target . '.error.txt';
-                file_put_contents($errorPath, $reason);
+                $safeReason = preg_replace('/[\x00-\x1F\x7F]/', ' ', $reason) ?? 'Spool processing failed.';
+                file_put_contents($errorPath, substr($safeReason, 0, 4096), LOCK_EX);
+                chmod($errorPath, 0600);
             } catch (\Throwable) {
                 // Best effort quarantine.
             }
@@ -205,8 +220,10 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
 
     private function readFile(string $file, bool $exclusiveLock): string|false
     {
-        if (!$this->config->lockBeforeRead) {
-            return file_get_contents($file);
+        $maxBytes = $this->config->maxMessageBytes ?? 10_485_760;
+        $size = filesize($file);
+        if (!is_int($size) || $size > $maxBytes) {
+            throw new RuntimeException(sprintf('Spool email exceeds configured size limit (%d bytes).', $maxBytes));
         }
 
         $handle = fopen($file, 'rb');
@@ -215,17 +232,19 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
         }
 
         $lockMode = $exclusiveLock ? LOCK_EX : LOCK_SH;
-        if (!flock($handle, $lockMode)) {
+        if ($this->config->lockBeforeRead && !flock($handle, $lockMode)) {
             fclose($handle);
 
             return false;
         }
 
-        $contents = stream_get_contents($handle);
-        flock($handle, LOCK_UN);
+        $contents = stream_get_contents($handle, $maxBytes + 1);
+        if ($this->config->lockBeforeRead) {
+            flock($handle, LOCK_UN);
+        }
         fclose($handle);
 
-        return is_string($contents) ? $contents : false;
+        return is_string($contents) && strlen($contents) <= $maxBytes ? $contents : false;
     }
 
     private function readNext(bool $consume): ?ParsedEmail
@@ -237,7 +256,7 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
 
         $processingFile = $sourceFile;
         $startedAt = microtime(true);
-        EmailEventBus::dispatch('email.receive.start', [
+        CommunicationEventBus::dispatch('email.receive.start', [
             'source' => 'spool',
             'path' => $sourceFile,
             'consume' => $consume,
@@ -248,7 +267,7 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
             $raw = $this->readFile($processingFile, $consume);
             if ($raw === false) {
                 $this->markFailed($processingFile, 'Unable to read spool file.');
-                EmailEventBus::dispatch('email.receive.finish', [
+                CommunicationEventBus::dispatch('email.receive.finish', [
                     'source' => 'spool',
                     'successful' => false,
                     'path' => $processingFile,
@@ -262,12 +281,12 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
             $parsed = $this->parseFile($raw, $this->buildMetadata($sourceFile, $processingFile, $consume));
         } catch (\Throwable $exception) {
             $this->markFailed($processingFile, $exception->getMessage());
-            EmailEventBus::dispatch('email.parse.failed', [
+            CommunicationEventBus::dispatch('email.parse.failed', [
                 'source' => 'spool',
                 'path' => $processingFile,
                 'error' => $exception->getMessage(),
             ]);
-            EmailEventBus::dispatch('email.receive.finish', [
+            CommunicationEventBus::dispatch('email.receive.finish', [
                 'source' => 'spool',
                 'successful' => false,
                 'path' => $processingFile,
@@ -282,7 +301,7 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
             $this->finalizeRead($processingFile);
         }
 
-        EmailEventBus::dispatch('email.receive.finish', [
+        CommunicationEventBus::dispatch('email.receive.finish', [
             'source' => 'spool',
             'successful' => true,
             'path' => $processingFile,

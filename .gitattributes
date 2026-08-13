@@ -1,4 +1,6 @@
 .github export-ignore
+.agents export-ignore
+.codex export-ignore
 .idea export-ignore
 benchmarks export-ignore
 docs export-ignore
@@ -21,5 +23,7 @@ pint.json export-ignore
 psalm.xml export-ignore
 rector.php export-ignore
 talkingbytes19.txt export-ignore
+talkingbytes.txt export-ignore
+plan.md export-ignore
 
 * text eol=lf

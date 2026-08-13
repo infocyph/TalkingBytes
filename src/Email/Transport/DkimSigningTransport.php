@@ -21,10 +21,11 @@ final readonly class DkimSigningTransport implements EmailTransport
 
     public function send(EmailMessage $message): CommunicationResult
     {
+        $message = $message->prepare();
         $raw = $this->rawEmailBuilder->build($message, includeSubject: true);
         $dkimHeader = $this->signer->buildSignatureHeader($raw->headers, $raw->body, $this->config);
         $dkimValue = trim(substr($dkimHeader, strlen('DKIM-Signature:')));
 
-        return $this->innerTransport->send($message->header('DKIM-Signature', $dkimValue));
+        return $this->innerTransport->send($message->withDkimSignature($dkimValue));
     }
 }

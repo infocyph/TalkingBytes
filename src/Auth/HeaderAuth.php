@@ -12,6 +12,7 @@ final readonly class HeaderAuth implements AuthenticatorInterface
 {
     public function __construct(
         private string $header,
+        #[\SensitiveParameter]
         private string $value,
     ) {
         if (trim($this->header) === '') {

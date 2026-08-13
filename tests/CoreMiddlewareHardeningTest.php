@@ -2,239 +2,120 @@
 
 declare(strict_types=1);
 
-use Infocyph\TalkingBytes\Core\Contract\TransportInterface;
-use Infocyph\TalkingBytes\Core\Message\CommunicationRequest;
-use Infocyph\TalkingBytes\Core\Middleware\CircuitBreakerMiddleware;
-use Infocyph\TalkingBytes\Core\Middleware\HeaderMiddleware;
-use Infocyph\TalkingBytes\Core\Middleware\IdempotencyMiddleware;
-use Infocyph\TalkingBytes\Core\Middleware\LoggingMiddleware;
-use Infocyph\TalkingBytes\Core\Middleware\RateLimitMiddleware;
-use Infocyph\TalkingBytes\Core\Middleware\RetryMiddleware;
-use Infocyph\TalkingBytes\Core\Middleware\TimeoutMiddleware;
-use Infocyph\TalkingBytes\Core\Pipeline\MiddlewarePipeline;
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
-use Infocyph\TalkingBytes\Grpc\Sender\GrpcRequest;
+use Infocyph\TalkingBytes\Core\Support\Clock;
+use Infocyph\TalkingBytes\Http\Contract\HttpTransport;
+use Infocyph\TalkingBytes\Http\HttpPipeline;
 use Infocyph\TalkingBytes\Http\HttpRequest;
+use Infocyph\TalkingBytes\Http\Middleware\CircuitBreakerMiddleware;
+use Infocyph\TalkingBytes\Http\Middleware\IdempotencyMiddleware;
+use Infocyph\TalkingBytes\Http\Middleware\LoggingMiddleware;
+use Infocyph\TalkingBytes\Http\Middleware\RateLimitMiddleware;
+use Infocyph\TalkingBytes\Http\Middleware\RetryMiddleware;
+use Infocyph\TalkingBytes\Http\Middleware\TimeoutMiddleware;
 use Infocyph\TalkingBytes\Resilience\CircuitBreaker;
 use Infocyph\TalkingBytes\Resilience\RateLimiter;
 use Infocyph\TalkingBytes\Retry\FixedDelayRetryPolicy;
 
-it('retries when transport throws and policy allows retry', function (): void {
+function recordingHttpTransport(Closure $send): HttpTransport
+{
+    return new class($send) implements HttpTransport {
+        public function __construct(private Closure $send) {}
+        public function send(HttpRequest $request): CommunicationResult
+        {
+            return ($this->send)($request);
+        }
+    };
+}
+
+it('retries safe HTTP requests when policy allows retry', function (): void {
     $attempts = 0;
+    $transport = recordingHttpTransport(static function () use (&$attempts): CommunicationResult {
+        $attempts++;
 
-    $transport = new class($attempts) implements TransportInterface
-    {
-        public function __construct(private int &$attempts) {}
+        return $attempts === 1
+            ? CommunicationResult::failure('temporary', 503)
+            : CommunicationResult::success(statusCode: 200);
+    });
 
-        public function send(CommunicationRequest $request): CommunicationResult
-        {
-            unset($request);
+    $result = (new HttpPipeline($transport, [new RetryMiddleware(new FixedDelayRetryPolicy(2, 0))]))
+        ->send(HttpRequest::get('https://example.com'));
 
-            $this->attempts++;
-
-            if ($this->attempts === 1) {
-                throw new RuntimeException('temporary failure');
-            }
-
-            return CommunicationResult::success(200);
-        }
-    };
-
-    $pipeline = new MiddlewarePipeline($transport, [new RetryMiddleware(new FixedDelayRetryPolicy(2, 0))]);
-
-    $result = $pipeline->send(new CommunicationRequest('test', ['hello' => 'world']));
-
-    expect($result->successful)->toBeTrue();
-    expect($attempts)->toBe(2);
+    expect($result->successful)->toBeTrue()->and($attempts)->toBe(2);
 });
 
-it('applies timeout middleware to http request payload', function (): void {
-    $timeoutSeen = null;
+it('applies HTTP timeout and one stable idempotency key outside retry', function (): void {
+    $seen = [];
+    $transport = recordingHttpTransport(static function (HttpRequest $request) use (&$seen): CommunicationResult {
+        $seen[] = [$request->options->timeoutSeconds, $request->headers->get('Idempotency-Key')];
 
-    $transport = new class($timeoutSeen) implements TransportInterface
-    {
-        public function __construct(private ?int &$timeoutSeen) {}
+        return count($seen) === 1
+            ? CommunicationResult::failure('temporary', 503)
+            : CommunicationResult::success(statusCode: 200);
+    });
+    $pipeline = new HttpPipeline($transport, [
+        new RetryMiddleware(new FixedDelayRetryPolicy(2, 0)),
+        new IdempotencyMiddleware(),
+        new TimeoutMiddleware(33),
+    ]);
 
-        public function send(CommunicationRequest $request): CommunicationResult
-        {
-            expect($request->payload)->toBeInstanceOf(HttpRequest::class);
+    $pipeline->send(HttpRequest::post('https://example.com')->json(['ok' => true]));
 
-            /** @var HttpRequest $httpRequest */
-            $httpRequest = $request->payload;
-            $this->timeoutSeen = $httpRequest->options->timeoutSeconds;
-
-            return CommunicationResult::success(200);
-        }
-    };
-
-    $pipeline = new MiddlewarePipeline($transport, [new TimeoutMiddleware(33)]);
-
-    $pipeline->send(new CommunicationRequest('http', HttpRequest::get('https://example.com')));
-
-    expect($timeoutSeen)->toBe(33);
+    expect($seen)->toHaveCount(2)
+        ->and($seen[0][0])->toBe(33)
+        ->and($seen[0][1])->toMatch('/^[a-f0-9]{32}$/')
+        ->and($seen[1][1])->toBe($seen[0][1]);
 });
 
-it('applies timeout middleware to grpc request payload', function (): void {
-    $deadlineSeen = null;
-
-    $transport = new class($deadlineSeen) implements TransportInterface
-    {
-        public function __construct(private ?float &$deadlineSeen) {}
-
-        public function send(CommunicationRequest $request): CommunicationResult
-        {
-            expect($request->payload)->toBeInstanceOf(GrpcRequest::class);
-
-            /** @var GrpcRequest $grpcRequest */
-            $grpcRequest = $request->payload;
-            $this->deadlineSeen = $grpcRequest->deadlineSeconds;
-
-            return CommunicationResult::success(200);
-        }
-    };
-
-    $pipeline = new MiddlewarePipeline($transport, [new TimeoutMiddleware(12)]);
-
-    $pipeline->send(new CommunicationRequest('grpc', new GrpcRequest('Svc/Call', ['ok' => true])));
-
-    expect($deadlineSeen)->toBe(12.0);
-});
-
-it('applies header middleware to http request payload', function (): void {
-    $headerValue = null;
-
-    $transport = new class($headerValue) implements TransportInterface
-    {
-        public function __construct(private ?string &$headerValue) {}
-
-        public function send(CommunicationRequest $request): CommunicationResult
-        {
-            expect($request->payload)->toBeInstanceOf(HttpRequest::class);
-
-            /** @var HttpRequest $httpRequest */
-            $httpRequest = $request->payload;
-            $value = $httpRequest->headers->get('X-App');
-
-            expect($value)->toBeString();
-            $this->headerValue = $value;
-
-            return CommunicationResult::success(200);
-        }
-    };
-
-    $pipeline = new MiddlewarePipeline($transport, [new HeaderMiddleware(['X-App' => 'talkingbytes'])]);
-
-    $pipeline->send(new CommunicationRequest('http', HttpRequest::get('https://example.com')));
-
-    expect($headerValue)->toBe('talkingbytes');
-});
-
-it('rate limit middleware blocks excess requests', function (): void {
-    $transport = new class implements TransportInterface
-    {
-        public function send(CommunicationRequest $request): CommunicationResult
-        {
-            unset($request);
-
-            return CommunicationResult::success(200);
-        }
-    };
-
-    $pipeline = new MiddlewarePipeline(
-        $transport,
+it('blocks excess HTTP requests with the token bucket', function (): void {
+    $pipeline = new HttpPipeline(
+        recordingHttpTransport(static fn(): CommunicationResult => CommunicationResult::success()),
         [new RateLimitMiddleware(new RateLimiter(1, 60))],
     );
+    $pipeline->send(HttpRequest::get('https://example.com'));
 
-    $pipeline->send(new CommunicationRequest('test', null));
-
-    expect(fn () => $pipeline->send(new CommunicationRequest('test', null)))
+    expect(fn() => $pipeline->send(HttpRequest::get('https://example.com')))
         ->toThrow(RuntimeException::class, 'Rate limit exceeded.');
 });
 
-it('circuit breaker middleware opens after failures', function (): void {
-    $transport = new class implements TransportInterface
-    {
-        public function send(CommunicationRequest $request): CommunicationResult
-        {
-            unset($request);
-
-            return CommunicationResult::failure('downstream failed', 503);
-        }
-    };
-
-    $pipeline = new MiddlewarePipeline(
-        $transport,
-        [new CircuitBreakerMiddleware(new CircuitBreaker(failureThreshold: 1, coolDownSeconds: 60))],
+it('does not over-refill the token bucket after a backward clock reading', function (): void {
+    $times = [100.0, 90.0, 150.0];
+    $clock = new Clock(
+        static fn(): float => 0.0,
+        static function () use (&$times): float {
+            return array_shift($times) ?? 150.0;
+        },
     );
+    $limiter = new RateLimiter(1, 60, $clock);
 
-    $first = $pipeline->send(new CommunicationRequest('test', null));
+    $limiter->assertCanProceed();
 
-    expect($first->successful)->toBeFalse();
-    expect(fn () => $pipeline->send(new CommunicationRequest('test', null)))
+    expect(fn() => $limiter->assertCanProceed())
+        ->toThrow(RuntimeException::class, 'Rate limit exceeded.');
+});
+
+it('opens an HTTP circuit after the configured failure threshold', function (): void {
+    $pipeline = new HttpPipeline(
+        recordingHttpTransport(static fn(): CommunicationResult => CommunicationResult::failure('down', 503)),
+        [new CircuitBreakerMiddleware(new CircuitBreaker(1, 60))],
+    );
+    expect($pipeline->send(HttpRequest::get('https://example.com'))->successful)->toBeFalse();
+    expect(fn() => $pipeline->send(HttpRequest::get('https://example.com')))
         ->toThrow(RuntimeException::class, 'Circuit breaker is open.');
 });
 
-it('applies idempotency key to both communication headers and http payload headers', function (): void {
-    $requestHeaders = [];
-    $httpHeader = null;
-
-    $transport = new class($requestHeaders, $httpHeader) implements TransportInterface
-    {
-        /**
-         * @param  array<string, string|string[]>  $requestHeaders
-         */
-        public function __construct(
-            private array &$requestHeaders,
-            private string|array|null &$httpHeader,
-        ) {}
-
-        public function send(CommunicationRequest $request): CommunicationResult
-        {
-            expect($request->payload)->toBeInstanceOf(HttpRequest::class);
-
-            $this->requestHeaders = $request->headers;
-
-            /** @var HttpRequest $httpRequest */
-            $httpRequest = $request->payload;
-            $this->httpHeader = $httpRequest->headers->get('Idempotency-Key');
-
-            return CommunicationResult::success(200);
-        }
-    };
-
-    $pipeline = new MiddlewarePipeline($transport, [new IdempotencyMiddleware]);
-    $pipeline->send(new CommunicationRequest('http', HttpRequest::post('https://example.com')->json(['a' => 1])));
-
-    expect($requestHeaders)->toHaveKey('Idempotency-Key');
-    expect($requestHeaders['Idempotency-Key'])->toMatch('/^[a-f0-9]{32}$/');
-    expect($httpHeader)->toBe($requestHeaders['Idempotency-Key']);
-});
-
-it('logging middleware logs request end on transport exception', function (): void {
+it('keeps logging best effort and records transport exceptions', function (): void {
     $events = [];
+    $pipeline = new HttpPipeline(
+        recordingHttpTransport(static function (): never { throw new RuntimeException('boom'); }),
+        [new LoggingMiddleware(static function (string $event, array $context) use (&$events): void {
+            $events[] = [$event, $context];
+        })],
+    );
 
-    $transport = new class implements TransportInterface
-    {
-        public function send(CommunicationRequest $request): CommunicationResult
-        {
-            unset($request);
-
-            throw new RuntimeException('boom');
-        }
-    };
-
-    $logger = function (string $event, array $context) use (&$events): void {
-        $events[] = ['event' => $event, 'context' => $context];
-    };
-
-    $pipeline = new MiddlewarePipeline($transport, [new LoggingMiddleware($logger)]);
-
-    expect(fn () => $pipeline->send(new CommunicationRequest('test', null)))
+    expect(fn() => $pipeline->send(HttpRequest::get('https://example.com')))
         ->toThrow(RuntimeException::class, 'boom');
-
-    expect($events)->toHaveCount(2);
-    expect($events[0]['event'])->toBe('request.start');
-    expect($events[1]['event'])->toBe('request.end');
-    expect($events[1]['context']['successful'])->toBeFalse();
-    expect($events[1]['context']['error'])->toBe('boom');
+    expect($events)->toHaveCount(2)
+        ->and($events[0][0])->toBe('http.request.start')
+        ->and($events[1][1]['successful'])->toBeFalse();
 });

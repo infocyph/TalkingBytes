@@ -2,7 +2,6 @@
 
 declare(strict_types=1);
 
-use Infocyph\TalkingBytes\Core\Message\CommunicationRequest;
 use Infocyph\TalkingBytes\Http\HttpClient;
 use Infocyph\TalkingBytes\Http\HttpClientConfig;
 use Infocyph\TalkingBytes\Http\HttpRequest;
@@ -60,16 +59,18 @@ it('builds http client from config defaults', function (): void {
     expect($defaulted->options->userAgent)->toBe('TalkingBytes/1.0');
 });
 
-it('reuses requests when client defaults require no changes', function (): void {
+it('preserves request semantics when client defaults require no changes', function (): void {
     $client = HttpClient::curl();
     $request = HttpRequest::get('https://example.com');
     $method = new ReflectionMethod($client, 'applyDefaults');
 
-    expect($method->invoke($client, $request))->toBe($request);
+    /** @var HttpRequest $defaulted */
+    $defaulted = $method->invoke($client, $request);
+    expect($defaulted->buildUrl())->toBe($request->buildUrl());
     expect($request->applyAuthenticators())->toBe($request);
 });
 
-it('keeps configured client defaults authoritative without repeating equal changes', function (): void {
+it('keeps explicit request options authoritative over client defaults', function (): void {
     $client = HttpClient::fromConfig(new HttpClientConfig(
         timeoutSeconds: 15,
         connectTimeoutSeconds: 5,
@@ -85,8 +86,8 @@ it('keeps configured client defaults authoritative without repeating equal chang
     /** @var HttpRequest $defaulted */
     $defaulted = $method->invoke($client, $request);
 
-    expect($defaulted->options->timeoutSeconds)->toBe(15);
-    expect($defaulted->options->connectTimeoutSeconds)->toBe(5);
+    expect($defaulted->options->timeoutSeconds)->toBe(2);
+    expect($defaulted->options->connectTimeoutSeconds)->toBe(2);
     expect($defaulted->options->followRedirects)->toBeTrue();
     expect($defaulted->headers->get('X-App'))->toBe('TalkingBytes');
 });
@@ -107,15 +108,6 @@ it('validates http client config values', function (): void {
     expect(fn() => HttpClientConfig::fromArray([
         'defaultHeaders' => ['Bad Header' => 'x'],
     ]))->toThrow(InvalidArgumentException::class, 'Invalid HTTP header name');
-});
-
-it('curl transport returns failure for invalid payload type', function (): void {
-    $transport = new CurlTransport();
-
-    $result = $transport->send(new CommunicationRequest('http', ['bad' => 'payload']));
-
-    expect($result->successful)->toBeFalse();
-    expect($result->error)->toContain('expects HttpRequest payload');
 });
 
 it('keeps redirects disabled by default', function (): void {
@@ -148,4 +140,13 @@ it('validates curl options upfront', function (): void {
 
     expect(fn() => new CurlOptions(clientCertificate: '/missing-cert.pem'))
         ->toThrow(InvalidArgumentException::class, 'clientCertificate must point to a readable file');
+
+    expect(fn() => new CurlOptions(userAgent: "TalkingBytes\r\nX-Injected: yes"))
+        ->toThrow(InvalidArgumentException::class, 'userAgent contains control characters');
+
+    expect(fn() => new CurlOptions(proxyAuth: 'missing-separator'))
+        ->toThrow(InvalidArgumentException::class, 'username:password');
+
+    expect(fn() => HttpRequest::get('https://example.com')->proxyAuth('bad:name', 'secret'))
+        ->toThrow(InvalidArgumentException::class, 'Proxy credentials are invalid');
 });

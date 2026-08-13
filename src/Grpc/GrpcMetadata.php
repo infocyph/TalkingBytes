@@ -6,22 +6,53 @@ namespace Infocyph\TalkingBytes\Grpc;
 
 use InvalidArgumentException;
 
-final class GrpcMetadata
+final readonly class GrpcMetadata
 {
+    private const int MAX_COUNT = 64;
+
+    private const int MAX_KEY_BYTES = 128;
+
+    private const int MAX_TOTAL_BYTES = 32_768;
+
+    private const int MAX_VALUE_BYTES = 8_192;
+
     /** @var array<string, list<string>> */
     public array $headers;
 
     /**
-     * @param array<string, list<string>> $headers
+     * @param array<array-key, mixed> $headers
      */
     public function __construct(array $headers = [])
     {
+        if (count($headers) > self::MAX_COUNT) {
+            throw new InvalidArgumentException(sprintf('gRPC metadata cannot contain more than %d keys.', self::MAX_COUNT));
+        }
+
         $normalized = [];
+        $totalBytes = 0;
         foreach ($headers as $name => $values) {
+            if (!is_string($name)) {
+                throw new InvalidArgumentException('gRPC metadata names must be strings.');
+            }
+
+            if (!is_array($values) || !array_is_list($values)) {
+                throw new InvalidArgumentException('gRPC metadata values must be provided as lists of strings.');
+            }
+
             $normalizedName = self::normalizeHeaderName($name);
 
             foreach ($values as $value) {
+                if (!is_string($value)) {
+                    throw new InvalidArgumentException('gRPC metadata values must be strings.');
+                }
                 self::assertHeaderValue($value, $normalizedName);
+                $totalBytes += strlen($normalizedName) + strlen($value);
+                if ($totalBytes > self::MAX_TOTAL_BYTES) {
+                    throw new InvalidArgumentException(sprintf(
+                        'gRPC metadata cannot exceed %d total bytes.',
+                        self::MAX_TOTAL_BYTES,
+                    ));
+                }
             }
 
             $normalized[$normalizedName] = $values;
@@ -65,7 +96,7 @@ final class GrpcMetadata
 
     public function has(string $name): bool
     {
-        return array_key_exists(self::normalizeHeaderName($name), $this->headers);
+        return isset($this->headers[self::normalizeHeaderName($name)]);
     }
 
     /**
@@ -159,12 +190,19 @@ final class GrpcMetadata
 
     private static function assertHeaderValue(string $value, string $name): void
     {
+        if (strlen($value) > self::MAX_VALUE_BYTES) {
+            throw new InvalidArgumentException(sprintf(
+                'gRPC metadata values cannot exceed %d bytes.',
+                self::MAX_VALUE_BYTES,
+            ));
+        }
+
         if (self::isBinaryHeader($name)) {
             return;
         }
 
-        if (str_contains($value, "\r") || str_contains($value, "\n") || str_contains($value, "\0")) {
-            throw new InvalidArgumentException('gRPC metadata value must not contain control characters.');
+        if (preg_match('/[^\x20-\x7E]/', $value) === 1) {
+            throw new InvalidArgumentException('Non-binary gRPC metadata values must contain only printable ASCII bytes.');
         }
     }
 
@@ -179,6 +217,13 @@ final class GrpcMetadata
 
         if ($normalized === '') {
             throw new InvalidArgumentException('gRPC metadata name must not be empty.');
+        }
+
+        if (strlen($normalized) > self::MAX_KEY_BYTES) {
+            throw new InvalidArgumentException(sprintf(
+                'gRPC metadata names cannot exceed %d bytes.',
+                self::MAX_KEY_BYTES,
+            ));
         }
 
         if (preg_match('/^[a-z0-9_.-]+$/', $normalized) !== 1) {

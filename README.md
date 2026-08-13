@@ -8,9 +8,10 @@
 ![GitHub Code Size](https://img.shields.io/github/languages/code-size/infocyph/TalkingBytes)
 [![Documentation](https://img.shields.io/badge/Documentation-TalkingBytes-blue?logo=readthedocs&logoColor=white)](https://docs.infocyph.com/projects/TalkingBytes)
 
-Transport-agnostic communication toolkit for PHP.
+Protocol-focused communication toolkit for PHP.
 
-TalkingBytes provides a shared middleware/event core with protocol modules for:
+TalkingBytes provides typed HTTP and gRPC pipelines, shared result/event primitives,
+and protocol modules for:
 
 - Email (SMTP/sendmail/mail/spool + IMAP/POP3/parser)
 - HTTP (cURL + cURL multi)
@@ -25,7 +26,7 @@ composer require infocyph/talkingbytes
 
 Requirements:
 
-- PHP `>=8.4`
+- PHP `^8.4`
 - `ext-curl`
 - `ext-fileinfo`
 - `ext-openssl`
@@ -88,7 +89,7 @@ use Infocyph\TalkingBytes\Grpc\Receiver\GrpcInboundRequest;
 use Infocyph\TalkingBytes\Grpc\Receiver\GrpcInboundResponse;
 use Infocyph\TalkingBytes\Grpc\Sender\GrpcRequest;
 use Infocyph\TalkingBytes\Grpc\Sender\GrpcResponse;
-use Infocyph\TalkingBytes\Grpc\GrpcServer;
+use Infocyph\TalkingBytes\Grpc\GrpcInboundDispatcher;
 use Infocyph\TalkingBytes\Grpc\GrpcStatus;
 
 $client = GrpcClient::using(
@@ -100,7 +101,7 @@ $result = $client->send(new GrpcRequest('/orders.v1.OrderService/Create', [
     'order_id' => 1001,
 ]));
 
-$server = GrpcServer::new()->withHandler(
+$server = GrpcInboundDispatcher::new()->withHandler(
     '/orders.v1.OrderService/Create',
     static fn (GrpcInboundRequest $request): GrpcInboundResponse =>
         GrpcInboundResponse::ok(['received' => $request->message]),

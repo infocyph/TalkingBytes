@@ -18,6 +18,7 @@ final class MailboxConfigValidator
         if ($password === '') {
             throw new InvalidArgumentException(sprintf('%s password is required.', $protocol));
         }
+        self::assertCredential($protocol, 'password', $password);
     }
 
     public static function assertPort(string $protocol, int $port): void
@@ -44,5 +45,17 @@ final class MailboxConfigValidator
     public static function assertUsername(string $protocol, string $username): void
     {
         self::assertRequired(sprintf('%s username', $protocol), $username);
+        self::assertCredential($protocol, 'username', $username);
+    }
+
+    private static function assertCredential(string $protocol, string $kind, string $value): void
+    {
+        if (preg_match('/[\x00-\x1F\x7F]/', $value) === 1) {
+            throw new InvalidArgumentException(sprintf(
+                '%s %s must not contain ASCII control characters.',
+                $protocol,
+                $kind,
+            ));
+        }
     }
 }

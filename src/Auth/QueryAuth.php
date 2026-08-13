@@ -11,6 +11,7 @@ final readonly class QueryAuth implements AuthenticatorInterface
 {
     public function __construct(
         private string $key,
+        #[\SensitiveParameter]
         private string $value,
     ) {
         if (trim($this->key) === '') {

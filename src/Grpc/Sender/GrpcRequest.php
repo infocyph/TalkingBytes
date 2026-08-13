@@ -11,17 +11,19 @@ use InvalidArgumentException;
 
 final readonly class GrpcRequest
 {
+    public string $method;
+
     /**
      * @param array<string, mixed> $metadata
      */
     public function __construct(
-        public string $method,
+        string $method,
         public mixed $message,
         public GrpcMetadata $headers = new GrpcMetadata(),
         public ?float $deadlineSeconds = null,
         public array $metadata = [],
     ) {
-        self::assertMethod($method);
+        $this->method = GrpcMethodGuard::normalize($method);
         self::assertDeadline($deadlineSeconds);
     }
 
@@ -32,6 +34,11 @@ final readonly class GrpcRequest
         }
 
         return GrpcDeadline::secondsToMicros($this->deadlineSeconds);
+    }
+
+    public function retrySafe(): bool
+    {
+        return ($this->metadata['retry_safe'] ?? false) === true;
     }
 
     public function withDeadlineSeconds(?float $deadlineSeconds): self
@@ -58,15 +65,21 @@ final readonly class GrpcRequest
         );
     }
 
-    private static function assertDeadline(?float $deadlineSeconds): void
+    public function withRetrySafety(bool $retrySafe = true): self
     {
-        if ($deadlineSeconds !== null && $deadlineSeconds <= 0.0) {
-            throw new InvalidArgumentException('gRPC deadline must be greater than zero.');
-        }
+        return new self(
+            $this->method,
+            $this->message,
+            $this->headers,
+            $this->deadlineSeconds,
+            [...$this->metadata, 'retry_safe' => $retrySafe],
+        );
     }
 
-    private static function assertMethod(string $method): void
+    private static function assertDeadline(?float $deadlineSeconds): void
     {
-        GrpcMethodGuard::assertValid($method);
+        if ($deadlineSeconds !== null && (!is_finite($deadlineSeconds) || $deadlineSeconds <= 0.0)) {
+            throw new InvalidArgumentException('gRPC deadline must be greater than zero.');
+        }
     }
 }

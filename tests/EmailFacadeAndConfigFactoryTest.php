@@ -48,8 +48,8 @@ it('builds config objects from arrays', function (): void {
 
     $pop3 = Pop3Config::fromArray([
         'host' => 'pop.example.com',
-        'port' => 110,
-        'security' => Pop3Security::None->value,
+        'port' => 995,
+        'security' => Pop3Security::Ssl->value,
         'username' => 'u',
         'password' => 'p',
     ]);
@@ -65,7 +65,7 @@ it('builds config objects from arrays', function (): void {
     expect($sendmail->timeoutSeconds)->toBe(20);
     expect($spool->writeMetadata)->toBeFalse();
     expect($imap->security)->toBe(ImapSecurity::Ssl);
-    expect($pop3->security)->toBe(Pop3Security::None);
+    expect($pop3->security)->toBe(Pop3Security::Ssl);
     expect($log->filenamePrefix)->toBe('mail');
 });
 
@@ -74,7 +74,8 @@ it('exposes unified email facade factories', function (): void {
     $receiver = Email::receiver()->usingSpool(new SpoolConfig(directory: sys_get_temp_dir()));
     $pop3 = Email::mailbox()->usingPop3(new Pop3Config(
         host: 'pop.example.com',
-        security: Pop3Security::None,
+        security: Pop3Security::Ssl,
+        port: 995,
         username: 'u',
         password: 'p',
     ));

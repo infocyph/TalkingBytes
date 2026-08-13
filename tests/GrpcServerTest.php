@@ -3,15 +3,16 @@
 declare(strict_types=1);
 
 use Infocyph\TalkingBytes\Core\Event\CommunicationEventBus;
+use Infocyph\TalkingBytes\Core\Event\CallableEventDispatcher;
 use Infocyph\TalkingBytes\Grpc\Receiver\GrpcInboundHandlerInterface;
 use Infocyph\TalkingBytes\Grpc\Receiver\GrpcInboundRequest;
 use Infocyph\TalkingBytes\Grpc\Receiver\GrpcInboundResponse;
 use Infocyph\TalkingBytes\Grpc\GrpcMetadata;
-use Infocyph\TalkingBytes\Grpc\GrpcServer;
+use Infocyph\TalkingBytes\Grpc\GrpcInboundDispatcher;
 use Infocyph\TalkingBytes\Grpc\GrpcStatus;
 
 it('handles inbound grpc requests with registered handlers', function (): void {
-    $server = GrpcServer::new()->withHandler(
+    $server = GrpcInboundDispatcher::new()->withHandler(
         '/orders.v1.OrderService/Create',
         static function (GrpcInboundRequest $request): GrpcInboundResponse {
             expect($request->headers->first('x-request-id'))->toBe('req-42');
@@ -36,7 +37,7 @@ it('handles inbound grpc requests with registered handlers', function (): void {
 });
 
 it('returns unimplemented for unknown inbound grpc methods', function (): void {
-    $server = GrpcServer::new();
+    $server = GrpcInboundDispatcher::new();
 
     $response = $server->receive('/orders.v1.OrderService/Unknown', ['order_id' => 1]);
 
@@ -56,7 +57,7 @@ it('supports class-based inbound grpc handlers', function (): void {
         }
     };
 
-    $server = GrpcServer::new()->withHandler('/orders.v1.OrderService/Ping', $handler);
+    $server = GrpcInboundDispatcher::new()->withHandler('/orders.v1.OrderService/Ping', $handler);
     $response = $server->receive('/orders.v1.OrderService/Ping', ['ping' => true]);
 
     expect($response->status)->toBe(GrpcStatus::Ok)
@@ -65,13 +66,13 @@ it('supports class-based inbound grpc handlers', function (): void {
 
 it('maps inbound handler exceptions to internal status and emits failed events', function (): void {
     $events = [];
-    CommunicationEventBus::listen(static function (string $event, array $payload) use (&$events): void {
+    $dispatcher = new CallableEventDispatcher(static function (string $event, array $payload) use (&$events): void {
         if (str_starts_with($event, 'grpc.inbound.')) {
             $events[] = [$event, $payload];
         }
     });
 
-    $server = GrpcServer::new()->withHandler(
+    $server = (new GrpcInboundDispatcher(events: $dispatcher))->withHandler(
         '/orders.v1.OrderService/Create',
         static function (): GrpcInboundResponse {
             throw new RuntimeException('handler exploded');
@@ -79,8 +80,6 @@ it('maps inbound handler exceptions to internal status and emits failed events',
     );
 
     $response = $server->receive('/orders.v1.OrderService/Create', ['order_id' => 1]);
-    CommunicationEventBus::listen(null);
-
     expect($response->status)->toBe(GrpcStatus::Internal)
         ->and($response->metadata['exception'] ?? null)->toBe(RuntimeException::class)
         ->and($events)->toHaveCount(2)

@@ -6,6 +6,7 @@ namespace Infocyph\TalkingBytes\Http;
 
 use Infocyph\TalkingBytes\Http\Options\CurlOptions;
 use Infocyph\TalkingBytes\Http\Support\HeaderBag;
+use InvalidArgumentException;
 
 final readonly class HttpClientConfig
 {
@@ -51,10 +52,10 @@ final readonly class HttpClientConfig
         return new self(
             timeoutSeconds: self::intFrom($config, 'timeoutSeconds', 10),
             connectTimeoutSeconds: self::intFrom($config, 'connectTimeoutSeconds', 10),
-            followRedirects: (bool) ($config['followRedirects'] ?? false),
+            followRedirects: self::boolFrom($config, 'followRedirects', false),
             maxRedirects: self::intFrom($config, 'maxRedirects', 5),
-            verifyPeer: (bool) ($config['verifyPeer'] ?? true),
-            verifyHost: (bool) ($config['verifyHost'] ?? true),
+            verifyPeer: self::boolFrom($config, 'verifyPeer', true),
+            verifyHost: self::boolFrom($config, 'verifyHost', true),
             caBundle: is_string($config['caBundle'] ?? null) ? $config['caBundle'] : null,
             proxy: is_string($config['proxy'] ?? null) ? $config['proxy'] : null,
             proxyUsername: is_string($config['proxyUsername'] ?? null) ? $config['proxyUsername'] : null,
@@ -63,6 +64,21 @@ final readonly class HttpClientConfig
             maxResponseBytes: isset($config['maxResponseBytes']) ? self::intFrom($config, 'maxResponseBytes', 0) : null,
             defaultHeaders: self::parseDefaultHeaders($config['defaultHeaders'] ?? null),
         );
+    }
+
+    /** @param array<string, mixed> $config */
+    private static function boolFrom(array $config, string $key, bool $default): bool
+    {
+        if (!array_key_exists($key, $config)) {
+            return $default;
+        }
+
+        $value = filter_var($config[$key], FILTER_VALIDATE_BOOL, FILTER_NULL_ON_FAILURE);
+        if ($value === null) {
+            throw new InvalidArgumentException(sprintf('HTTP configuration key "%s" must be a boolean.', $key));
+        }
+
+        return $value;
     }
 
     /**
@@ -76,15 +92,14 @@ final readonly class HttpClientConfig
             return $value;
         }
 
-        if (is_float($value)) {
-            return (int) $value;
+        if (is_string($value) && preg_match('/^-?\d+$/D', $value) === 1) {
+            $parsed = filter_var($value, FILTER_VALIDATE_INT);
+            if (is_int($parsed)) {
+                return $parsed;
+            }
         }
 
-        if (is_string($value) && is_numeric($value)) {
-            return (int) $value;
-        }
-
-        return $default;
+        throw new InvalidArgumentException(sprintf('HTTP configuration key "%s" must be an integer.', $key));
     }
 
     /**

@@ -9,7 +9,7 @@ interface HttpBody
     public function contentType(): string;
 
     /**
-     * @return string|array<string, string|\CURLFile>
+     * @return string|array<string, string|\CURLFile|\CURLStringFile>
      */
     public function toCurlPayload(): string|array;
 }

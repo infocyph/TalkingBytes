@@ -102,6 +102,45 @@ it('verifies inbound dkim signatures using resolver abstraction', function (): v
     expect($result->selector)->toBe('s1');
 });
 
+it('verifies wire-exact simple dkim header and body canonicalization', function (): void {
+    [$privateKey, $publicKey] = inboundAuthBuildKeyPair();
+    $message = EmailMessage::new()
+        ->from('sender@example.com')
+        ->to('user@example.net')
+        ->subject('Simple canonicalization')
+        ->text("Line one \t\r\nLine two");
+
+    $raw = (new RawEmailBuilder())->build($message);
+    $config = new DkimConfig(
+        'example.com',
+        's1',
+        $privateKey,
+        headerCanonicalization: 'simple',
+        bodyCanonicalization: 'simple',
+    );
+    $signatureLine = (new DkimSigner())->buildSignatureHeader($raw->headers, $raw->body, $config);
+    $parsed = (new RawEmailParser())->parse($signatureLine . "\r\n" . $raw->headers . "\r\n\r\n" . $raw->body);
+    $resolver = new StaticDkimPublicKeyResolver([
+        's1._domainkey.example.com' => inboundAuthPublicKeyRecordFromPem($publicKey),
+    ]);
+
+    expect((new DkimVerifier($resolver))->verify($parsed)->valid)->toBeTrue();
+});
+
+it('rejects unsupported dkim canonicalization before key lookup', function (): void {
+    $raw = implode("\r\n", [
+        'DKIM-Signature: v=1; a=rsa-sha256; c=unknown/simple; d=example.com; s=s1; h=from; bh=abc; b=abc',
+        'From: sender@example.com',
+        '',
+        'Body',
+    ]);
+    $parsed = (new RawEmailParser())->parse($raw);
+    $resolver = new StaticDkimPublicKeyResolver([]);
+
+    expect((new DkimVerifier($resolver))->verify($parsed)->reason)
+        ->toBe('Unsupported DKIM canonicalization.');
+});
+
 it('fails dkim verification when key resolver returns wrong public key', function (): void {
     [$privateKey] = inboundAuthBuildKeyPair();
     [, $otherPublicKey] = inboundAuthBuildKeyPair();

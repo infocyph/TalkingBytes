@@ -9,7 +9,7 @@ use InvalidArgumentException;
 
 final readonly class BearerTokenAuth implements AuthenticatorInterface
 {
-    public function __construct(private string $token)
+    public function __construct(#[\SensitiveParameter] private string $token)
     {
         if (trim($this->token) === '') {
             throw new InvalidArgumentException('Bearer token must not be empty.');

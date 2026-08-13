@@ -3,9 +3,12 @@
 declare(strict_types=1);
 
 use Infocyph\TalkingBytes\Auth\SignedRequestAuth;
+use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
+use Infocyph\TalkingBytes\Http\Contract\HttpMiddleware;
+use Infocyph\TalkingBytes\Http\Contract\HttpTransport;
 use Infocyph\TalkingBytes\Http\HttpClient;
 use Infocyph\TalkingBytes\Http\HttpRequest;
-use Infocyph\TalkingBytes\Signing\HmacSha256Signer;
+use Infocyph\TalkingBytes\Http\Signing\HmacSha256Signer;
 
 it('applies deterministic signed request headers', function (): void {
     $signer = new HmacSha256Signer('secret-key');
@@ -97,4 +100,43 @@ it('validates custom signature header names', function (): void {
         new HmacSha256Signer('secret-key'),
         signatureHeader: 'Bad Header',
     ))->toThrow(InvalidArgumentException::class, 'Invalid HTTP header name');
+});
+
+it('signs after middleware has completed request mutation', function (): void {
+    $signer = new HmacSha256Signer('secret-key');
+    $auth = new SignedRequestAuth(
+        $signer,
+        static fn(): int => 1_700_000_000,
+        static fn(): string => 'nonce-final',
+    );
+    $transport = new class implements HttpTransport {
+        public function send(HttpRequest $request): CommunicationResult
+        {
+            return CommunicationResult::success(response: $request);
+        }
+    };
+    $middleware = new class implements HttpMiddleware {
+        public function handle(HttpRequest $request, Closure $next): CommunicationResult
+        {
+            return $next($request->query('final', 'yes'));
+        }
+    };
+
+    $result = HttpClient::using($transport)
+        ->withAuthenticator($auth)
+        ->withMiddleware($middleware)
+        ->send(HttpRequest::post('https://api.example.com/orders')->raw('body'));
+
+    expect($result->response)->toBeInstanceOf(HttpRequest::class);
+    /** @var HttpRequest $sent */
+    $sent = $result->response;
+    $canonical = implode("\n", [
+        'POST',
+        '/orders?final=yes',
+        '1700000000',
+        'nonce-final',
+        hash('sha256', 'body'),
+    ]);
+
+    expect($sent->headers->get('X-TB-Signature'))->toBe($signer->sign($canonical));
 });

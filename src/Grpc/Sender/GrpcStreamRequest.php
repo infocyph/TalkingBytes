@@ -11,20 +11,22 @@ use InvalidArgumentException;
 
 final readonly class GrpcStreamRequest
 {
+    public string $method;
+
     /**
      * @param array<string, mixed> $metadata
      * @param iterable<mixed> $messages
      */
     public function __construct(
-        public string $method,
+        string $method,
         public iterable $messages,
         public GrpcMetadata $headers = new GrpcMetadata(),
         public ?float $deadlineSeconds = null,
         public array $metadata = [],
     ) {
-        GrpcMethodGuard::assertValid($this->method);
+        $this->method = GrpcMethodGuard::normalize($method);
 
-        if ($this->deadlineSeconds !== null && $this->deadlineSeconds <= 0.0) {
+        if ($this->deadlineSeconds !== null && (!is_finite($this->deadlineSeconds) || $this->deadlineSeconds <= 0.0)) {
             throw new InvalidArgumentException('gRPC stream deadline must be greater than zero.');
         }
     }

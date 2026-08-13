@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Infocyph\TalkingBytes\Email\Mailbox;
 
-use Infocyph\TalkingBytes\Email\Event\EmailEventBus;
+use Infocyph\TalkingBytes\Core\Event\CommunicationEventBus;
 use Infocyph\TalkingBytes\Email\Exception\MailboxConnectionException;
 
 final class SocketMailboxRuntime
@@ -19,10 +19,24 @@ final class SocketMailboxRuntime
         string $protocolLabel,
         bool $ssl,
     ): mixed {
-        $targetHost = $ssl ? sprintf('ssl://%s', $host) : $host;
+        $targetHost = sprintf('%s://%s:%d', $ssl ? 'ssl' : 'tcp', $host, $port);
         $errno = 0;
         $errstr = '';
-        $connection = fsockopen($targetHost, $port, $errno, $errstr, $timeoutSeconds);
+        $context = stream_context_create(['ssl' => [
+            'verify_peer' => true,
+            'verify_peer_name' => true,
+            'peer_name' => $host,
+            'SNI_enabled' => true,
+            'crypto_method' => STREAM_CRYPTO_METHOD_TLSv1_2_CLIENT | STREAM_CRYPTO_METHOD_TLSv1_3_CLIENT,
+        ]]);
+        $connection = stream_socket_client(
+            $targetHost,
+            $errno,
+            $errstr,
+            $timeoutSeconds,
+            STREAM_CLIENT_CONNECT,
+            $context,
+        );
         if (!is_resource($connection)) {
             throw new MailboxConnectionException(sprintf(
                 'Unable to connect to %s server: %s (%d)',
@@ -47,7 +61,7 @@ final class SocketMailboxRuntime
         int $startedAtMs,
         array $endpoint,
     ): void {
-        EmailEventBus::dispatch('mailbox.command.finish', [
+        CommunicationEventBus::dispatch('mailbox.command.finish', [
             'protocol' => $protocol,
             'host' => $endpoint['host'],
             'port' => $endpoint['port'],
@@ -64,7 +78,7 @@ final class SocketMailboxRuntime
     public static function dispatchStart(string $protocol, string $command, array $endpoint): array
     {
         $redactedCommand = MailboxCommandRedactor::redact($protocol, $command);
-        EmailEventBus::dispatch('mailbox.command.start', [
+        CommunicationEventBus::dispatch('mailbox.command.start', [
             'protocol' => $protocol,
             'host' => $endpoint['host'],
             'port' => $endpoint['port'],
@@ -114,6 +128,13 @@ final class SocketMailboxRuntime
 
             throw new MailboxConnectionException(sprintf('Failed to read from %s socket.', strtoupper($protocol)));
         }
+        if (!str_ends_with($line, "\n") && !feof($connection)) {
+            throw new MailboxConnectionException(sprintf(
+                '%s response line exceeds %d bytes.',
+                strtoupper($protocol),
+                $maxLength - 1,
+            ));
+        }
 
         return $line;
     }
@@ -141,7 +162,17 @@ final class SocketMailboxRuntime
     {
         $remaining = $value;
         while ($remaining !== '') {
-            $written = fwrite($connection, $remaining);
+            set_error_handler(
+                static fn(): bool => true,
+                E_NOTICE | E_WARNING,
+            );
+
+            try {
+                $written = fwrite($connection, $remaining);
+            } finally {
+                restore_error_handler();
+            }
+
             if ($written === false || $written === 0) {
                 throw new MailboxConnectionException(sprintf('Failed writing to %s socket.', strtoupper($protocol)));
             }

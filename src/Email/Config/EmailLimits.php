@@ -17,6 +17,7 @@ final readonly class EmailLimits
         public int $maxMimeParts = 500,
         public int $maxHeaderBytes = 131072,
         public int $maxHeaderCount = 2000,
+        public int $maxHeaderLineBytes = 998,
     ) {
         $this->assertPositive('maxMessageBytes', $this->maxMessageBytes);
         $this->assertPositive('maxAttachmentBytes', $this->maxAttachmentBytes);
@@ -26,6 +27,7 @@ final readonly class EmailLimits
         $this->assertPositive('maxMimeParts', $this->maxMimeParts);
         $this->assertPositive('maxHeaderBytes', $this->maxHeaderBytes);
         $this->assertPositive('maxHeaderCount', $this->maxHeaderCount);
+        $this->assertPositive('maxHeaderLineBytes', $this->maxHeaderLineBytes);
     }
 
     private function assertPositive(string $name, int $value): void

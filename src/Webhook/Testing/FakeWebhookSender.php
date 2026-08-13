@@ -23,6 +23,7 @@ final class FakeWebhookSender
 
     public function send(WebhookMessage $message): WebhookDelivery
     {
+        $message->payloadForDelivery();
         $this->sent[] = $message;
 
         return new WebhookDelivery(

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Infocyph\TalkingBytes\Email\Config;
 
+use InvalidArgumentException;
+
 final class ConfigValue
 {
     /**
@@ -28,14 +30,14 @@ final class ConfigValue
                 return false;
             }
 
-            return $default;
+            throw new InvalidArgumentException(sprintf('Configuration key "%s" must be a boolean.', $key));
         }
 
         if (is_int($value)) {
             return $value === 1;
         }
 
-        return $default;
+        throw new InvalidArgumentException(sprintf('Configuration key "%s" must be a boolean.', $key));
     }
 
     /**
@@ -49,11 +51,14 @@ final class ConfigValue
             return $value;
         }
 
-        if (is_string($value) && is_numeric($value)) {
-            return (int) $value;
+        if (is_string($value) && preg_match('/^-?\d+$/D', $value) === 1) {
+            $parsed = filter_var($value, FILTER_VALIDATE_INT);
+            if (is_int($parsed)) {
+                return $parsed;
+            }
         }
 
-        return $default;
+        throw new InvalidArgumentException(sprintf('Configuration key "%s" must be an integer.', $key));
     }
 
     /**
@@ -70,11 +75,14 @@ final class ConfigValue
             return $value;
         }
 
-        if (is_string($value) && is_numeric($value)) {
-            return (int) $value;
+        if (is_string($value) && preg_match('/^-?\d+$/D', $value) === 1) {
+            $parsed = filter_var($value, FILTER_VALIDATE_INT);
+            if (is_int($parsed)) {
+                return $parsed;
+            }
         }
 
-        return null;
+        throw new InvalidArgumentException(sprintf('Configuration key "%s" must be an integer or null.', $key));
     }
 
     /**

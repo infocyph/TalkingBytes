@@ -180,8 +180,8 @@ it('adds dkim-signature header via signing transport decorator', function (): vo
     expect($result->successful)->toBeTrue();
     $sent = $inner->sentMessages();
     expect($sent)->toHaveCount(1);
-    expect($sent[0]->headersData()->customHeaders)->toHaveKey('DKIM-Signature');
-    expect((string) $sent[0]->headersData()->customHeaders['DKIM-Signature'])->toContain('v=1');
+    expect($sent[0]->dkimSignatures())->toHaveCount(1);
+    expect($sent[0]->dkimSignatures()[0])->toContain('v=1');
 });
 
 it('builds dkim config from private key helpers', function (): void {
@@ -198,8 +198,8 @@ it('builds dkim config from private key helpers', function (): void {
     unlink($path);
 });
 
-it('keeps dkim algorithm extensible and rejects unsupported signer algorithms', function (): void {
-    [$privateKey] = dkimBuildKeyPair();
+it('signs with the supported Ed25519 DKIM algorithm', function (): void {
+    $privateKey = base64_encode(random_bytes(SODIUM_CRYPTO_SIGN_SEEDBYTES));
 
     $message = EmailMessage::new()
         ->from('sender@example.com')
@@ -215,8 +215,8 @@ it('keeps dkim algorithm extensible and rejects unsupported signer algorithms', 
         algorithm: DkimAlgorithm::Ed25519Sha256,
     );
 
-    expect(fn () => (new DkimSigner)->buildSignatureHeader($raw->headers, $raw->body, $config))
-        ->toThrow(RuntimeException::class, 'Unsupported DKIM algorithm');
+    expect((new DkimSigner)->buildSignatureHeader($raw->headers, $raw->body, $config))
+        ->toContain('a=ed25519-sha256');
 });
 
 it('resolves dkim txt records with split entries and ignores unrelated records', function (): void {

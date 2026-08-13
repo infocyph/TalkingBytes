@@ -4,12 +4,15 @@ declare(strict_types=1);
 
 namespace Infocyph\TalkingBytes\Grpc\Retry;
 
-use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
+use Infocyph\TalkingBytes\Core\Support\Sleeper;
 use Infocyph\TalkingBytes\Grpc\GrpcStatus;
 use Infocyph\TalkingBytes\Grpc\Sender\GrpcResponse;
+use Infocyph\TalkingBytes\Grpc\Sender\GrpcTransportException;
+use Infocyph\TalkingBytes\Retry\RetryContext;
+use Infocyph\TalkingBytes\Retry\RetryDecision;
+use Infocyph\TalkingBytes\Retry\RetryDelay;
 use Infocyph\TalkingBytes\Retry\RetryPolicy;
 use InvalidArgumentException;
-use Throwable;
 
 final readonly class GrpcRetryPolicy implements RetryPolicy
 {
@@ -21,10 +24,7 @@ final readonly class GrpcRetryPolicy implements RetryPolicy
         private int $baseDelayMs = 100,
         private array $retryStatuses = [
             GrpcStatus::Unavailable,
-            GrpcStatus::DeadlineExceeded,
             GrpcStatus::ResourceExhausted,
-            GrpcStatus::Aborted,
-            GrpcStatus::Internal,
         ],
         private ?int $maxDelayMs = null,
         private float $jitterRatio = 0.0,
@@ -37,8 +37,11 @@ final readonly class GrpcRetryPolicy implements RetryPolicy
             throw new InvalidArgumentException('gRPC baseDelayMs must be greater than or equal to 0.');
         }
 
-        if ($this->maxDelayMs !== null && $this->maxDelayMs < 0) {
-            throw new InvalidArgumentException('gRPC maxDelayMs must be greater than or equal to 0.');
+        if ($this->maxDelayMs !== null && ($this->maxDelayMs < 0 || $this->maxDelayMs > Sleeper::MAX_DELAY_MS)) {
+            throw new InvalidArgumentException(sprintf(
+                'gRPC maxDelayMs must be between 0 and %d.',
+                Sleeper::MAX_DELAY_MS,
+            ));
         }
 
         if ($this->jitterRatio < 0.0 || $this->jitterRatio > 1.0) {
@@ -55,44 +58,51 @@ final readonly class GrpcRetryPolicy implements RetryPolicy
         return new self($attempts, $baseDelayMs, maxDelayMs: $maxDelayMs, jitterRatio: $jitterRatio);
     }
 
-    public function delayMs(int $attempt): int
+    public function decide(RetryContext $context): RetryDecision
     {
-        $power = max(0, $attempt - 1);
-        $base = $this->baseDelayMs * (2 ** $power);
-        $delay = $base;
+        if ($context->attempt >= $this->maxAttempts) {
+            return RetryDecision::stop();
+        }
 
-        if ($this->jitterRatio > 0.0 && $base > 0) {
-            $maxJitter = (int) floor($base * $this->jitterRatio);
-            if ($maxJitter > 0) {
-                $delay = max(0, $base + random_int(-$maxJitter, $maxJitter));
+        if ($context->error !== null) {
+            if (!$context->error instanceof GrpcTransportException || !$context->error->retryable) {
+                return RetryDecision::stop();
             }
+
+            return RetryDecision::retryAfter($this->delay($context->attempt));
         }
 
-        if ($this->maxDelayMs !== null) {
-            $delay = min($delay, $this->maxDelayMs);
-        }
-
-        return $delay;
-    }
-
-    public function shouldRetry(int $attempt, ?CommunicationResult $result = null, ?Throwable $error = null): bool
-    {
-        if ($attempt >= $this->maxAttempts) {
-            return false;
-        }
-
-        if ($error !== null) {
-            return true;
-        }
-
+        $result = $context->result;
         if ($result === null || $result->successful) {
-            return false;
+            return RetryDecision::stop();
         }
 
         if (!$result->response instanceof GrpcResponse) {
-            return true;
+            return ($result->metadata['grpc_transport_retryable'] ?? false) === true
+                ? RetryDecision::retryAfter($this->delay($context->attempt))
+                : RetryDecision::stop();
         }
 
-        return array_any($this->retryStatuses, fn($status): bool => $result->response->status === $status);
+        $retry = array_any($this->retryStatuses, fn($status): bool => $result->response->status === $status);
+
+        return $retry
+            ? RetryDecision::retryAfter($this->delay($context->attempt))
+            : RetryDecision::stop();
+    }
+
+    private function delay(int $attempt): int
+    {
+        $limit = $this->maxDelayMs ?? Sleeper::MAX_DELAY_MS;
+        $base = RetryDelay::exponential($this->baseDelayMs, $attempt, $limit);
+        if ($this->jitterRatio <= 0.0 || $base === 0) {
+            return $base;
+        }
+
+        $maxJitter = (int) floor($base * $this->jitterRatio);
+        if ($maxJitter === 0) {
+            return $base;
+        }
+
+        return max(0, min($limit, $base + random_int(-$maxJitter, $maxJitter)));
     }
 }

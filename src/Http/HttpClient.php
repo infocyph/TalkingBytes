@@ -10,53 +10,52 @@ use Infocyph\TalkingBytes\Auth\AuthenticatorInterface;
 use Infocyph\TalkingBytes\Auth\BasicAuth;
 use Infocyph\TalkingBytes\Auth\BearerTokenAuth;
 use Infocyph\TalkingBytes\Auth\SignedRequestAuth;
-use Infocyph\TalkingBytes\Core\Contract\MiddlewareInterface;
-use Infocyph\TalkingBytes\Core\Contract\TransportInterface;
-use Infocyph\TalkingBytes\Core\Middleware\CircuitBreakerMiddleware;
-use Infocyph\TalkingBytes\Core\Middleware\HeaderMiddleware;
-use Infocyph\TalkingBytes\Core\Middleware\IdempotencyMiddleware;
-use Infocyph\TalkingBytes\Core\Middleware\LoggingMiddleware;
-use Infocyph\TalkingBytes\Core\Middleware\RateLimitMiddleware;
-use Infocyph\TalkingBytes\Core\Middleware\RetryMiddleware;
-use Infocyph\TalkingBytes\Core\Middleware\TimeoutMiddleware;
-use Infocyph\TalkingBytes\Core\Pipeline\MiddlewarePipeline;
+use Infocyph\TalkingBytes\Core\Event\EventDispatcher;
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
 use Infocyph\TalkingBytes\Http\Body\MultipartBody;
+use Infocyph\TalkingBytes\Http\Contract\HttpMiddleware;
+use Infocyph\TalkingBytes\Http\Contract\HttpTransport;
 use Infocyph\TalkingBytes\Http\Cookie\CookieJar;
+use Infocyph\TalkingBytes\Http\Middleware\CircuitBreakerMiddleware;
+use Infocyph\TalkingBytes\Http\Middleware\IdempotencyMiddleware;
+use Infocyph\TalkingBytes\Http\Middleware\LoggingMiddleware;
+use Infocyph\TalkingBytes\Http\Middleware\RateLimitMiddleware;
+use Infocyph\TalkingBytes\Http\Middleware\RetryMiddleware;
+use Infocyph\TalkingBytes\Http\Middleware\TimeoutMiddleware;
 use Infocyph\TalkingBytes\Http\Options\CurlOptions;
 use Infocyph\TalkingBytes\Http\Retry\HttpRetryPolicy;
+use Infocyph\TalkingBytes\Http\Signing\RequestSigner;
 use Infocyph\TalkingBytes\Http\Testing\AssertableHttpTransport;
 use Infocyph\TalkingBytes\Http\Testing\FakeHttpTransport;
 use Infocyph\TalkingBytes\Http\Transport\CurlTransport;
 use Infocyph\TalkingBytes\Resilience\CircuitBreaker;
 use Infocyph\TalkingBytes\Resilience\RateLimiter;
 use Infocyph\TalkingBytes\Retry\RetryPolicy;
-use Infocyph\TalkingBytes\Signing\RequestSignerInterface;
 use RuntimeException;
 
 final readonly class HttpClient
 {
-    private MiddlewarePipeline $pipeline;
+    private HttpPipeline $pipeline;
 
     /**
-     * @param list<MiddlewareInterface> $middlewares
+     * @param list<HttpMiddleware> $middlewares
      * @param array<string, string|list<string>> $defaultHeaders
      * @param list<AuthenticatorInterface> $authenticators
      */
     private function __construct(
-        private TransportInterface $transport,
+        private HttpTransport $transport,
         private array $middlewares = [],
         private CurlOptions $defaultOptions = new CurlOptions(),
         private array $defaultHeaders = [],
         private array $authenticators = [],
         private ?CookieJar $cookieJar = null,
     ) {
-        $this->pipeline = new MiddlewarePipeline($transport, $middlewares);
+        $this->pipeline = new HttpPipeline($transport, $middlewares);
     }
 
-    public static function curl(): self
+    public static function curl(?EventDispatcher $events = null): self
     {
-        return new self(new CurlTransport());
+        return new self(new CurlTransport($events));
     }
 
     public static function fake(?FakeHttpTransport $transport = null): self
@@ -87,9 +86,9 @@ final readonly class HttpClient
         );
     }
 
-    public static function multi(int $maxConcurrency = 10): Concurrent\RequestPool
+    public static function multi(int $maxConcurrency = 10, ?EventDispatcher $events = null): Concurrent\RequestPool
     {
-        return new Concurrent\RequestPool(new Concurrent\CurlMultiTransport(), $maxConcurrency);
+        return new Concurrent\RequestPool(new Concurrent\CurlMultiTransport(events: $events), $maxConcurrency);
     }
 
     public static function multipart(): MultipartBody
@@ -97,7 +96,7 @@ final readonly class HttpClient
         return MultipartBody::new();
     }
 
-    public static function using(TransportInterface $transport): self
+    public static function using(HttpTransport $transport): self
     {
         return new self($transport);
     }
@@ -124,6 +123,14 @@ final readonly class HttpClient
     public function get(string $url): CommunicationResult
     {
         return $this->send(HttpRequest::get($url));
+    }
+
+    public function hasRetryMiddleware(): bool
+    {
+        return array_any(
+            $this->middlewares,
+            static fn(HttpMiddleware $middleware): bool => $middleware instanceof RetryMiddleware,
+        );
     }
 
     public function head(string $url): CommunicationResult
@@ -209,7 +216,7 @@ final readonly class HttpClient
             $resolvedRequest = $this->cookieJar->applyToRequest($resolvedRequest);
         }
 
-        $result = $this->pipeline->send($resolvedRequest->toCommunicationRequest());
+        $result = $this->pipeline->send($resolvedRequest);
 
         if ($this->cookieJar !== null && $result->response instanceof HttpResponse) {
             $this->cookieJar->storeFromResponse($result->response, $resolvedRequest->buildUrl());
@@ -223,17 +230,17 @@ final readonly class HttpClient
         return new self($this->transport, $this->middlewares, $this->defaultOptions->withTimeoutSeconds($seconds), $this->defaultHeaders, $this->authenticators, $this->cookieJar);
     }
 
-    public function withApiKey(string $header, string $value): self
+    public function withApiKey(string $header, #[\SensitiveParameter] string $value): self
     {
         return $this->withApiKeyHeader($header, $value);
     }
 
-    public function withApiKeyHeader(string $header, string $value): self
+    public function withApiKeyHeader(string $header, #[\SensitiveParameter] string $value): self
     {
         return $this->withAuthenticator(new ApiKeyAuth($header, $value));
     }
 
-    public function withApiKeyQuery(string $key, string $value): self
+    public function withApiKeyQuery(string $key, #[\SensitiveParameter] string $value): self
     {
         return $this->withAuthenticator(new ApiKeyAuth($key, $value, true));
     }
@@ -246,12 +253,12 @@ final readonly class HttpClient
         return new self($this->transport, $this->middlewares, $this->defaultOptions, $this->defaultHeaders, $authenticators, $this->cookieJar);
     }
 
-    public function withBasicAuth(string $username, string $password): self
+    public function withBasicAuth(#[\SensitiveParameter] string $username, #[\SensitiveParameter] string $password): self
     {
         return $this->withAuthenticator(new BasicAuth($username, $password));
     }
 
-    public function withBearerToken(string $token): self
+    public function withBearerToken(#[\SensitiveParameter] string $token): self
     {
         return $this->withAuthenticator(new BearerTokenAuth($token));
     }
@@ -271,7 +278,14 @@ final readonly class HttpClient
      */
     public function withDefaultHeaders(array $headers): self
     {
-        return $this->withMiddleware(new HeaderMiddleware($headers));
+        return new self(
+            $this->transport,
+            $this->middlewares,
+            $this->defaultOptions,
+            [...$this->defaultHeaders, ...$headers],
+            $this->authenticators,
+            $this->cookieJar,
+        );
     }
 
     /**
@@ -300,7 +314,7 @@ final readonly class HttpClient
         return $this->withMiddleware(new LoggingMiddleware(Closure::fromCallable($logger)));
     }
 
-    public function withMiddleware(MiddlewareInterface $middleware): self
+    public function withMiddleware(HttpMiddleware $middleware): self
     {
         $middlewares = $this->middlewares;
         $middlewares[] = $middleware;
@@ -323,7 +337,7 @@ final readonly class HttpClient
         return $this->withMiddleware(new RetryMiddleware($policy));
     }
 
-    public function withSigner(RequestSignerInterface $signer): self
+    public function withSigner(RequestSigner $signer): self
     {
         return $this->withAuthenticator(new SignedRequestAuth($signer));
     }
@@ -335,31 +349,39 @@ final readonly class HttpClient
 
     private function applyCoreOptionDefaults(HttpRequest $request): HttpRequest
     {
-        if ($request->options->timeoutSeconds !== $this->defaultOptions->timeoutSeconds) {
+        if (!$request->options->isExplicit('timeoutSeconds')) {
             $request = $request->timeout($this->defaultOptions->timeoutSeconds);
         }
 
-        if ($request->options->connectTimeoutSeconds !== $this->defaultOptions->connectTimeoutSeconds) {
+        if (!$request->options->isExplicit('connectTimeoutSeconds')) {
             $request = $request->connectTimeout($this->defaultOptions->connectTimeoutSeconds);
         }
 
         if (
-            $request->options->followRedirects !== $this->defaultOptions->followRedirects
-            || $request->options->maxRedirects !== $this->defaultOptions->maxRedirects
+            !$request->options->isExplicit('followRedirects')
+            || !$request->options->isExplicit('maxRedirects')
         ) {
             $request = $request->followRedirects(
-                $this->defaultOptions->followRedirects,
-                $this->defaultOptions->maxRedirects,
+                $request->options->isExplicit('followRedirects')
+                    ? $request->options->followRedirects
+                    : $this->defaultOptions->followRedirects,
+                $request->options->isExplicit('maxRedirects')
+                    ? $request->options->maxRedirects
+                    : $this->defaultOptions->maxRedirects,
             );
         }
 
         if (
-            $request->options->verifyPeer !== $this->defaultOptions->verifyPeer
-            || $request->options->verifyHost !== $this->defaultOptions->verifyHost
+            !$request->options->isExplicit('verifyPeer')
+            || !$request->options->isExplicit('verifyHost')
         ) {
             $request = $request->verifyTls(
-                $this->defaultOptions->verifyPeer,
-                $this->defaultOptions->verifyHost,
+                $request->options->isExplicit('verifyPeer')
+                    ? $request->options->verifyPeer
+                    : $this->defaultOptions->verifyPeer,
+                $request->options->isExplicit('verifyHost')
+                    ? $request->options->verifyHost
+                    : $this->defaultOptions->verifyHost,
             );
         }
 
@@ -372,7 +394,19 @@ final readonly class HttpClient
         $request = $this->applyOptionalOptionDefaults($request);
 
         if ($this->defaultHeaders !== []) {
-            $request = $request->headers($this->defaultHeaders);
+            $request = new HttpRequest(
+                $request->method,
+                $request->url,
+                new \Infocyph\TalkingBytes\Http\Support\HeaderBag([
+                    ...$this->defaultHeaders,
+                    ...$request->headers->all(),
+                ]),
+                $request->queryParams,
+                $request->body,
+                $request->options,
+                $request->authenticators,
+                $request->metadata,
+            );
         }
 
         foreach ($this->authenticators as $authenticator) {
@@ -384,30 +418,30 @@ final readonly class HttpClient
 
     private function applyOptionalOptionDefaults(HttpRequest $request): HttpRequest
     {
-        if ($this->defaultOptions->proxy !== null && $request->options->proxy !== $this->defaultOptions->proxy) {
+        if ($this->defaultOptions->proxy !== null && !$request->options->isExplicit('proxy')) {
             $request = $request->proxy($this->defaultOptions->proxy);
         }
 
         if (
             $this->defaultOptions->proxyAuth !== null
-            && $request->options->proxyAuth !== $this->defaultOptions->proxyAuth
+            && !$request->options->isExplicit('proxyAuth')
             && str_contains($this->defaultOptions->proxyAuth, ':')
         ) {
             [$username, $password] = explode(':', $this->defaultOptions->proxyAuth, 2);
             $request = $request->proxyAuth($username, $password);
         }
 
-        if ($this->defaultOptions->caBundle !== null && $request->options->caBundle !== $this->defaultOptions->caBundle) {
+        if ($this->defaultOptions->caBundle !== null && !$request->options->isExplicit('caBundle')) {
             $request = $request->caBundle($this->defaultOptions->caBundle);
         }
 
-        if ($this->defaultOptions->userAgent !== null && $request->options->userAgent !== $this->defaultOptions->userAgent) {
+        if ($this->defaultOptions->userAgent !== null && !$request->options->isExplicit('userAgent')) {
             $request = $request->userAgent($this->defaultOptions->userAgent);
         }
 
         if (
             $this->defaultOptions->maxResponseBytes !== null
-            && $request->options->maxResponseBytes !== $this->defaultOptions->maxResponseBytes
+            && !$request->options->isExplicit('maxResponseBytes')
         ) {
             $request = $request->maxResponseBytes($this->defaultOptions->maxResponseBytes);
         }

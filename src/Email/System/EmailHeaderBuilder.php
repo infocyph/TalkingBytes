@@ -24,9 +24,13 @@ final readonly class EmailHeaderBuilder
         $headerLines = $this->addListHeaders($message, $headerLines);
         $headerLines = $this->addMiscHeaders($message, $headerLines);
         $headerLines = $this->addMessageThreadHeaders($message, $headerLines);
+        $headerLines = $this->addDkimHeaders($message, $headerLines);
         $headerLines = $this->addCustomHeaders($message, $headerLines);
 
-        return implode("\r\n", array_map($this->headerFolder->fold(...), $headerLines));
+        $rendered = implode("\r\n", array_map($this->headerFolder->fold(...), $headerLines));
+        $this->assertHeaderBounds($rendered, count($headerLines));
+
+        return $rendered;
     }
 
     public function resolveMessageId(EmailMessage $message): ?string
@@ -56,6 +60,19 @@ final readonly class EmailHeaderBuilder
             }
 
             $headerLines[] = sprintf('%s: %s', $name, $value);
+        }
+
+        return $headerLines;
+    }
+
+    /**
+     * @param list<string> $headerLines
+     * @return list<string>
+     */
+    private function addDkimHeaders(EmailMessage $message, array $headerLines): array
+    {
+        foreach ($message->dkimSignatures() as $signature) {
+            $headerLines[] = 'DKIM-Signature: ' . $signature;
         }
 
         return $headerLines;
@@ -187,6 +204,19 @@ final readonly class EmailHeaderBuilder
         return $headerLines;
     }
 
+    private function assertHeaderBounds(string $headers, int $fieldCount): void
+    {
+        if (strlen($headers) > 131_072 || $fieldCount > 2_000) {
+            throw new InvalidArgumentException('Outbound email headers exceed configured protocol bounds.');
+        }
+
+        foreach (explode("\r\n", $headers) as $line) {
+            if (strlen($line) > 998) {
+                throw new InvalidArgumentException('Outbound email header line exceeds 998 bytes.');
+            }
+        }
+    }
+
     /**
      * @return list<string>
      */
@@ -200,7 +230,8 @@ final readonly class EmailHeaderBuilder
         }
 
         $headerLines = [
-            'Date: ' . new DateTimeImmutable('now', new DateTimeZone('UTC'))->format('r'),
+            'Date: ' . ($message->preparedDateHeader()
+                ?? new DateTimeImmutable('now', new DateTimeZone('UTC'))->format('r')),
             'From: ' . $this->addressFormatter->format($envelope->from),
             'To: ' . $this->formatToHeaderValue($envelope->to),
             'MIME-Version: 1.0',

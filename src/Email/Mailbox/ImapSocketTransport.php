@@ -375,7 +375,7 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
             return;
         }
 
-        $mustStartTls = $this->config->security === ImapSecurity::StartTlsRequired;
+        $mustStartTls = true;
         if (!SocketMailboxRuntime::shouldStartTls($mustStartTls, $this->hasCapability('STARTTLS'), 'imap')) {
             return;
         }
@@ -417,6 +417,13 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
 
     private function readExact(int $bytes): string
     {
+        if ($bytes < 0 || $bytes > $this->config->maxLiteralBytes) {
+            throw new MailboxProtocolException(sprintf(
+                'IMAP literal exceeds configured limit (%d bytes).',
+                $this->config->maxLiteralBytes,
+            ));
+        }
+
         $buffer = '';
         $connection = $this->requireConnection();
 
@@ -453,15 +460,29 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
         $lines = [];
         $literals = [];
         $status = 'NO';
+        $totalBytes = 0;
+        $deadline = microtime(true) + $this->config->timeoutSeconds;
 
         while (true) {
+            if (microtime(true) >= $deadline) {
+                throw new MailboxConnectionException('IMAP command deadline exceeded.');
+            }
             $line = $this->readLine();
             $trimmed = rtrim($line, "\r\n");
             $lines[] = $trimmed;
+            $totalBytes += strlen($line);
+            if (count($lines) > $this->config->maxResponseLines || $totalBytes > $this->config->maxResponseBytes) {
+                throw new MailboxProtocolException('IMAP response exceeds configured bounds.');
+            }
 
             $literalSize = $this->parseLiteralSize($trimmed);
             if ($literalSize !== null) {
-                $literals[] = $this->readExact($literalSize);
+                $literal = $this->readExact($literalSize);
+                $totalBytes += strlen($literal);
+                if ($totalBytes > $this->config->maxResponseBytes) {
+                    throw new MailboxProtocolException('IMAP response exceeds configured byte limit.');
+                }
+                $literals[] = $literal;
             }
 
             if (preg_match('/^' . preg_quote($tag, '/') . '\s+(OK|NO|BAD)\b/i', $trimmed, $matches) === 1) {

@@ -4,12 +4,12 @@ declare(strict_types=1);
 
 namespace Infocyph\TalkingBytes\Grpc;
 
-use Infocyph\TalkingBytes\Core\Contract\MiddlewareInterface;
-use Infocyph\TalkingBytes\Core\Event\CommunicationEventBus;
-use Infocyph\TalkingBytes\Core\Message\CommunicationRequest;
-use Infocyph\TalkingBytes\Core\Middleware\RetryMiddleware;
-use Infocyph\TalkingBytes\Core\Pipeline\MiddlewarePipeline;
+use Infocyph\TalkingBytes\Core\Event\BestEffortEventDispatcher;
+use Infocyph\TalkingBytes\Core\Event\EventDispatcher;
+use Infocyph\TalkingBytes\Core\Event\NullEventDispatcher;
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
+use Infocyph\TalkingBytes\Grpc\Contract\GrpcMiddleware;
+use Infocyph\TalkingBytes\Grpc\Middleware\RetryMiddleware;
 use Infocyph\TalkingBytes\Grpc\Native\NativeGrpcInvoker;
 use Infocyph\TalkingBytes\Grpc\Native\NativeGrpcResult;
 use Infocyph\TalkingBytes\Grpc\Native\NativeGrpcStreamingInvoker;
@@ -24,25 +24,29 @@ use Throwable;
 
 final readonly class GrpcClient
 {
-    private MiddlewarePipeline $pipeline;
+    private EventDispatcher $events;
+
+    private GrpcPipeline $pipeline;
 
     /**
-     * @param list<MiddlewareInterface> $middlewares
+     * @param list<GrpcMiddleware> $middlewares
      */
     private function __construct(
         private GrpcTransport $transport,
         private array $middlewares = [],
         private ?NativeGrpcStreamingInvoker $streamingInvoker = null,
+        ?EventDispatcher $events = null,
     ) {
-        $this->pipeline = new MiddlewarePipeline($transport, $middlewares);
+        $this->pipeline = new GrpcPipeline($transport, $middlewares);
+        $this->events = new BestEffortEventDispatcher($events ?? new NullEventDispatcher());
     }
 
     /**
      * @param callable(GrpcRequest): GrpcResponse $caller
      */
-    public static function using(callable $caller): self
+    public static function using(callable $caller, ?EventDispatcher $events = null): self
     {
-        return new self(new GrpcTransport($caller));
+        return new self(new GrpcTransport($caller, $events), events: $events);
     }
 
     public static function usingNative(NativeGrpcInvoker $invoker): self
@@ -105,7 +109,7 @@ final readonly class GrpcClient
 
     public function send(GrpcRequest $request): CommunicationResult
     {
-        return $this->pipeline->send(new CommunicationRequest('grpc', $request));
+        return $this->pipeline->send($request);
     }
 
     /**
@@ -136,20 +140,20 @@ final readonly class GrpcClient
         return $this->withRetryPolicy($policy ?? GrpcRetryPolicy::standard());
     }
 
-    public function withMiddleware(MiddlewareInterface $middleware): self
+    public function withMiddleware(GrpcMiddleware $middleware): self
     {
         $middlewares = $this->middlewares;
         $middlewares[] = $middleware;
 
-        return new self($this->transport, $middlewares, $this->streamingInvoker);
+        return new self($this->transport, $middlewares, $this->streamingInvoker, $this->events);
     }
 
     /**
-     * @param list<MiddlewareInterface> $middlewares
+     * @param list<GrpcMiddleware> $middlewares
      */
     public function withMiddlewares(array $middlewares): self
     {
-        return new self($this->transport, $middlewares, $this->streamingInvoker);
+        return new self($this->transport, $middlewares, $this->streamingInvoker, $this->events);
     }
 
     public function withRetryPolicy(RetryPolicy $policy): self
@@ -207,7 +211,7 @@ final readonly class GrpcClient
         }
 
         $startedAt = microtime(true);
-        CommunicationEventBus::dispatch('grpc.stream.start', [
+        $this->events->dispatch('grpc.stream.start', [
             'transport' => 'grpc',
             'type' => $streamType,
             'method' => $method,
@@ -217,7 +221,7 @@ final readonly class GrpcClient
             $native = $execute($this->streamingInvoker);
         } catch (Throwable $exception) {
             $durationMs = (int) ((microtime(true) - $startedAt) * 1000);
-            CommunicationEventBus::dispatch('grpc.stream.failed', [
+            $this->events->dispatch('grpc.stream.failed', [
                 'transport' => 'grpc',
                 'type' => $streamType,
                 'method' => $method,
@@ -260,7 +264,7 @@ final readonly class GrpcClient
         );
 
         if (!$response->isOk()) {
-            CommunicationEventBus::dispatch('grpc.stream.failed', [
+            $this->events->dispatch('grpc.stream.failed', [
                 'transport' => 'grpc',
                 'type' => $streamType,
                 'method' => $method,
@@ -293,7 +297,7 @@ final readonly class GrpcClient
             );
         }
 
-        CommunicationEventBus::dispatch('grpc.stream.finish', [
+        $this->events->dispatch('grpc.stream.finish', [
             'transport' => 'grpc',
             'type' => $streamType,
             'method' => $method,

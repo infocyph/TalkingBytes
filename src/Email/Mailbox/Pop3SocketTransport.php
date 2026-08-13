@@ -269,7 +269,7 @@ final class Pop3SocketTransport implements Pop3Transport
     {
         $mustUseTls = match ($this->config->security) {
             Pop3Security::StartTlsRequired => true,
-            Pop3Security::StartTlsOptional => false,
+            Pop3Security::StartTlsOptional => true,
             default => null,
         };
         if ($mustUseTls === null) {
@@ -299,8 +299,13 @@ final class Pop3SocketTransport implements Pop3Transport
     private function readMultilineResponse(): array
     {
         $lines = [];
+        $bytes = 0;
+        $deadline = microtime(true) + $this->config->timeoutSeconds;
 
         while (true) {
+            if (microtime(true) >= $deadline) {
+                throw new MailboxConnectionException('POP3 command deadline exceeded.');
+            }
             $line = $this->readLine();
             $trimmed = rtrim($line, "\r\n");
 
@@ -313,6 +318,10 @@ final class Pop3SocketTransport implements Pop3Transport
             }
 
             $lines[] = $trimmed;
+            $bytes += strlen($line);
+            if (count($lines) > $this->config->maxResponseLines || $bytes > $this->config->maxResponseBytes) {
+                throw new MailboxProtocolException('POP3 multiline response exceeds configured bounds.');
+            }
         }
 
         return $lines;

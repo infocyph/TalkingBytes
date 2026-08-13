@@ -5,16 +5,21 @@ declare(strict_types=1);
 namespace Infocyph\TalkingBytes\Email\Config;
 
 use Infocyph\TalkingBytes\Email\Enum\Pop3Security;
+use InvalidArgumentException;
 
 final readonly class Pop3Config
 {
     public function __construct(
         public string $host,
         public int $port = 110,
-        public Pop3Security $security = Pop3Security::None,
+        public Pop3Security $security = Pop3Security::StartTlsRequired,
+        #[\SensitiveParameter]
         public string $username = '',
+        #[\SensitiveParameter]
         public string $password = '',
         public int $timeoutSeconds = 10,
+        public int $maxResponseBytes = 10_485_760,
+        public int $maxResponseLines = 100_000,
     ) {
         $this->validate();
     }
@@ -31,6 +36,8 @@ final readonly class Pop3Config
             'username' => ConfigValue::string($config, 'username', ''),
             'password' => ConfigValue::string($config, 'password', ''),
             'timeoutSeconds' => ConfigValue::int($config, 'timeoutSeconds', 10),
+            'maxResponseBytes' => ConfigValue::int($config, 'maxResponseBytes', 10_485_760),
+            'maxResponseLines' => ConfigValue::int($config, 'maxResponseLines', 100_000),
         ];
 
         return new self(...$values);
@@ -41,15 +48,26 @@ final readonly class Pop3Config
      */
     private static function parseSecurity(array $config): Pop3Security
     {
-        $raw = ConfigValue::string($config, 'security', Pop3Security::None->value);
+        $raw = ConfigValue::string($config, 'security', Pop3Security::StartTlsRequired->value);
 
-        return Pop3Security::tryFrom($raw) ?? Pop3Security::None;
+        return Pop3Security::tryFrom($raw) ?? Pop3Security::StartTlsRequired;
+    }
+
+    private function isLoopbackHost(): bool
+    {
+        return in_array(strtolower(trim($this->host, '[]')), ['localhost', '127.0.0.1', '::1'], true);
     }
 
     private function validate(): void
     {
         foreach ($this->validators() as $validator) {
             $validator();
+        }
+        if ($this->security === Pop3Security::None && !$this->isLoopbackHost()) {
+            throw new InvalidArgumentException('POP3 credentials cannot be sent over a plaintext connection.');
+        }
+        if ($this->maxResponseBytes < 1 || $this->maxResponseLines < 1) {
+            throw new InvalidArgumentException('POP3 response limits must be greater than zero.');
         }
     }
 

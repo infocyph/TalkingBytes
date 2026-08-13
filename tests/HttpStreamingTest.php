@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Infocyph\TalkingBytes\Http\HttpRequest;
+use Infocyph\TalkingBytes\Http\Body\MultipartBody;
 use Infocyph\TalkingBytes\Http\Internal\CurlHandleConfigurator;
 use Infocyph\TalkingBytes\Http\Internal\ResponseBodyCollector;
 use Infocyph\TalkingBytes\Http\Internal\ResponseHeaderCollector;
@@ -17,6 +18,22 @@ it('streams download chunks to a temp file and finalizes atomically', function (
     expect($collector->finalize())->toBeNull();
     expect($collector->responseBody())->toBe('');
     expect(file_get_contents($target))->toBe('hello world');
+
+    if (is_file($target)) {
+        unlink($target);
+    }
+});
+
+it('keeps streamed download finalization idempotent', function (): void {
+    $target = sys_get_temp_dir() . '/tb-http-stream-' . bin2hex(random_bytes(6)) . '.txt';
+    $request = HttpRequest::get('https://example.com')->streamDownloadTo($target);
+    $collector = new ResponseBodyCollector($request);
+
+    expect($collector->collect('complete'))->toBe(8);
+    expect($collector->finalize())->toBeNull();
+    expect($collector->finalize())->toBeNull();
+    expect($collector->collect('late'))->toBe(0);
+    expect(file_get_contents($target))->toBe('complete');
 
     if (is_file($target)) {
         unlink($target);
@@ -105,7 +122,7 @@ it('configures upload from file and stream sources', function (): void {
 
     expect($resolvedStream->metadata['_upload_opened_by_configurator'] ?? null)->toBeFalse();
     expect($resolvedStream->metadata['_upload_handle'] ?? null)->toBe($stream);
-    expect(ftell($stream))->toBe(0);
+    expect(ftell($stream))->toBe(5);
 
     unset($streamHandle);
     fclose($stream);
@@ -185,5 +202,25 @@ it('enforces max upload bytes for file and stream uploads', function (): void {
     )->toThrow(InvalidArgumentException::class, 'max upload bytes');
 
     unset($streamHandle);
+    fclose($stream);
+});
+
+it('restores caller-owned multipart stream positions after spooling', function (): void {
+    $stream = fopen('php://temp', 'w+b');
+    expect($stream)->toBeResource();
+    fwrite($stream, 'prefix-payload');
+    fseek($stream, 7);
+
+    $prepared = MultipartBody::new()
+        ->addStream('file', $stream, 'payload.txt', knownSize: 7)
+        ->prepareCurlPayload(64);
+
+    expect(ftell($stream))->toBe(7);
+
+    foreach ($prepared['temporaryPaths'] as $path) {
+        if (is_file($path)) {
+            unlink($path);
+        }
+    }
     fclose($stream);
 });

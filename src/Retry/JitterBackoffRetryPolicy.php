@@ -4,9 +4,7 @@ declare(strict_types=1);
 
 namespace Infocyph\TalkingBytes\Retry;
 
-use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
 use InvalidArgumentException;
-use Throwable;
 
 final readonly class JitterBackoffRetryPolicy implements RetryPolicy
 {
@@ -23,23 +21,18 @@ final readonly class JitterBackoffRetryPolicy implements RetryPolicy
         }
     }
 
-    public function delayMs(int $attempt): int
+    public function decide(RetryContext $context): RetryDecision
     {
-        $exponentialDelay = $this->baseDelayMs * (2 ** max(0, $attempt - 1));
-
-        return random_int((int) floor($exponentialDelay / 2), $exponentialDelay);
-    }
-
-    public function shouldRetry(int $attempt, ?CommunicationResult $result = null, ?Throwable $error = null): bool
-    {
-        if ($attempt >= $this->maxAttempts) {
-            return false;
+        if ($context->attempt >= $this->maxAttempts) {
+            return RetryDecision::stop();
         }
 
-        if ($error !== null) {
-            return true;
+        if ($context->error === null && ($context->result === null || $context->result->successful)) {
+            return RetryDecision::stop();
         }
 
-        return $result !== null && !$result->successful;
+        $maximum = RetryDelay::exponential($this->baseDelayMs, $context->attempt);
+
+        return RetryDecision::retryAfter(random_int(intdiv($maximum, 2), $maximum));
     }
 }

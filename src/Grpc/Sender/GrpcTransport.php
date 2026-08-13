@@ -5,37 +5,35 @@ declare(strict_types=1);
 namespace Infocyph\TalkingBytes\Grpc\Sender;
 
 use Closure;
-use Infocyph\TalkingBytes\Core\Contract\TransportInterface;
-use Infocyph\TalkingBytes\Core\Event\CommunicationEventBus;
-use Infocyph\TalkingBytes\Core\Message\CommunicationRequest;
+use Infocyph\TalkingBytes\Core\Event\BestEffortEventDispatcher;
+use Infocyph\TalkingBytes\Core\Event\EventDispatcher;
+use Infocyph\TalkingBytes\Core\Event\NullEventDispatcher;
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
 use Infocyph\TalkingBytes\Grpc\GrpcStatus;
 use Throwable;
 
-final readonly class GrpcTransport implements TransportInterface
+final readonly class GrpcTransport
 {
     /**
      * @var Closure(GrpcRequest): GrpcResponse
      */
     private Closure $caller;
 
+    private EventDispatcher $events;
+
     /**
      * @param callable(GrpcRequest): GrpcResponse $caller
      */
-    public function __construct(callable $caller)
+    public function __construct(callable $caller, ?EventDispatcher $events = null)
     {
         $this->caller = Closure::fromCallable($caller);
+        $this->events = new BestEffortEventDispatcher($events ?? new NullEventDispatcher());
     }
 
-    public function send(CommunicationRequest $request): CommunicationResult
+    public function send(GrpcRequest $grpcRequest): CommunicationResult
     {
-        if (!$request->payload instanceof GrpcRequest) {
-            return CommunicationResult::failure('GrpcTransport expects GrpcRequest payload.');
-        }
-
-        $grpcRequest = $request->payload;
         $startedAt = microtime(true);
-        CommunicationEventBus::dispatch('grpc.request.start', [
+        $this->events->dispatch('grpc.request.start', [
             'transport' => 'grpc',
             'method' => $grpcRequest->method,
             'deadline_seconds' => $grpcRequest->deadlineSeconds,
@@ -46,7 +44,7 @@ final readonly class GrpcTransport implements TransportInterface
             $response = ($this->caller)($grpcRequest);
         } catch (Throwable $exception) {
             $durationMs = (int) ((microtime(true) - $startedAt) * 1000);
-            CommunicationEventBus::dispatch('grpc.request.failed', [
+            $this->events->dispatch('grpc.request.failed', [
                 'transport' => 'grpc',
                 'method' => $grpcRequest->method,
                 'duration_ms' => $durationMs,
@@ -72,13 +70,14 @@ final readonly class GrpcTransport implements TransportInterface
                     'method' => $grpcRequest->method,
                     'duration_ms' => $durationMs,
                     'grpc_error' => $error,
+                    'grpc_transport_retryable' => $exception instanceof GrpcTransportException && $exception->retryable,
                 ],
             );
         }
 
         $durationMs = (int) ((microtime(true) - $startedAt) * 1000);
         if (!$response->isOk()) {
-            CommunicationEventBus::dispatch('grpc.request.failed', [
+            $this->events->dispatch('grpc.request.failed', [
                 'transport' => 'grpc',
                 'method' => $grpcRequest->method,
                 'status_code' => $response->status->value,
@@ -108,7 +107,7 @@ final readonly class GrpcTransport implements TransportInterface
             );
         }
 
-        CommunicationEventBus::dispatch('grpc.request.finish', [
+        $this->events->dispatch('grpc.request.finish', [
             'transport' => 'grpc',
             'method' => $grpcRequest->method,
             'status_code' => $response->status->value,

@@ -24,6 +24,7 @@ final readonly class EmailAttachment
         public ?string $path = null,
         public ?string $content = null,
         public mixed $stream = null,
+        public ?int $streamOffset = null,
     ) {}
 
     public static function fromData(
@@ -112,6 +113,7 @@ final readonly class EmailAttachment
         string $disposition = 'attachment',
         ?string $contentId = null,
         int $maxSizeBytes = self::DEFAULT_MAX_SIZE_BYTES,
+        ?int $knownSize = null,
     ): self {
         self::assertCommonFields($name, $mimeType, $disposition, $contentId, $maxSizeBytes);
 
@@ -120,13 +122,24 @@ final readonly class EmailAttachment
         }
 
         $meta = stream_get_meta_data($stream);
-        $sizeBytes = 0;
+        if (!$meta['seekable']) {
+            throw new InvalidArgumentException('Attachment streams must be seekable for repeatable sends.');
+        }
+        $offset = ftell($stream);
+        if (!is_int($offset)) {
+            throw new InvalidArgumentException('Unable to determine attachment stream position.');
+        }
+        if ($knownSize !== null && $knownSize < 0) {
+            throw new InvalidArgumentException('Attachment stream known size cannot be negative.');
+        }
+
+        $sizeBytes = $knownSize ?? 0;
 
         $uri = $meta['uri'] ?? null;
         if (is_string($uri) && is_file($uri)) {
             $size = filesize($uri);
             if ($size !== false) {
-                $sizeBytes = $size;
+                $sizeBytes = $knownSize ?? max(0, $size - $offset);
             }
         }
 
@@ -136,7 +149,7 @@ final readonly class EmailAttachment
             );
         }
 
-        return new self($name, $mimeType, $sizeBytes, $maxSizeBytes, $disposition, $contentId, null, null, $stream);
+        return new self($name, $mimeType, $sizeBytes, $maxSizeBytes, $disposition, $contentId, null, null, $stream, $offset);
     }
 
     public function isInline(): bool
@@ -164,11 +177,13 @@ final readonly class EmailAttachment
         if (is_resource($this->stream)) {
             $meta = stream_get_meta_data($this->stream);
 
-            if ($meta['seekable'] === true) {
-                rewind($this->stream);
+            if (!$meta['seekable'] || !is_int($this->streamOffset)
+                || fseek($this->stream, $this->streamOffset) !== 0
+            ) {
+                throw new AttachmentException(sprintf('Unable to rewind attachment stream: %s', $this->name));
             }
 
-            $data = stream_get_contents($this->stream);
+            $data = stream_get_contents($this->stream, $this->boundedReadLength());
             if ($data === false) {
                 throw new AttachmentException(sprintf('Unable to read attachment stream: %s', $this->name));
             }
@@ -245,9 +260,15 @@ final readonly class EmailAttachment
         );
     }
 
+    /** @return positive-int */
+    private function boundedReadLength(): int
+    {
+        return $this->maxSizeBytes < PHP_INT_MAX ? max(1, $this->maxSizeBytes + 1) : PHP_INT_MAX;
+    }
+
     private function readFileContent(string $path): string
     {
-        $fileContent = file_get_contents($path);
+        $fileContent = file_get_contents($path, false, null, 0, $this->boundedReadLength());
         if ($fileContent === false) {
             throw new AttachmentException(sprintf('Unable to read attachment file: %s', $path));
         }

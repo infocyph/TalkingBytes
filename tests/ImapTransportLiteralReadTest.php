@@ -61,7 +61,7 @@ it('reads multiple imap literals from a single tagged response', function (): vo
     ]);
 
     $transport = new ImapSocketTransport(new ImapConfig(
-        host: 'imap.example.com',
+        host: '127.0.0.1',
         port: 143,
         security: ImapSecurity::None,
         username: 'user',
@@ -87,7 +87,7 @@ it('supports empty imap literal bodies', function (): void {
     ]);
 
     $transport = new ImapSocketTransport(new ImapConfig(
-        host: 'imap.example.com',
+        host: '127.0.0.1',
         port: 143,
         security: ImapSecurity::None,
         username: 'user',
@@ -110,7 +110,7 @@ it('fails when imap server closes during literal read', function (): void {
     ]);
 
     $transport = new ImapSocketTransport(new ImapConfig(
-        host: 'imap.example.com',
+        host: '127.0.0.1',
         port: 143,
         security: ImapSecurity::None,
         username: 'user',
@@ -144,7 +144,7 @@ it('reads literals across multiple FETCH lines in one tagged response', function
     ]);
 
     $transport = new ImapSocketTransport(new ImapConfig(
-        host: 'imap.example.com',
+        host: '127.0.0.1',
         port: 143,
         security: ImapSecurity::None,
         username: 'user',
@@ -162,7 +162,7 @@ it('reads literals across multiple FETCH lines in one tagged response', function
 
 it('fails with timeout-specific error while reading literal bytes', function (): void {
     $transport = new ImapSocketTransport(new ImapConfig(
-        host: 'imap.example.com',
+        host: '127.0.0.1',
         port: 143,
         security: ImapSecurity::None,
         username: 'user',

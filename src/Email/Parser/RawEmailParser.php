@@ -14,13 +14,17 @@ use Infocyph\TalkingBytes\Email\ValueObject\ReceivedAttachment;
 
 final readonly class RawEmailParser implements EmailParser
 {
+    private MimeParser $mimeParser;
+
     public function __construct(
         private HeaderParser $headerParser = new HeaderParser(),
         private AddressParser $addressParser = new AddressParser(),
-        private MimeParser $mimeParser = new MimeParser(),
+        ?MimeParser $mimeParser = null,
         private AttachmentExtractor $attachmentExtractor = new AttachmentExtractor(),
         private EmailLimits $limits = new EmailLimits(),
-    ) {}
+    ) {
+        $this->mimeParser = $mimeParser ?? new MimeParser(limits: $this->limits);
+    }
 
     /**
      * @param array<string, mixed> $metadata
@@ -60,7 +64,7 @@ final readonly class RawEmailParser implements EmailParser
             $attachments,
             $parts,
             $headers->asMap(),
-            $this->normalizeLineEndings($rawEmail),
+            $rawEmail,
             $metadata,
         );
     }
@@ -121,7 +125,20 @@ final readonly class RawEmailParser implements EmailParser
         }
 
         $headerLines = preg_split('/\r\n/', $headerBlock) ?: [];
-        if (count($headerLines) > $this->limits->maxHeaderCount) {
+        $fieldCount = 0;
+        foreach ($headerLines as $line) {
+            if (strlen($line) > $this->limits->maxHeaderLineBytes) {
+                throw new EmailParseException(sprintf(
+                    'Header line exceeds limit (%d bytes).',
+                    $this->limits->maxHeaderLineBytes,
+                ));
+            }
+            if ($line !== '' && !str_starts_with($line, ' ') && !str_starts_with($line, "\t")) {
+                $fieldCount++;
+            }
+        }
+
+        if ($fieldCount > $this->limits->maxHeaderCount) {
             throw new EmailParseException(sprintf(
                 'Header count exceeds limit (%d).',
                 $this->limits->maxHeaderCount,

@@ -14,7 +14,7 @@ final class RequestSecurityGuard
         $url ??= $request->buildUrl();
         $host = parse_url($url, PHP_URL_HOST);
         if (!is_string($host) || $host === '') {
-            return;
+            throw new InvalidArgumentException('HTTP request URL must contain a valid host.');
         }
         $host = self::normalizeHost($host);
 
@@ -32,9 +32,74 @@ final class RequestSecurityGuard
             return;
         }
 
+        if ($request->options->proxy !== null) {
+            throw new InvalidArgumentException(
+                'Strict private-network protection cannot be combined with a remote proxy.',
+            );
+        }
+
         if (self::isPrivateOrLocalHost($host)) {
             throw new InvalidArgumentException(sprintf('HTTP request host resolves to a private or reserved address: %s', $host));
         }
+    }
+
+    public static function pinnedResolution(HttpRequest $request, string $url): ?string
+    {
+        self::assertAllowed($request, $url);
+        if (($request->metadata['security_block_private_networks'] ?? false) !== true) {
+            return null;
+        }
+
+        $host = parse_url($url, PHP_URL_HOST);
+        if (!is_string($host) || filter_var($host, FILTER_VALIDATE_IP) !== false) {
+            return null;
+        }
+
+        $addresses = self::resolveHostAddresses($host);
+        if ($addresses === []) {
+            throw new InvalidArgumentException(sprintf('HTTP request host could not be resolved safely: %s', $host));
+        }
+
+        foreach ($addresses as $address) {
+            if (self::isPrivateOrReservedIp($address)) {
+                throw new InvalidArgumentException(sprintf(
+                    'HTTP request host resolves to a private or reserved address: %s',
+                    $host,
+                ));
+            }
+        }
+
+        $port = parse_url($url, PHP_URL_PORT);
+        if (!is_int($port)) {
+            $port = strtolower((string) parse_url($url, PHP_URL_SCHEME)) === 'https' ? 443 : 80;
+        }
+
+        return sprintf('%s:%d:%s', $host, $port, implode(',', $addresses));
+    }
+
+    private static function inCidr(string $ip, string $cidr): bool
+    {
+        [$network, $prefixText] = explode('/', $cidr, 2);
+        $addressBytes = inet_pton($ip);
+        $networkBytes = inet_pton($network);
+        if ($addressBytes === false || $networkBytes === false || strlen($addressBytes) !== strlen($networkBytes)) {
+            return false;
+        }
+
+        $prefix = (int) $prefixText;
+        $fullBytes = intdiv($prefix, 8);
+        $remainingBits = $prefix % 8;
+        if (substr($addressBytes, 0, $fullBytes) !== substr($networkBytes, 0, $fullBytes)) {
+            return false;
+        }
+
+        if ($remainingBits === 0) {
+            return true;
+        }
+
+        $mask = (0xFF << (8 - $remainingBits)) & 0xFF;
+
+        return (ord($addressBytes[$fullBytes]) & $mask) === (ord($networkBytes[$fullBytes]) & $mask);
     }
 
     private static function isPrivateOrLocalHost(string $host): bool
@@ -60,28 +125,35 @@ final class RequestSecurityGuard
         }
 
         if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false) {
-            $long = ip2long($ip);
-            if ($long === false) {
-                return true;
-            }
-
-            return
-                ($long >= ip2long('0.0.0.0') && $long <= ip2long('0.255.255.255'))
-                || ($long >= ip2long('127.0.0.0') && $long <= ip2long('127.255.255.255'))
-                || ($long >= ip2long('169.254.0.0') && $long <= ip2long('169.254.255.255'));
+            return array_any([
+                '0.0.0.0/8',
+                '10.0.0.0/8',
+                '100.64.0.0/10',
+                '127.0.0.0/8',
+                '169.254.0.0/16',
+                '172.16.0.0/12',
+                '192.0.0.0/24',
+                '192.0.2.0/24',
+                '192.88.99.0/24',
+                '192.168.0.0/16',
+                '198.18.0.0/15',
+                '198.51.100.0/24',
+                '203.0.113.0/24',
+                '224.0.0.0/4',
+                '240.0.0.0/4',
+            ], static fn(string $range): bool => self::inCidr($ip, $range));
         }
 
         if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) !== false) {
-            $normalized = strtolower($ip);
-
-            return $normalized === '::'
-                || $normalized === '::1'
-                || str_starts_with($normalized, 'fc')
-                || str_starts_with($normalized, 'fd')
-                || str_starts_with($normalized, 'fe8')
-                || str_starts_with($normalized, 'fe9')
-                || str_starts_with($normalized, 'fea')
-                || str_starts_with($normalized, 'feb');
+            return array_any([
+                '::/128',
+                '::1/128',
+                '100::/64',
+                '2001:db8::/32',
+                'fc00::/7',
+                'fe80::/10',
+                'ff00::/8',
+            ], static fn(string $range): bool => self::inCidr($ip, $range));
         }
 
         return true;
@@ -93,7 +165,7 @@ final class RequestSecurityGuard
             return substr($host, 1, -1);
         }
 
-        return $host;
+        return rtrim($host, '.');
     }
 
     /**

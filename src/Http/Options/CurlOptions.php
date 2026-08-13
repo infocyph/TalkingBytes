@@ -25,7 +25,7 @@ namespace Infocyph\TalkingBytes\Http\Options;
  *   maxDownloadBytes?: ?int,
  *   maxUploadBytes?: ?int,
  *   httpVersion?: ?int,
- *   additional?: array<int, mixed>
+ *   explicit?: array<string, true>
  * }
  * @phpstan-type CurlOptionState array{
  *   timeoutSeconds: int,
@@ -47,26 +47,26 @@ namespace Infocyph\TalkingBytes\Http\Options;
  *   maxDownloadBytes: ?int,
  *   maxUploadBytes: ?int,
  *   httpVersion: ?int,
- *   additional: array<int, mixed>
+ *   explicit: array<string, true>
  * }
  */
 final readonly class CurlOptions
 {
-    /**
-     * @param array<int, mixed> $additional
-     */
+    /** @param array<string, true> $explicit */
     public function __construct(
         public int $timeoutSeconds = 10,
         public int $connectTimeoutSeconds = 10,
         public bool $followRedirects = false,
         public int $maxRedirects = 5,
         public ?string $proxy = null,
+        #[\SensitiveParameter]
         public ?string $proxyAuth = null,
         public bool $verifyPeer = true,
         public bool $verifyHost = true,
         public ?string $caBundle = null,
         public ?string $clientCertificate = null,
         public ?string $clientKey = null,
+        #[\SensitiveParameter]
         public ?string $clientKeyPassphrase = null,
         public ?string $userAgent = null,
         public ?string $downloadPath = null,
@@ -75,7 +75,7 @@ final readonly class CurlOptions
         public ?int $maxDownloadBytes = null,
         public ?int $maxUploadBytes = null,
         public ?int $httpVersion = null,
-        public array $additional = [],
+        private array $explicit = [],
     ) {
         if ($this->timeoutSeconds < 1) {
             throw new \InvalidArgumentException('timeoutSeconds must be greater than 0.');
@@ -97,17 +97,25 @@ final readonly class CurlOptions
             self::assertValidProxy($this->proxy);
         }
 
+        self::assertNoControlCharacters($this->proxyAuth, 'proxyAuth');
+        self::assertNoControlCharacters($this->userAgent, 'userAgent');
+        if ($this->proxyAuth !== null && !str_contains($this->proxyAuth, ':')) {
+            throw new \InvalidArgumentException('proxyAuth must use the username:password form.');
+        }
+
         self::assertReadableFileIfSet($this->caBundle, 'caBundle');
         self::assertReadableFileIfSet($this->clientCertificate, 'clientCertificate');
         self::assertReadableFileIfSet($this->clientKey, 'clientKey');
     }
 
-    public function withAdditional(int $option, mixed $value): self
+    public function isExplicit(string $option): bool
     {
-        $additional = $this->additional;
-        $additional[$option] = $value;
+        return isset($this->explicit[$option]);
+    }
 
-        return $this->with(['additional' => $additional]);
+    public function withCaBundle(?string $caBundle): self
+    {
+        return $this->with(['caBundle' => $caBundle]);
     }
 
     public function withConnectTimeoutSeconds(int $seconds): self
@@ -128,12 +136,27 @@ final readonly class CurlOptions
         ]);
     }
 
+    public function withMaxDownloadBytes(?int $bytes): self
+    {
+        return $this->with(['maxDownloadBytes' => $bytes]);
+    }
+
     public function withMaxRedirects(int $maxRedirects): self
     {
         return $this->withFollowRedirects($this->followRedirects, $maxRedirects);
     }
 
-    public function withMtls(string $certificatePath, string $keyPath, ?string $passphrase = null): self
+    public function withMaxResponseBytes(?int $bytes): self
+    {
+        return $this->with(['maxResponseBytes' => $bytes]);
+    }
+
+    public function withMaxUploadBytes(?int $bytes): self
+    {
+        return $this->with(['maxUploadBytes' => $bytes]);
+    }
+
+    public function withMtls(string $certificatePath, string $keyPath, #[\SensitiveParameter] ?string $passphrase = null): self
     {
         return $this->with([
             'clientCertificate' => $certificatePath,
@@ -147,7 +170,7 @@ final readonly class CurlOptions
         return $this->with(['proxy' => $proxy]);
     }
 
-    public function withProxyAuth(?string $proxyAuth): self
+    public function withProxyAuth(#[\SensitiveParameter] ?string $proxyAuth): self
     {
         return $this->with(['proxyAuth' => $proxyAuth]);
     }
@@ -180,9 +203,21 @@ final readonly class CurlOptions
         ]);
     }
 
+    public function withTlsVerification(bool $verifyPeer, bool $verifyHost): self
+    {
+        return $this->with(['verifyPeer' => $verifyPeer, 'verifyHost' => $verifyHost]);
+    }
+
     public function withUserAgent(?string $userAgent): self
     {
         return $this->with(['userAgent' => $userAgent]);
+    }
+
+    private static function assertNoControlCharacters(?string $value, string $field): void
+    {
+        if ($value !== null && preg_match('/[\x00-\x1F\x7F]/', $value) === 1) {
+            throw new \InvalidArgumentException(sprintf('%s contains control characters.', $field));
+        }
     }
 
     private static function assertPositiveLimit(?int $value, string $field): void
@@ -246,13 +281,21 @@ final readonly class CurlOptions
             'maxDownloadBytes' => $this->maxDownloadBytes,
             'maxUploadBytes' => $this->maxUploadBytes,
             'httpVersion' => $this->httpVersion,
-            'additional' => $this->additional,
+            'explicit' => $this->explicit,
         ];
     }
 
     /** @param CurlOptionChanges $changes */
     private function with(array $changes): self
     {
+        $explicit = $this->explicit;
+        foreach ($changes as $name => $value) {
+            if ($name !== 'explicit') {
+                $explicit[$name] = true;
+            }
+        }
+        $changes['explicit'] = $explicit;
+
         return new self(...array_replace($this->state(), $changes));
     }
 }

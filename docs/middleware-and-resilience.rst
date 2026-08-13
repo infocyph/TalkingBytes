@@ -4,10 +4,10 @@ Middleware and Resilience
 Overview
 --------
 
-TalkingBytes provides a framework-agnostic middleware pipeline shared by the
-HTTP and gRPC clients. Middleware is immutable client configuration: the
-pipeline is compiled when the client is created or changed and reused for
-subsequent sends.
+TalkingBytes provides separate, typed middleware pipelines for HTTP and gRPC.
+Middleware is immutable client configuration: each pipeline is compiled when
+the client is created or changed and reused for subsequent sends. There is no
+universal request envelope or protocol-switching middleware.
 
 HTTP helpers
 ------------
@@ -42,25 +42,24 @@ HTTP helpers
 Custom middleware
 -----------------
 
-Implement ``MiddlewareInterface`` when a policy must wrap transport execution.
-Middleware receives a ``CommunicationRequest`` and a closure for the next
-stage.
+Implement ``HttpMiddleware`` when an HTTP policy must wrap transport execution.
+Middleware receives an ``HttpRequest`` and a typed closure for the next stage.
 
 .. code-block:: php
 
    use Closure;
-   use Infocyph\TalkingBytes\Core\Contract\MiddlewareInterface;
-   use Infocyph\TalkingBytes\Core\Message\CommunicationRequest;
    use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
+   use Infocyph\TalkingBytes\Http\Contract\HttpMiddleware;
+   use Infocyph\TalkingBytes\Http\HttpRequest;
 
-   final readonly class TenantHeaderMiddleware implements MiddlewareInterface
+   final readonly class TenantHeaderMiddleware implements HttpMiddleware
    {
        public function __construct(private string $tenantId)
        {
        }
 
        public function handle(
-           CommunicationRequest $request,
+           HttpRequest $request,
            Closure $next,
        ): CommunicationResult {
            $headers = $request->headers;
@@ -76,9 +75,10 @@ stage.
 gRPC middleware
 ---------------
 
-``GrpcClient`` accepts shared middleware through ``withMiddleware()`` and
+``GrpcClient`` accepts ``GrpcMiddleware`` through ``withMiddleware()`` and
 ``withMiddlewares()``. Use ``withGrpcRetry()`` for the protocol-aware retry
-defaults.
+defaults. gRPC retry is limited to explicitly retry-safe calls and conservative
+transient statuses within the original monotonic deadline budget.
 
 Operational guidance
 --------------------
@@ -91,5 +91,7 @@ Operational guidance
   bounded.
 - Retry only idempotent operations unless the application supplies
   deduplication semantics.
+- Keep idempotency outside retry so one logical HTTP request retains one key.
+- Inject ``Clock`` and ``Sleeper`` in deterministic tests.
 - ``RateLimiter`` and ``CircuitBreaker`` are process-local. Use a shared
   application-level implementation when policy state must span workers.

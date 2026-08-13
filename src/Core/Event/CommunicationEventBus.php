@@ -23,12 +23,12 @@ final class CommunicationEventBus
     {
         self::$dispatcher = $listener === null
             ? new NullEventDispatcher()
-            : new CallableEventDispatcher($listener);
+            : new BestEffortEventDispatcher(new CallableEventDispatcher($listener));
     }
 
     public static function useDispatcher(EventDispatcher $dispatcher): void
     {
-        self::$dispatcher = $dispatcher;
+        self::$dispatcher = new BestEffortEventDispatcher($dispatcher);
     }
 
     private static function dispatcher(): EventDispatcher
