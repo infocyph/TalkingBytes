@@ -108,22 +108,6 @@ $server = GrpcInboundDispatcher::new()->withHandler(
 );
 ```
 
-## Security
-
-Protected by [PHPForge](https://github.com/infocyph/PHPForge) — an automated quality and security gate for PHP projects.
-
-## Documentation
-
-The complete guides cover
-[email](https://docs.infocyph.com/projects/TalkingBytes/en/latest/email/),
-[HTTP](https://docs.infocyph.com/projects/TalkingBytes/en/latest/http/),
-[webhooks](https://docs.infocyph.com/projects/TalkingBytes/en/latest/webhook/),
-[gRPC](https://docs.infocyph.com/projects/TalkingBytes/en/latest/grpc/),
-[middleware and resilience](https://docs.infocyph.com/projects/TalkingBytes/en/latest/middleware-and-resilience.html),
-[security](https://docs.infocyph.com/projects/TalkingBytes/en/latest/security.html), and
-[testing](https://docs.infocyph.com/projects/TalkingBytes/en/latest/testing.html).
-
----
 
 ## Security
 
