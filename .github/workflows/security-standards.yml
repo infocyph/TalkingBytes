@@ -20,6 +20,39 @@ jobs:
       actions: read
       contents: read
 
+  optional-capability-coldness:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup minimal PHP runtime
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.5"
+          extensions: "curl, fileinfo, openssl, :grpc, :imap, :posix, :pcntl, :sodium"
+          coverage: none
+
+      - name: Verify optional extensions are absent
+        run: |
+          php -r '
+          foreach (["grpc", "imap", "posix", "pcntl", "sodium"] as $extension) {
+              if (extension_loaded($extension)) {
+                  fwrite(STDERR, "Optional extension unexpectedly loaded: {$extension}\n");
+                  exit(1);
+              }
+          }
+          '
+
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Run optional capability coldness gate
+        env:
+          TALKINGBYTES_OPTIONAL_COLDNESS: "1"
+        run: vendor/bin/pest --configuration=vendor/infocyph/phpforge/resources/pest.xml --bootstrap=vendor/autoload.php tests/OptionalCapabilityColdnessTest.php
+
   mailpit-integration:
     runs-on: ubuntu-latest
     services:

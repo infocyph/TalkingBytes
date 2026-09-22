@@ -30,6 +30,51 @@ Examples:
 
 Sensitive values are redacted before dispatch.
 
+Runtime ownership and lifetime
+------------------------------
+
+TalkingBytes objects are safe to reuse only according to the state they own.
+
+- immutable request/configuration objects may be reused.
+- an ``HttpClient`` without mutable collaborators is an immutable reusable
+  graph.
+- ``CookieJar`` owns mutable session state and should be scoped to the
+  intended request/session lifetime.
+- ``CircuitBreaker`` and ``RateLimiter`` own resilience state; sharing
+  them is an explicit host policy decision.
+- mailbox/socket transports own connection/session state and should remain
+  execution- or worker-owned rather than globally shared.
+- generated/native gRPC invokers inherit the lifetime of their channel/stub and
+  should be scoped deliberately by the host.
+- fakes and spies own mutable test history and should be test-scoped.
+
+No global registry is introduced for cookies, resilience state, mailbox
+connections, native clients, cancellation, or protocol events.
+
+Cancellation and host control
+-----------------------------
+
+Long-running protocol work accepts the small ``CancellationSignal`` boundary
+where interruption is useful. TalkingBytes checks that signal around retries,
+bounded waits, stream progress, concurrent HTTP scheduling, mailbox watches,
+sendmail process supervision, and accepted inbound gRPC exchanges.
+
+The host remains responsible for translating its own stop token, heartbeat,
+release generation, or worker lifecycle into that signal. TalkingBytes does not
+own worker supervision or process-global signal handling.
+
+Optional capability coldness
+----------------------------
+
+Optional protocol capabilities remain cold until selected. HTTP, webhook, and
+basic email graphs must not initialize gRPC, IMAP, POSIX, PCNTL, or Sodium
+capabilities. RSA DKIM is OpenSSL-backed; Sodium is required only by Ed25519
+DKIM. POSIX sendmail hardening is opportunistic and PCNTL is not part of the
+normal runtime graph.
+
+The security workflow contains a minimal-extension coldness gate that exercises
+these boundaries with the optional extensions disabled.
+
 Module boundaries
 -----------------
 
@@ -48,3 +93,5 @@ Every module includes fakes/assertion helpers and fake protocol servers where us
 - gRPC: fake caller + retry tests.
 - Webhook: signature/replay/redaction tests.
 - Email: SMTP/IMAP/POP3/parser/bounce/authentication tests.
+- runtime: sequential/Fiber isolation, cancellation, and optional-capability
+  coldness gates.
