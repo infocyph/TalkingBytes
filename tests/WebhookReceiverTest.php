@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Infocyph\TalkingBytes\Webhook\Contracts\WebhookReplayStore;
 use Infocyph\TalkingBytes\Webhook\Replay\InMemoryWebhookReplayStore;
 use Infocyph\TalkingBytes\Webhook\Testing\WebhookTestFactory;
 use Infocyph\TalkingBytes\Webhook\Webhook;
@@ -97,4 +98,78 @@ it('validates event and delivery header values using name guard', function (): v
     $spacedEvent['X-TB-Event'] = ' order.created';
     expect(fn() => $receiver->receive($payload, $spacedEvent))
         ->toThrow(InvalidArgumentException::class, 'surrounding whitespace');
+});
+
+
+it('claims each replay identity only once and validates replay inputs', function (): void {
+    $store = new InMemoryWebhookReplayStore();
+
+    $claims = [
+        $store->claim('tenant-a', 'evt_contention', 60),
+        $store->claim('tenant-a', 'evt_contention', 60),
+    ];
+
+    expect(array_values(array_filter($claims)))->toHaveCount(1);
+    expect(fn() => $store->claim('tenant-a', 'evt_ttl', 0))
+        ->toThrow(InvalidArgumentException::class, 'TTL must be greater than zero');
+
+    $receiver = (new WebhookReceiver(Webhook::verifier('whsec_test')))
+        ->withReplayStore($store, 60);
+
+    expect(fn() => $receiver->withReplayStore($store, 60, ''))
+        ->toThrow(InvalidArgumentException::class, 'namespace must not be empty');
+});
+
+it('verifies webhook signatures before touching replay state', function (): void {
+    [$payload, $headers] = WebhookTestFactory::signedJson(
+        secret: 'whsec_test',
+        event: 'order.created',
+        payload: ['id' => 2],
+        deliveryId: 'evt_verify_first',
+    );
+
+    $store = new class implements WebhookReplayStore {
+        public int $claims = 0;
+
+        public function claim(string $namespace, string $deliveryId, int $ttlSeconds): bool
+        {
+            unset($namespace, $deliveryId, $ttlSeconds);
+            $this->claims++;
+
+            return true;
+        }
+    };
+
+    $receiver = (new WebhookReceiver(Webhook::verifier('whsec_test')))
+        ->withReplayStore($store, 60);
+
+    $headers['X-TB-Signature'] = 't=1,v1=invalid';
+
+    expect(fn() => $receiver->receive($payload, $headers))
+        ->toThrow(RuntimeException::class, 'Webhook verification failed');
+    expect($store->claims)->toBe(0);
+});
+
+it('fails closed when the replay backend cannot claim a verified delivery', function (): void {
+    [$payload, $headers] = WebhookTestFactory::signedJson(
+        secret: 'whsec_test',
+        event: 'order.created',
+        payload: ['id' => 3],
+        deliveryId: 'evt_backend_failure',
+    );
+
+    $store = new class implements WebhookReplayStore {
+        public function claim(string $namespace, string $deliveryId, int $ttlSeconds): bool
+        {
+            unset($namespace, $deliveryId, $ttlSeconds);
+
+            throw new RuntimeException('replay backend unavailable');
+        }
+    };
+
+    $receiver = (new WebhookReceiver(Webhook::verifier('whsec_test')))
+        ->withReplayStore($store, 60);
+
+    expect(fn() => $receiver->receive($payload, $headers))
+        ->toThrow(RuntimeException::class, 'replay backend unavailable');
 });
