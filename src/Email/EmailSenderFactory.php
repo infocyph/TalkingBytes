@@ -135,6 +135,7 @@ final readonly class EmailSenderFactory
 
     /**
      * @param array<string, mixed> $config
+     * @return array<string, mixed>
      */
     private static function section(array $config, string $key, bool $required = false): array
     {

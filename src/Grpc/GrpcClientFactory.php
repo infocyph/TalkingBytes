@@ -33,6 +33,7 @@ final readonly class GrpcClientFactory
     }
 
     /**
+     * @param array<string, string> $methodMap
      * @param array<string, mixed> $config
      */
     public function usingGeneratedStub(
@@ -143,10 +144,6 @@ final readonly class GrpcClientFactory
     private static function section(array $config, string $key): array
     {
         $value = $config[$key] ?? [];
-        if ($value === null) {
-            return [];
-        }
-
         if (!is_array($value)) {
             throw new InvalidArgumentException(sprintf('gRPC resolved configuration section "%s" must be an array.', $key));
         }

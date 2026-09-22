@@ -51,6 +51,9 @@ final readonly class GrpcClient
         return new self(new GrpcTransport($caller, $events), events: $events);
     }
 
+    /**
+     * @param array<string, string> $methodMap
+     */
     public static function usingGeneratedStub(
         object $stubClient,
         array $methodMap = [],

@@ -176,10 +176,6 @@ final readonly class Webhook
     private static function section(array $config, string $key): array
     {
         $value = $config[$key] ?? [];
-        if ($value === null) {
-            return [];
-        }
-
         if (!is_array($value)) {
             throw new InvalidArgumentException(sprintf('Webhook resolved configuration section "%s" must be an array.', $key));
         }
