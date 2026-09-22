@@ -106,7 +106,7 @@ final readonly class CurlMultiTransport
                 if ($scheduled['cancelled']) {
                     $cancelled = true;
                     $stoppedScheduling = true;
-                    $this->cancelOutstanding($multiHandle, $requests, $keys, $nextIndex, $contexts, $results);
+                    $this->cancelOutstanding($multiHandle, $keys, $nextIndex, $contexts, $results);
 
                     break;
                 }
@@ -120,7 +120,6 @@ final readonly class CurlMultiTransport
                     $stoppedScheduling = true;
                     $this->failOutstanding(
                         $multiHandle,
-                        $requests,
                         $keys,
                         $nextIndex,
                         $contexts,
@@ -142,7 +141,7 @@ final readonly class CurlMultiTransport
                 if ($cancellation?->isRequested() === true) {
                     $cancelled = true;
                     $stoppedScheduling = true;
-                    $this->cancelOutstanding($multiHandle, $requests, $keys, $nextIndex, $contexts, $results);
+                    $this->cancelOutstanding($multiHandle, $keys, $nextIndex, $contexts, $results);
 
                     break;
                 }
@@ -168,6 +167,18 @@ final readonly class CurlMultiTransport
         );
     }
 
+    private static function cancelledResult(bool $started): CommunicationResult
+    {
+        return CommunicationResult::failure(
+            'HTTP concurrent operation cancelled.',
+            metadata: [
+                'transport' => 'curl-multi',
+                'cancelled' => true,
+                'started' => $started,
+            ],
+        );
+    }
+
     /**
      * @param array{key:int|string, handle:\CurlHandle, request:HttpRequest, headerCollector:ResponseHeaderCollector, bodyCollector:ResponseBodyCollector} $context
      */
@@ -179,14 +190,12 @@ final readonly class CurlMultiTransport
     }
 
     /**
-     * @param array<int|string, HttpRequest> $requests
      * @param list<int|string> $keys
      * @param array<int, array{key:int|string, handle:\CurlHandle, request:HttpRequest, headerCollector:ResponseHeaderCollector, bodyCollector:ResponseBodyCollector}> $contexts
      * @param array<int|string, CommunicationResult> $results
      */
     private function cancelOutstanding(
         \CurlMultiHandle $multiHandle,
-        array $requests,
         array $keys,
         int $nextIndex,
         array &$contexts,
@@ -224,7 +233,11 @@ final readonly class CurlMultiTransport
         $failureObserved = false;
 
         while (($message = curl_multi_info_read($multiHandle)) !== false) {
-            $handle = $message['handle'];
+            $handle = $message['handle'] ?? null;
+            if (!$handle instanceof \CurlHandle) {
+                continue;
+            }
+
             $handleId = spl_object_id($handle);
             $context = $contexts[$handleId] ?? null;
             if ($context === null) {
@@ -244,18 +257,6 @@ final readonly class CurlMultiTransport
         }
 
         return ['count' => $count, 'failure_observed' => $failureObserved];
-    }
-
-    private static function cancelledResult(bool $started): CommunicationResult
-    {
-        return CommunicationResult::failure(
-            'HTTP concurrent operation cancelled.',
-            metadata: [
-                'transport' => 'curl-multi',
-                'cancelled' => true,
-                'started' => $started,
-            ],
-        );
     }
 
     private function dispatchRequestResultEvent(HttpRequest $request, CommunicationResult $result): void
@@ -282,18 +283,16 @@ final readonly class CurlMultiTransport
             ];
         }
 
-        return ['error' => null, 'running' => $running];
+        return ['error' => null, 'running' => (int) $running];
     }
 
     /**
-     * @param array<int|string, HttpRequest> $requests
      * @param list<int|string> $keys
      * @param array<int, array{key:int|string, handle:\CurlHandle, request:HttpRequest, headerCollector:ResponseHeaderCollector, bodyCollector:ResponseBodyCollector}> $contexts
      * @param array<int|string, CommunicationResult> $results
      */
     private function failOutstanding(
         \CurlMultiHandle $multiHandle,
-        array $requests,
         array $keys,
         int $nextIndex,
         array &$contexts,
