@@ -99,7 +99,7 @@ final readonly class HttpClient
         ?CancellationSignal $cancellation = null,
         ?HttpTransport $transport = null,
     ): self {
-        return (new HttpClientFactory($events, $cancellation))->fromArray($config, $transport);
+        return new HttpClientFactory($events, $cancellation)->fromArray($config, $transport);
     }
 
     public static function multi(int $maxConcurrency = 10, ?EventDispatcher $events = null): Concurrent\RequestPool

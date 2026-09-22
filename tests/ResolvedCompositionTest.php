@@ -141,7 +141,10 @@ it('builds grpc retry and generated stub clients from resolved protocol config',
         ],
     );
 
-    $result = $client->send(new GrpcRequest('/orders.v1.OrderService/Create', ['id' => 1]));
+    $result = $client->send(
+        (new GrpcRequest('/orders.v1.OrderService/Create', ['id' => 1]))
+            ->withRetrySafety(),
+    );
 
     $stub = new class {
         public function Ping(mixed $message, array $metadata = [], array $options = []): object

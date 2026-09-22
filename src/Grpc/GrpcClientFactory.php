@@ -160,6 +160,7 @@ final readonly class GrpcClientFactory
 
         return $section;
     }
+
     /**
      * @param array<string, mixed> $config
      */
@@ -182,5 +183,4 @@ final readonly class GrpcClientFactory
             $this->cancellation,
         );
     }
-
 }

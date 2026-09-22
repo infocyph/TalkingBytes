@@ -44,7 +44,6 @@ final readonly class EmailSenderFactory
         return Emailer::fake($this->events, $this->clock);
     }
 
-
     /**
      * Build an email sender from already-resolved protocol configuration.
      *

@@ -171,6 +171,7 @@ final readonly class HttpClientFactory
 
         return $value;
     }
+
     /**
      * @param array<string, mixed> $auth
      */
@@ -194,5 +195,4 @@ final readonly class HttpClientFactory
             default => throw new InvalidArgumentException('Unsupported HTTP auth driver.'),
         };
     }
-
 }

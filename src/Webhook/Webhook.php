@@ -30,7 +30,8 @@ final readonly class Webhook
      * @param array<string, mixed> $config
      */
     public static function receiverFromResolvedConfig(
-        #[\SensitiveParameter] string|array $secret,
+        #[\SensitiveParameter]
+        string|array $secret,
         array $config,
         ?WebhookReplayStore $replayStore = null,
         ?EventDispatcher $events = null,
@@ -112,7 +113,8 @@ final readonly class Webhook
      * @param array<string, mixed> $config
      */
     public static function verifierFromResolvedConfig(
-        #[\SensitiveParameter] string|array $secret,
+        #[\SensitiveParameter]
+        string|array $secret,
         array $config,
         ?EventDispatcher $events = null,
     ): WebhookVerifier {
