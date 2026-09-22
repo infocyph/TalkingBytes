@@ -89,3 +89,37 @@ it('supports additional charset aliases and handles invalid byte payloads safely
     $decoded = $decoder->toUtf8($invalidBytes, 'X-UNKNOWN');
     expect($decoded)->toBeString();
 });
+
+it('restores the error handler stack and original error mask after charset fallback', function (): void {
+    $outer = static fn(): bool => true;
+    $calls = [];
+    $inner = static function (int $severity) use (&$calls): bool {
+        $calls[] = $severity;
+        return true;
+    };
+    $reporting = error_reporting(E_USER_WARNING);
+    set_error_handler($outer);
+    set_error_handler($inner, E_USER_WARNING);
+    try {
+        for ($i = 0; $i < 3; $i++) {
+            (new CharsetDecoder())->toUtf8('text', 'INVALID-CHARSET-AUDIT');
+        }
+        trigger_error('excluded notice', E_USER_NOTICE);
+        trigger_error('included warning', E_USER_WARNING);
+        restore_error_handler();
+        $after = set_error_handler($outer);
+        restore_error_handler();
+    } finally {
+        error_reporting($reporting);
+        // Unwind even a broken implementation so the regression cannot pollute other tests.
+        for ($i = 0; $i < 20; $i++) {
+            $current = set_error_handler($outer);
+            restore_error_handler();
+            restore_error_handler();
+            if ($current === $outer) {
+                break;
+            }
+        }
+    }
+    expect($after)->toBe($outer)->and($calls)->toBe([E_USER_WARNING]);
+});

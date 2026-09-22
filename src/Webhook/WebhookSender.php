@@ -18,6 +18,7 @@ use Infocyph\TalkingBytes\Http\Support\HttpRedactor;
 use Infocyph\TalkingBytes\Retry\RetryContext;
 use Infocyph\TalkingBytes\Webhook\Model\WebhookDelivery;
 use Infocyph\TalkingBytes\Webhook\Model\WebhookDeliveryResult;
+use Infocyph\TalkingBytes\Webhook\Model\WebhookSignature;
 use Infocyph\TalkingBytes\Webhook\Retry\WebhookRetryProfile;
 use Infocyph\TalkingBytes\Webhook\Signing\HmacWebhookSigner;
 use Infocyph\TalkingBytes\Webhook\Signing\WebhookSigner;
@@ -127,8 +128,8 @@ final readonly class WebhookSender
                 ->header(WebhookHeaders::CONTENT_TYPE, 'application/json');
 
             if ($this->signingSecret !== null) {
-                $signature = $this->signature($payload, $timestamp);
-                $request = $request->header(WebhookHeaders::SIGNATURE, sprintf('t=%d,v1=%s', $timestamp, $signature));
+                $signature = $this->signature(WebhookSignature::deliveryPayload($payload, $webhook->event, $webhook->deliveryId), $timestamp);
+                $request = $request->header(WebhookHeaders::SIGNATURE, sprintf('t=%d,v2=%s', $timestamp, $signature));
             }
 
             $result = $this->httpClient->send($request);

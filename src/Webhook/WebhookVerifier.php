@@ -8,6 +8,7 @@ use Infocyph\TalkingBytes\Core\Event\BestEffortEventDispatcher;
 use Infocyph\TalkingBytes\Core\Event\EventDispatcher;
 use Infocyph\TalkingBytes\Core\Event\NullEventDispatcher;
 use Infocyph\TalkingBytes\Core\Support\Clock;
+use Infocyph\TalkingBytes\Webhook\Model\WebhookSignature;
 use Infocyph\TalkingBytes\Webhook\Model\WebhookVerificationResult;
 use Infocyph\TalkingBytes\Webhook\Signing\HmacWebhookSigner;
 use Infocyph\TalkingBytes\Webhook\Signing\WebhookSignatureParser;
@@ -69,6 +70,8 @@ final readonly class WebhookVerifier
         string $signatureHeader,
         ?string $timestampHeader = null,
         ?int $now = null,
+        ?string $event = null,
+        ?string $deliveryId = null,
     ): WebhookVerificationResult {
         $now ??= (int) floor($this->clock->timestamp());
 
@@ -84,7 +87,12 @@ final readonly class WebhookVerifier
             return $this->reject('missing_timestamp');
         }
 
-        $parsed = $this->signatureParser->parse($signatureHeader, $timestampHeader);
+        $version = 'v1';
+        if ($event !== null || $deliveryId !== null) {
+            $payload = WebhookSignature::deliveryPayload($payload, $event ?? '', $deliveryId ?? '');
+            $version = 'v2';
+        }
+        $parsed = $this->signatureParser->parse($signatureHeader, $timestampHeader, $version);
         if ($parsed === null) {
             if ($timestampHeader !== null && trim($timestampHeader) !== '' && !ctype_digit(trim($timestampHeader))) {
                 return $this->reject('invalid_timestamp');

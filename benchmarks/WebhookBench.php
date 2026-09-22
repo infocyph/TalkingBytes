@@ -47,7 +47,7 @@ final class WebhookBench
         ], JSON_THROW_ON_ERROR);
         $this->timestamp = 1_720_000_000;
         $this->signature = new WebhookSignature('secret');
-        $this->signatureHeader = $this->signature->buildHeader($this->payload, $this->timestamp);
+        $this->signatureHeader = $this->signature->buildHeader($this->payload, $this->timestamp, 'invoice.paid', 'delivery-bench');
         $this->verifier = new WebhookVerifier(['current-secret', 'secret'], 300);
         $this->parser = new WebhookSignatureParser();
         $this->replayStore = new InMemoryWebhookReplayStore(10_000);
@@ -65,7 +65,7 @@ final class WebhookBench
     #[Revs(1000)]
     public function benchParseSignature(): void
     {
-        $this->parser->parse($this->signatureHeader);
+        $this->parser->parse($this->signatureHeader, version: 'v2');
     }
 
     #[Iterations(5)]
@@ -80,14 +80,14 @@ final class WebhookBench
     #[Revs(1000)]
     public function benchSignWebhook(): void
     {
-        $this->signature->buildHeader($this->payload, $this->timestamp);
+        $this->signature->buildHeader($this->payload, $this->timestamp, 'invoice.paid', 'delivery-bench');
     }
 
     #[Iterations(5)]
     #[Revs(1000)]
     public function benchVerificationAndReplayClaim(): void
     {
-        $this->verifier->verify($this->payload, $this->signatureHeader, $this->timestamp);
+        $this->verifier->verifyResult($this->payload, $this->signatureHeader, now: $this->timestamp, event: 'invoice.paid', deliveryId: 'delivery-bench');
         $this->replayCounter++;
         $this->replayStore->claim('verify', 'delivery-' . $this->replayCounter, 60);
     }
@@ -96,6 +96,6 @@ final class WebhookBench
     #[Revs(1000)]
     public function benchVerifyWebhook(): void
     {
-        $this->verifier->verify($this->payload, $this->signatureHeader, $this->timestamp);
+        $this->verifier->verifyResult($this->payload, $this->signatureHeader, now: $this->timestamp, event: 'invoice.paid', deliveryId: 'delivery-bench');
     }
 }

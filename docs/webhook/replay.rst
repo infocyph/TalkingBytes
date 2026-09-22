@@ -4,7 +4,10 @@ Replay Protection
 Interface
 ---------
 
-Use ``WebhookReplayStore`` to prevent duplicate processing.
+Use ``WebhookReplayStore`` to prevent duplicate processing. The native receiver
+requires a ``v2`` signature authenticating both event and delivery ID before
+claiming replay state. Changing either header invalidates the signature.
+Backend atomicity alone cannot secure an unsigned delivery ID.
 
 .. code-block:: php
 

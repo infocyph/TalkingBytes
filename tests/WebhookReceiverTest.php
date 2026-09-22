@@ -41,7 +41,7 @@ it('rejects invalid payload json and invalid signatures', function (): void {
     $invalidJson = '{';
     $invalidJsonHeaders = $headers;
     $invalidJsonHeaders['X-TB-Signature'] = (new WebhookSignature('whsec_test'))
-        ->buildHeader($invalidJson, (int) $headers['X-TB-Timestamp']);
+        ->buildHeader($invalidJson, (int) $headers['X-TB-Timestamp'], $headers['X-TB-Event'], $headers['X-TB-Delivery']);
 
     expect(fn() => $receiver->receive($invalidJson, $invalidJsonHeaders))
         ->toThrow(InvalidArgumentException::class, 'Webhook payload must be valid JSON.');
@@ -172,4 +172,52 @@ it('fails closed when the replay backend cannot claim a verified delivery', func
 
     expect(fn() => $receiver->receive($payload, $headers))
         ->toThrow(RuntimeException::class, 'replay backend unavailable');
+});
+
+it('authenticates delivery identity and event before claiming replay state', function (): void {
+    [$payload, $headers] = WebhookTestFactory::signedJson('secret', 'order.created', ['id' => 1], 'original');
+    $receiver = Webhook::receiver('secret')->withReplayStore(new InMemoryWebhookReplayStore());
+
+    foreach (['X-TB-Delivery' => 'altered', 'X-TB-Event' => 'order.refunded'] as $name => $value) {
+        $tampered = $headers;
+        $tampered[$name] = $value;
+        expect(fn() => $receiver->receive($payload, $tampered))->toThrow(RuntimeException::class, 'signature_mismatch');
+    }
+
+    expect($receiver->receive($payload, $headers)->deliveryId)->toBe('original');
+    expect(fn() => $receiver->receive($payload, $headers))->toThrow(RuntimeException::class, 'already been processed');
+    $headers['X-TB-Delivery'] = 'replayed';
+    expect(fn() => $receiver->receive($payload, $headers))->toThrow(RuntimeException::class, 'signature_mismatch');
+});
+
+it('rejects legacy signature downgrade even alongside an invalid bound signature', function (): void {
+    [$payload, $headers] = WebhookTestFactory::signedJson('secret', 'order.created', ['id' => 1]);
+    $legacy = (new WebhookSignature('secret'))->buildHeader($payload, (int) $headers['X-TB-Timestamp']);
+    $receiver = Webhook::receiver('secret');
+    $headers['X-TB-Signature'] = $legacy;
+    expect(fn() => $receiver->receive($payload, $headers))->toThrow(RuntimeException::class, 'malformed_signature');
+    $headers['X-TB-Signature'] .= ',v2=' . str_repeat('0', 64);
+    expect(fn() => $receiver->receive($payload, $headers))->toThrow(RuntimeException::class, 'signature_mismatch');
+});
+
+it('accepts bound signatures across secret rotation and rejects payload and timestamp tampering', function (): void {
+    [$payload, $headers] = WebhookTestFactory::signedJson('old-secret', 'order.created', ['id' => 1]);
+    $receiver = new WebhookReceiver(new \Infocyph\TalkingBytes\Webhook\WebhookVerifier(['new-secret', 'old-secret']));
+    expect($receiver->receive($payload, $headers)->payload)->toBe(['id' => 1]);
+    expect(fn() => $receiver->receive('{"id":2}', $headers))->toThrow(RuntimeException::class, 'signature_mismatch');
+    $headers['X-TB-Timestamp'] = (string) ((int) $headers['X-TB-Timestamp'] + 1);
+    expect(fn() => $receiver->receive($payload, $headers))->toThrow(RuntimeException::class, 'signature_mismatch');
+});
+
+it('receives the signed request produced by the native sender', function (): void {
+    $transport = new \Infocyph\TalkingBytes\Http\Testing\FakeHttpTransport();
+    Webhook::sender(\Infocyph\TalkingBytes\Http\HttpClient::using($transport))->withSecret('secret')->send(
+        \Infocyph\TalkingBytes\Webhook\WebhookMessage::event('order.created')->url('https://example.test/hook')->payload(['id' => 1]),
+    );
+    $request = $transport->sentRequests()[0];
+    $headers = [];
+    foreach (['X-TB-Event', 'X-TB-Delivery', 'X-TB-Timestamp', 'X-TB-Signature'] as $name) {
+        $headers[$name] = (string) $request->headers->get($name);
+    }
+    expect(Webhook::receiver('secret')->receive('{"id":1}', $headers)->event)->toBe('order.created');
 });

@@ -15,7 +15,7 @@ final class WebhookSignatureParser
     /**
      * @return array{timestamp:int,signatures:list<string>}|null
      */
-    public function parse(string $signatureHeader, ?string $timestampHeader = null): ?array
+    public function parse(string $signatureHeader, ?string $timestampHeader = null, string $version = 'v1'): ?array
     {
         if (strlen($signatureHeader) > self::MAX_HEADER_BYTES) {
             return null;
@@ -33,7 +33,7 @@ final class WebhookSignatureParser
 
         $signatures = [];
         foreach ($segments as $segment) {
-            [$timestamp, $candidate] = $this->parseSegment($segment, $timestamp);
+            [$timestamp, $candidate] = $this->parseSegment($segment, $timestamp, $version);
             if ($candidate !== null) {
                 $signatures[] = $candidate;
                 if (count($signatures) > self::MAX_SIGNATURES) {
@@ -66,7 +66,7 @@ final class WebhookSignatureParser
     /**
      * @return array{0:?int,1:?string}
      */
-    private function parseSegment(string $segment, ?int $timestamp): array
+    private function parseSegment(string $segment, ?int $timestamp, string $version): array
     {
         $parts = explode('=', trim($segment), 2);
         if (count($parts) !== 2) {
@@ -82,7 +82,7 @@ final class WebhookSignatureParser
             return [$timestamp, null];
         }
 
-        if ($parts[0] !== 'v1') {
+        if ($parts[0] !== $version) {
             return [$timestamp, null];
         }
 
