@@ -10,9 +10,9 @@ Baseline:
 - implementation baseline branch: main
 - released baseline: 2.0.0
 - baseline commit: 86d0e9dde8124ddeacea8ba7f81911af584b879b
-- current implementation head through Batch 7: d61b0286a8a8661d4896d81eb3cfc0c553758440
+- current implementation head through Batch 8: 45c7dd11d1c77c3e4ff1b68ab4a1999ed5f6761f
 - primary consumer: Foundation 3 runtime plan point 26.9
-- plan state: **ACTIVE — BATCHES 1–7 GREEN / BATCH 8 NEXT**
+- plan state: **ACTIVE — BATCHES 1–8 GREEN / BATCH 9 NEXT**
 
 Batch progress:
 
@@ -23,7 +23,7 @@ Batch progress:
 - [x] Batch 5 — webhook replay acceptance
 - [x] Batch 6 — HTTP rolling multi scheduler
 - [x] Batch 7 — gRPC generated adapter determinism
-- [ ] Batch 8 — observability and data minimization
+- [x] Batch 8 — observability and data minimization
 - [ ] Batch 9 — optional cold graphs, docs and benchmarks
 - [ ] Batch 10 — exact-head release gate
 
@@ -655,21 +655,21 @@ Default events/log context must not expose secrets or unnecessary payload/PII.
 
 ### Tasks
 
-- [ ] Never emit raw Authorization credentials.
-- [ ] Never emit raw bearer/API tokens.
-- [ ] Never emit cookie values.
-- [ ] Never emit proxy credentials.
-- [ ] Never emit webhook secrets/signatures/bodies.
-- [ ] Never emit SMTP/mailbox passwords or raw auth commands.
-- [ ] Avoid raw gRPC metadata values unless explicitly classified safe.
-- [ ] Do not copy raw exception messages blindly into protocol events.
-- [ ] Prefer stable failure category, exception class where locally appropriate, protocol status/code and bounded sanitized diagnostics.
-- [ ] Remove exception class from remote gRPC response metadata.
-- [ ] Review SMTP transcript capture and document it as explicit diagnostic data with clear redaction guarantees.
-- [ ] Remove or gate spool absolute paths and email subjects from default events when they are not required.
-- [ ] Keep caller-facing CommunicationResult diagnostics useful; local observability may intentionally be stricter.
-- [ ] Add sentinel-secret and sentinel-PII tests across HTTP, webhook, gRPC, email and mailbox event payloads.
-- [ ] Keep hot-path redaction overhead bounded.
+- [x] Never emit raw Authorization credentials.
+- [x] Never emit raw bearer/API tokens.
+- [x] Never emit cookie values.
+- [x] Never emit proxy credentials.
+- [x] Never emit webhook secrets/signatures/bodies.
+- [x] Never emit SMTP/mailbox passwords or raw auth commands.
+- [x] Avoid raw gRPC metadata values unless explicitly classified safe.
+- [x] Do not copy raw exception messages blindly into protocol events.
+- [x] Prefer stable failure category, exception class where locally appropriate, protocol status/code and bounded sanitized diagnostics.
+- [x] Remove exception class from remote gRPC response metadata.
+- [x] Review SMTP transcript capture and document it as explicit diagnostic data with clear redaction guarantees.
+- [x] Remove or gate spool absolute paths and email subjects from default events when they are not required.
+- [x] Keep caller-facing CommunicationResult diagnostics useful; local observability may intentionally be stricter.
+- [x] Add sentinel-secret and sentinel-PII tests across HTTP, webhook, gRPC, email and mailbox event payloads.
+- [x] Keep hot-path redaction overhead bounded.
 
 ---
 
@@ -762,7 +762,7 @@ Foundation owns bridge attribution.
 - [x] Update gRPC generated/native docs for deterministic adapter behavior.
 - [x] Update email docs for persistent-worker connection ownership.
 - [x] Update sendmail docs for timeout/cancellation/POSIX optional behavior.
-- [ ] Update security docs with secret/PII redaction guarantees.
+- [x] Update security docs with secret/PII redaction guarantees.
 - [ ] Update performance docs with persistent-runtime guidance.
 - [x] Update testing docs with isolation, fake cancellation and fake inbound-runtime examples.
 - [ ] Update release checklist with static-state, monotonic-time, cancellation, optional-cold and secret-sentinel gates.
@@ -936,13 +936,13 @@ This is a planning map, not a requirement to modify every file.
 - deterministic call-shape resolution;
 - streaming cancellation/failure cleanup.
 
-### Batch 8 — Observability and data minimization
+### Batch 8 — Observability and data minimization ✅
 
 - raw failure audit;
 - secret/PII sentinels;
 - transcript/path/subject policy.
 
-### Batch 9 — Optional cold graphs, docs and benchmarks
+### Batch 9 — Optional cold graphs, docs and benchmarks ⏳
 
 - extension/package absence matrix;
 - native benchmark evidence;
