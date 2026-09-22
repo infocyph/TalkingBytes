@@ -83,3 +83,24 @@ jobs:
           SMTP_PORT: 1025
           MAILPIT_API_BASE: http://127.0.0.1:8025
         run: vendor/bin/pest --configuration=vendor/infocyph/phpforge/resources/pest.xml --bootstrap=vendor/autoload.php --fail-on-skipped tests/MailpitIntegrationTest.php
+
+  docs-warning-free:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: docs/requirements.txt
+
+      - name: Install documentation dependencies
+        run: python -m pip install --disable-pip-version-check -r docs/requirements.txt
+
+      - name: Build documentation with warnings as errors
+        run: sphinx-build -W --keep-going -b html docs build/docs
+
