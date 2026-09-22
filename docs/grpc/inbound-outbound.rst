@@ -125,6 +125,21 @@ exposes a normalized ``GrpcInboundRequest`` and receives exactly one
 ``GrpcInboundResponse``. TalkingBytes keeps dispatch/status/error semantics;
 the host keeps worker heartbeat, restart, release-generation and process policy.
 
+Inbound streaming scope in 2.1
+------------------------------
+
+The host-controlled inbound boundary in 2.1 is deliberately request/response:
+one accepted ``GrpcInboundExchange`` exposes one normalized
+``GrpcInboundRequest`` and is completed with exactly one
+``GrpcInboundResponse``.
+
+TalkingBytes 2.1 does **not** expose a server-side inbound streaming exchange
+contract. Client/server/bidirectional streaming support described in
+:doc:`streaming` belongs to the outbound/native client adapter boundary and
+processes iterables and callbacks incrementally without accumulating a complete
+stream in memory. A future inbound streaming contract, if added, must preserve
+the same incremental/bounded rule rather than buffering an entire stream.
+
 Method dispatch behavior
 ------------------------
 

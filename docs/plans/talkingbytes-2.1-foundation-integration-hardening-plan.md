@@ -470,8 +470,8 @@ native/server runtime
 - [x] Do not add socket/process supervision.
 - [x] Do not require Foundation or Omnibus.
 - [x] Keep ext-grpc and grpc/grpc cold until selected.
-- [ ] Document exact inbound streaming modes actually implemented.
-- [ ] Keep inbound streaming incremental and bounded.
+- [x] Document the exact inbound 2.1 scope: host-controlled unary/request-response exchanges only; no server-side inbound streaming contract is exposed.
+- [x] Keep streaming incremental and bounded: outbound/native streaming processes iterables/callbacks incrementally; the 2.1 inbound exchange boundary does not buffer or expose a streaming mode.
 
 ### Security correction
 
@@ -624,7 +624,7 @@ Improve throughput without threads, forks or a new async framework.
 - [x] Move pool durations to monotonic Clock.
 - [x] Prove rolling-window slot refill against mixed fast/slow local endpoints with deterministic integration timing.
 - [x] Track repeated-run object/state cleanup with soak tests; active cURL-handle cleanup is covered by cancellation integration tests.
-- [ ] Optional follow-up: record a historical 2.0 chunked-versus-2.1 rolling I/O benchmark outside the CPU microbenchmark suite. This is non-gating for 2.1.
+- Deferred performance research: record a historical 2.0 chunked-versus-2.1 rolling I/O comparison outside the CPU microbenchmark suite if a future performance investigation needs it.
 
 ### Non-goal
 
@@ -722,7 +722,7 @@ Foundation owns bridge attribution.
 - [x] verification;
 - [x] verification plus replay claim;
 - [x] duplicate rejection;
-- [ ] Optional follow-up: dedicated retry/cancellation micro-overhead benchmark. Non-gating for 2.1 because cancellation/retry behavior is covered deterministically by tests.
+- Deferred performance research: dedicated webhook retry/cancellation micro-overhead measurement; behavior is already covered deterministically by tests.
 
 ### gRPC
 
@@ -731,16 +731,16 @@ Foundation owns bridge attribution.
 - [x] host accepted-exchange bridge;
 - [x] retry success-path/decision overhead;
 - [x] generated adapter;
-- [ ] Optional follow-up: native streaming/cancellation micro-overhead benchmark. Non-gating for 2.1 because streaming remains incremental and cancellation/finalization are covered by deterministic tests.
+- Deferred performance research: native streaming/cancellation micro-overhead measurement; streaming remains incremental and cancellation/finalization are already covered deterministically.
 
 ### Email
 
 - [x] message preparation;
 - [x] null/fake send;
 - [x] parser;
-- [ ] Optional follow-up: disk-backed spool-receive microbenchmark. Keep disk I/O outside the CPU suite.
+- Deferred performance research: disk-backed spool-receive measurement; keep disk I/O outside the CPU suite.
 - [x] deterministic mailbox adapter;
-- [ ] Optional follow-up: sendmail process-control microbenchmark. Keep child-process I/O outside the CPU suite.
+- Deferred performance research: sendmail process-control measurement; keep child-process I/O outside the CPU suite.
 - [x] 1/10/25 MB streaming payload paths.
 
 ### Rules
@@ -959,33 +959,33 @@ Non-gating follow-ups are intentionally kept separate from the release gate: his
 
 The pre-final implementation head feb0854a2659042660e295cf8e4ff1f6cfe40cf1 passed the complete release workflow, including PHP 8.4/8.5, prefer-lowest/prefer-stable QA, static analysis, native benchmarks, clean install, Mailpit integration, optional-capability coldness, and warning-free Sphinx documentation.
 
-This plan-reconciliation commit is the final release candidate. Batch 10 is complete only if the same complete workflow remains green on this exact commit; no further implementation or plan edits should be made before release/tagging.
+The final plan/documentation finalization commit is the release candidate. Batch 10 is complete when the complete workflow is green on that exact head; any subsequent code or documentation change must become a new candidate and repeat the gate.
 
 ---
 
 ## 20. Foundation 3 Handoff
 
-After TalkingBytes 2.1 is released:
+After TalkingBytes 2.1 is released, the following are **Foundation 3 point 26.9 handoff instructions**, not unfinished TalkingBytes tasks:
 
-- [ ] Foundation raises its communication floor to ^2.1 only when the released APIs are consumed.
-- [ ] Foundation keeps named application profile lookup.
-- [ ] Foundation keeps path/secret resolution and production policy.
-- [ ] Foundation keeps DI lifetime selection.
-- [ ] Foundation keeps CacheLayerWebhookReplayStore.
-- [ ] Foundation keeps gRPC handler service lookup.
-- [ ] Foundation keeps ProcessRunner for console/scheduler/application subprocesses.
-- [ ] Foundation maps worker heartbeat/stop/release replacement into TalkingBytes cancellation.
-- [ ] Foundation removes duplicated HTTP auth/cookie/retry/rate-limit/circuit/idempotency composition when TalkingBytes native composition is available.
-- [ ] Foundation removes duplicated gRPC retry/native/generated composition when TalkingBytes owns it.
-- [ ] Foundation removes duplicated webhook retry/signing composition where TalkingBytes can consume resolved values directly.
-- [ ] Foundation removes duplicated email transport/fallback/retry/rate-limit/DKIM composition where TalkingBytes factories can consume resolved config.
-- [ ] Foundation replaces manual EmailLimits construction with TalkingBytes parsing.
-- [ ] Foundation keeps default From and notification/template routing as application policy.
-- [ ] Foundation keeps HTTP clients scoped when mutable state is attached.
-- [ ] Foundation routes inbound gRPC through the new host-controlled boundary.
-- [ ] Foundation proves communication secrets are absent from generated metadata, cache keys and logs.
-- [ ] Foundation adds direct-TalkingBytes-versus-Foundation bridge benchmark attribution.
-- [ ] Foundation closes runtime plan point 26.9 only on exact-head green CI.
+- raise the Foundation communication floor to ^2.1 only when the released APIs are consumed;
+- keep named application profile lookup in Foundation;
+- keep path/secret resolution and production policy in Foundation;
+- keep DI lifetime selection in Foundation;
+- keep CacheLayerWebhookReplayStore in Foundation;
+- keep gRPC handler service lookup in Foundation;
+- keep ProcessRunner for console/scheduler/application subprocesses in Foundation;
+- map Foundation worker heartbeat/stop/release replacement into TalkingBytes cancellation;
+- remove duplicated HTTP auth/cookie/retry/rate-limit/circuit/idempotency composition when consuming TalkingBytes native composition;
+- remove duplicated gRPC retry/native/generated composition when consuming TalkingBytes ownership;
+- remove duplicated webhook retry/signing composition where TalkingBytes consumes resolved values directly;
+- remove duplicated email transport/fallback/retry/rate-limit/DKIM composition where TalkingBytes factories consume resolved config;
+- replace manual EmailLimits construction with TalkingBytes parsing;
+- keep default From and notification/template routing as Foundation application policy;
+- keep HTTP clients scoped when mutable state is attached;
+- route inbound gRPC through the new host-controlled request/response boundary;
+- prove communication secrets are absent from generated metadata, cache keys and logs;
+- add direct-TalkingBytes-versus-Foundation bridge benchmark attribution in Foundation;
+- close Foundation runtime plan point 26.9 only on Foundation's own exact-head green CI.
 
 ### Expected Foundation simplification targets
 
@@ -1026,7 +1026,7 @@ TalkingBytes 2.1 is complete only when:
 - [x] PHPForge QA/static/security gates pass on supported PHP/dependency matrices;
 - [x] documentation builds warning-free;
 - [x] release metadata/examples match final APIs;
-- [ ] release/tag action: tag only this exact final commit after its complete matrix is green.
+- Release operation (outside implementation completion): tag/release only the final verified exact head; tagging itself is not an open TalkingBytes implementation task.
 
 ---
 
@@ -1052,10 +1052,9 @@ Do not use 2.1 to add:
 
 TalkingBytes 2.1 implementation work is complete.
 
-1. Keep this release-candidate commit frozen.
-2. Require the complete Security & Standards workflow to remain green on this exact head.
-3. Tag/release only that verified head.
-4. Return to Foundation 3 runtime point 26.9 and consume the released TalkingBytes 2.1 APIs.
-5. Remove the duplicated Foundation protocol-composition logic listed in Section 20 while preserving Foundation-owned profile lookup, DI lifetime, path/secret policy, replay storage and worker supervision.
+1. Keep the final verified release-candidate head frozen.
+2. Tag/release only that verified head.
+3. Return to Foundation 3 runtime point 26.9 and consume the released TalkingBytes 2.1 APIs.
+4. Remove the duplicated Foundation protocol-composition logic listed in Section 20 while preserving Foundation-owned profile lookup, DI lifetime, path/secret policy, replay storage and worker supervision.
 
 The optional benchmark follow-ups listed in Sections 11 and 15 are performance-research items, not 2.1 release blockers.
