@@ -164,7 +164,9 @@ it('logging email transport logs finish event when inner transport throws', func
     expect($events[0]['event'])->toBe('email.send.start');
     expect($events[1]['event'])->toBe('email.send.finish');
     expect($events[1]['context']['successful'])->toBeFalse();
-    expect($events[1]['context']['error'])->toBe('transport boom');
+    expect($events[1]['context']['failure_category'] ?? null)->toBe('exception');
+    expect($events[1]['context']['exception_class'] ?? null)->toBe(RuntimeException::class);
+    expect(json_encode($events, JSON_THROW_ON_ERROR))->not->toContain('transport boom');
 });
 
 it('fails clearly when log transport directory path is not a directory', function (): void {

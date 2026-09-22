@@ -152,7 +152,9 @@ final readonly class WebhookSender
                 'delivery_id' => $webhook->deliveryId,
                 'url' => $redactedUrl,
                 'status_code' => $result->statusCode,
-                'error' => $result->error,
+                'failure_category' => $result->successful
+                    ? null
+                    : (ObservabilitySanitizer::resultContext($result)['failure_category'] ?? 'transport_error'),
                 'duration_ms' => $delivery->metadata['duration_ms'] ?? null,
                 'attempt' => $attempt,
             ],

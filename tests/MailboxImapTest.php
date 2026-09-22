@@ -727,11 +727,12 @@ it('redacts IMAP LOGIN password in mailbox command events', function (): void {
 
     expect(array_any(
         $events,
-        static fn (array $payload): bool => ($payload['command'] ?? null) === 'LOGIN "user" [REDACTED]',
+        static fn (array $payload): bool => ($payload['command'] ?? null) === 'LOGIN [REDACTED] [REDACTED]',
     ))->toBeTrue();
     expect(array_any(
         $events,
-        static fn (array $payload): bool => is_string($payload['command'] ?? null) && str_contains($payload['command'], 'LOGIN "user" "pass"'),
+        static fn (array $payload): bool => is_string($payload['command'] ?? null)
+            && (str_contains($payload['command'], '"user"') || str_contains($payload['command'], '"pass"')),
     ))->toBeFalse();
 });
 
