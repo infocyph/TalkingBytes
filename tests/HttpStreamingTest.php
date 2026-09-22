@@ -224,3 +224,16 @@ it('restores caller-owned multipart stream positions after spooling', function (
     }
     fclose($stream);
 });
+
+
+it('aborts streamed downloads without publishing partial files', function (): void {
+    $target = sys_get_temp_dir() . '/tb-http-stream-' . bin2hex(random_bytes(6)) . '.txt';
+    $request = HttpRequest::get('https://example.com')->streamDownloadTo($target);
+    $collector = new ResponseBodyCollector($request);
+
+    expect($collector->collect('partial'))->toBe(7);
+    $collector->abort();
+
+    expect(is_file($target))->toBeFalse();
+    expect($collector->collect('late'))->toBe(0);
+});
