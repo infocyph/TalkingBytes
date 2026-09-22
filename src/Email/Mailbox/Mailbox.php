@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Infocyph\TalkingBytes\Email\Mailbox;
 
 use Infocyph\TalkingBytes\Core\Event\EventDispatcher;
+use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
 use Infocyph\TalkingBytes\Core\Support\Clock;
 use Infocyph\TalkingBytes\Core\Support\Sleeper;
 use Infocyph\TalkingBytes\Email\Config\ImapConfig;
@@ -62,6 +63,11 @@ final readonly class Mailbox
         $this->archive($sourceFolder, $uid, $target);
     }
 
+    public function connect(): void
+    {
+        $this->transport->connect();
+    }
+
     public function createFolder(string $name): void
     {
         MailboxFolderNameGuard::assertValid($name);
@@ -102,6 +108,11 @@ final readonly class Mailbox
     public function folders(): array
     {
         return $this->transport->folders();
+    }
+
+    public function logout(): void
+    {
+        $this->transport->logout();
     }
 
     public function noop(): void
@@ -148,5 +159,19 @@ final readonly class Mailbox
     {
         MailboxFolderNameGuard::assertValid($folder);
         $this->folder($folder)->watch($onEvent, $timeoutSeconds, $shouldStop);
+    }
+
+    public function watchUntilCancelled(
+        string $folder,
+        callable $onEvent,
+        CancellationSignal $cancellation,
+        int $timeoutSeconds = 30,
+    ): void {
+        $this->watch(
+            $folder,
+            $onEvent,
+            $timeoutSeconds,
+            $cancellation->isRequested(...),
+        );
     }
 }

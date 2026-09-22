@@ -102,3 +102,33 @@ Behavior notes
 - BCC recipients are part of envelope RCPT flow and are not written into message headers.
 - Outbound builder normalizes line endings to CRLF.
 - Streaming paths are used for large payload handling in SMTP/sendmail/spool transports.
+
+Sendmail process lifecycle
+--------------------------
+
+Sendmail execution uses an argument-array ``proc_open()`` path; no shell command
+string is constructed. The process lifetime is bounded by monotonic timeout and
+may receive a ``CancellationSignal`` through ``usingSendmail()``.
+
+TalkingBytes first requests graceful termination, waits a bounded grace period,
+then forces termination if required. On Unix, when the optional POSIX functions
+can successfully place the child into its own process group, termination targets
+that group so descendants are cleaned up as well. If process-group isolation is
+unavailable or cannot be established, TalkingBytes safely falls back to direct
+child termination.
+
+``ext-pcntl`` is not required and normal email transports do not install signal
+handlers. A host runtime should translate its own stop/signal policy into a
+``CancellationSignal``.
+
+Persistent mailbox ownership
+----------------------------
+
+IMAP and POP3 mailbox objects own their connection/session state. Reuse one
+instance only within the intended execution/worker scope. Long-running runtimes
+should call ``connect()`` explicitly when eager connection is useful and
+``logout()`` during deterministic scope cleanup; destructors remain best-effort
+shutdown protection.
+
+For watch loops, ``watchUntilCancelled()`` adapts the shared
+``CancellationSignal`` while the existing callable stop hook remains available.

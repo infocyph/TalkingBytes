@@ -87,14 +87,20 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
         );
         $this->selectedFolder = null;
 
-        $greeting = $this->readLine();
-        if (!str_starts_with(strtoupper($greeting), '* OK')) {
-            throw new MailboxProtocolException(sprintf('Unexpected IMAP greeting: %s', trim($greeting)));
-        }
+        try {
+            $greeting = $this->readLine();
+            if (!str_starts_with(strtoupper($greeting), '* OK')) {
+                throw new MailboxProtocolException(sprintf('Unexpected IMAP greeting: %s', trim($greeting)));
+            }
 
-        $this->refreshCapabilities();
-        $this->negotiateStartTls();
-        $this->login();
+            $this->refreshCapabilities();
+            $this->negotiateStartTls();
+            $this->login();
+        } catch (\Throwable $exception) {
+            $this->closeConnection();
+
+            throw $exception;
+        }
     }
 
     public function copy(string $folder, int $uid, string $targetFolder): void
@@ -170,10 +176,7 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
             // Best effort for shutdown.
         }
 
-        fclose($this->connection);
-        $this->connection = null;
-        $this->capabilities = [];
-        $this->selectedFolder = null;
+        $this->closeConnection();
     }
 
     public function markSeen(string $folder, int $uid): void
@@ -369,6 +372,17 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
             $stage,
             implode(' | ', $response->lines),
         ));
+    }
+
+    private function closeConnection(): void
+    {
+        if (is_resource($this->connection)) {
+            fclose($this->connection);
+        }
+
+        $this->connection = null;
+        $this->capabilities = [];
+        $this->selectedFolder = null;
     }
 
     private function hasCapability(string $capability): bool

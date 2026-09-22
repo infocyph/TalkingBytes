@@ -38,6 +38,7 @@
         "ext-iconv": "Optional fallback for inbound charset conversion when mbstring is unavailable.",
         "ext-imap": "Optional for imap_* address parsing and UTF7-IMAP fallback helpers.",
         "ext-mbstring": "Recommended for robust charset conversion and encoded header handling.",
+        "ext-posix": "Optional best-effort Unix sendmail process-group termination for descendant cleanup.",
         "ext-sodium": "Required for Ed25519-SHA256 DKIM signing and verification.",
         "grpc/grpc": "Required for generated PHP gRPC clients."
     },

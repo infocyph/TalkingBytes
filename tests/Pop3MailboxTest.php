@@ -384,13 +384,12 @@ it('supports pop3 rset to clear pending deletions before quit', function (): voi
     expect($transcript['mismatches'])->toBe([]);
 });
 
-it('fails pop3 authentication when server rejects password', function (): void {
+it('fails pop3 authentication and drops the poisoned connection', function (): void {
     $server = FakePop3ServerProcess::start([
         'expect' => [
             ['regex' => '/^CAPA$/', 'multiline' => ['UIDL']],
             ['regex' => '/^USER user$/'],
             ['regex' => '/^PASS wrong$/', 'status' => '-ERR', 'text' => 'invalid login'],
-            ['regex' => '/^QUIT$/'],
         ],
     ]);
 
@@ -404,8 +403,12 @@ it('fails pop3 authentication when server rejects password', function (): void {
 
     expect(fn() => $mailbox->status())->toThrow(MailboxAuthenticationException::class);
 
+    $transcript = $server->transcript();
     $mailbox->logout();
     $server->stop();
+
+    expect($transcript['mismatches'])->toBe([]);
+    expect($transcript['commands'])->toBe(['CAPA', 'USER user', 'PASS wrong']);
 });
 
 it('rejects unsupported pop3 folder operations and non-all searches', function (): void {

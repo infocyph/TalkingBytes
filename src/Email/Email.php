@@ -37,7 +37,8 @@ final readonly class Email
     public static function sender(
         ?EventDispatcher $events = null,
         ?Clock $clock = null,
+        ?Sleeper $sleeper = null,
     ): EmailSenderFactory {
-        return new EmailSenderFactory($events, $clock);
+        return new EmailSenderFactory($events, $clock, $sleeper);
     }
 }

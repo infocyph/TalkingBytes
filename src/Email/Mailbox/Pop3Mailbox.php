@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Infocyph\TalkingBytes\Email\Mailbox;
 
 use Infocyph\TalkingBytes\Core\Event\EventDispatcher;
+use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
 use Infocyph\TalkingBytes\Core\Support\Clock;
 use Infocyph\TalkingBytes\Core\Support\Sleeper;
 use Infocyph\TalkingBytes\Email\Config\Pop3Config;
@@ -26,6 +27,11 @@ final readonly class Pop3Mailbox
         ?Sleeper $sleeper = null,
     ): self {
         return new self(new Pop3SocketTransport($config, $events, $clock, $sleeper));
+    }
+
+    public function connect(): void
+    {
+        $this->transport->connect();
     }
 
     public function delete(int $messageNumber): void
@@ -117,5 +123,25 @@ final readonly class Pop3Mailbox
     public function transport(): Pop3Transport
     {
         return $this->transport;
+    }
+
+    public function watch(
+        callable $onEvent,
+        int $timeoutSeconds = 30,
+        ?callable $shouldStop = null,
+    ): void {
+        $this->transport->watch($onEvent, $timeoutSeconds, $shouldStop);
+    }
+
+    public function watchUntilCancelled(
+        callable $onEvent,
+        CancellationSignal $cancellation,
+        int $timeoutSeconds = 30,
+    ): void {
+        $this->watch(
+            $onEvent,
+            $timeoutSeconds,
+            $cancellation->isRequested(...),
+        );
     }
 }

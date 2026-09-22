@@ -7,7 +7,9 @@ namespace Infocyph\TalkingBytes\Email;
 use Infocyph\TalkingBytes\Core\Event\BestEffortEventDispatcher;
 use Infocyph\TalkingBytes\Core\Event\EventDispatcher;
 use Infocyph\TalkingBytes\Core\Event\NullEventDispatcher;
+use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
 use Infocyph\TalkingBytes\Core\Support\Clock;
+use Infocyph\TalkingBytes\Core\Support\Sleeper;
 use Infocyph\TalkingBytes\Email\Config\LogEmailConfig;
 use Infocyph\TalkingBytes\Email\Config\SendmailConfig;
 use Infocyph\TalkingBytes\Email\Config\SmtpConfig;
@@ -19,10 +21,16 @@ final readonly class EmailSenderFactory
 
     private EventDispatcher $events;
 
-    public function __construct(?EventDispatcher $events = null, ?Clock $clock = null)
-    {
+    private Sleeper $sleeper;
+
+    public function __construct(
+        ?EventDispatcher $events = null,
+        ?Clock $clock = null,
+        ?Sleeper $sleeper = null,
+    ) {
         $this->events = new BestEffortEventDispatcher($events ?? new NullEventDispatcher());
         $this->clock = $clock ?? Clock::system();
+        $this->sleeper = $sleeper ?? Sleeper::system();
     }
 
     public function fake(): Emailer
@@ -45,9 +53,17 @@ final readonly class EmailSenderFactory
         return Emailer::usingNull($this->events, $this->clock);
     }
 
-    public function usingSendmail(SendmailConfig $config = new SendmailConfig()): Emailer
-    {
-        return Emailer::usingSendmail($config, $this->events, $this->clock);
+    public function usingSendmail(
+        SendmailConfig $config = new SendmailConfig(),
+        ?CancellationSignal $cancellation = null,
+    ): Emailer {
+        return Emailer::usingSendmail(
+            $config,
+            $this->events,
+            $this->clock,
+            $cancellation,
+            $this->sleeper,
+        );
     }
 
     public function usingSmtp(SmtpConfig $config): Emailer

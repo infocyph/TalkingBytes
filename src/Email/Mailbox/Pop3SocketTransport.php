@@ -72,14 +72,20 @@ final class Pop3SocketTransport implements Pop3Transport
             $this->config->security === Pop3Security::Ssl,
         );
 
-        $greeting = $this->readLine();
-        if (!$this->isOkResponse($greeting)) {
-            throw new MailboxProtocolException(sprintf('Unexpected POP3 greeting: %s', trim($greeting)));
-        }
+        try {
+            $greeting = $this->readLine();
+            if (!$this->isOkResponse($greeting)) {
+                throw new MailboxProtocolException(sprintf('Unexpected POP3 greeting: %s', trim($greeting)));
+            }
 
-        $this->refreshCapabilities();
-        $this->negotiateStartTls();
-        $this->login();
+            $this->refreshCapabilities();
+            $this->negotiateStartTls();
+            $this->login();
+        } catch (\Throwable $exception) {
+            $this->closeConnection();
+
+            throw $exception;
+        }
     }
 
     public function delete(int $messageNumber): void

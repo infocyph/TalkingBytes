@@ -10,6 +10,7 @@ use Infocyph\TalkingBytes\Core\Event\NullEventDispatcher;
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
 use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
 use Infocyph\TalkingBytes\Core\Support\Clock;
+use Infocyph\TalkingBytes\Core\Support\Sleeper;
 use Infocyph\TalkingBytes\Email\Config\DkimConfig;
 use Infocyph\TalkingBytes\Email\Config\LogEmailConfig;
 use Infocyph\TalkingBytes\Email\Config\SendmailConfig;
@@ -72,8 +73,19 @@ final readonly class Emailer
         SendmailConfig $config = new SendmailConfig(),
         ?EventDispatcher $events = null,
         ?Clock $clock = null,
+        ?CancellationSignal $cancellation = null,
+        ?Sleeper $sleeper = null,
     ): self {
-        return new self(new SendmailTransport($config), $events, $clock);
+        return new self(
+            new SendmailTransport(
+                $config,
+                cancellation: $cancellation,
+                clock: $clock,
+                sleeper: $sleeper,
+            ),
+            $events,
+            $clock,
+        );
     }
 
     public static function usingSmtp(SmtpConfig $config, ?EventDispatcher $events = null, ?Clock $clock = null): self

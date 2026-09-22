@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Infocyph\TalkingBytes\Core\Event\CallableEventDispatcher;
+use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
 use Infocyph\TalkingBytes\Email\Config\ImapConfig;
 use Infocyph\TalkingBytes\Email\Enum\ImapSecurity;
 use Infocyph\TalkingBytes\Email\Exception\MailboxConnectionException;
@@ -392,6 +393,23 @@ it('attempts STARTTLS before LOGIN when server advertises capability', function 
         $transcript['commands'],
         static fn (string $command): bool => str_contains($command, 'LOGIN "user" "pass"'),
     ))->toBeFalse();
+});
+
+it('exposes explicit mailbox session lifecycle and cancellation helpers', function (): void {
+    $fake = FakeMailbox::new();
+    $events = 0;
+
+    $fake->mailbox->connect();
+    $fake->mailbox->watchUntilCancelled(
+        'INBOX',
+        static function () use (&$events): void {
+            $events++;
+        },
+        CancellationSignal::fromCallable(static fn(): bool => true),
+    );
+    $fake->mailbox->logout();
+
+    expect($events)->toBe(0);
 });
 
 it('supports fake mailbox operations and parsing workflow', function (): void {
