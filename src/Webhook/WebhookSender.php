@@ -205,6 +205,21 @@ final readonly class WebhookSender
         return new self($this->httpClient, $secret, $this->signer, $this->retryProfile, $this->maxPayloadBytes, $this->events, $this->clock, $this->sleeper, $this->cancellation);
     }
 
+    public function withCancellation(?CancellationSignal $cancellation): self
+    {
+        return new self(
+            $this->httpClient,
+            $this->signingSecret,
+            $this->signer,
+            $this->retryProfile,
+            $this->maxPayloadBytes,
+            $this->events,
+            $this->clock,
+            $this->sleeper,
+            $cancellation,
+        );
+    }
+
     public function withRetryProfile(
         int $attempts = 3,
         int $baseDelayMs = 250,
@@ -225,29 +240,16 @@ final readonly class WebhookSender
         return new self($this->httpClient, $this->signingSecret, $signer, $this->retryProfile, $this->maxPayloadBytes, $this->events, $this->clock, $this->sleeper, $this->cancellation);
     }
 
-    public function withCancellation(?CancellationSignal $cancellation): self
-    {
-        return new self(
-            $this->httpClient,
-            $this->signingSecret,
-            $this->signer,
-            $this->retryProfile,
-            $this->maxPayloadBytes,
-            $this->events,
-            $this->clock,
-            $this->sleeper,
-            $cancellation,
-        );
-    }
-
     private function cancelledResult(?CommunicationResult $previous, int $attempts): CommunicationResult
     {
+        $metadata = $previous === null ? [] : $previous->metadata;
+
         return CommunicationResult::failure(
             'Webhook delivery cancelled.',
             $previous?->statusCode,
             $previous?->response,
             [
-                ...($previous?->metadata ?? []),
+                ...$metadata,
                 'cancelled' => true,
                 'attempts' => $attempts,
             ],

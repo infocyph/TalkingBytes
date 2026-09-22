@@ -148,7 +148,9 @@ it('interrupts webhook retry waiting when cancellation is requested', function (
     $sleeper = new Sleeper(static function () use (&$cancelled): void {
         $cancelled = true;
     });
-    $signal = CancellationSignal::fromCallable(static fn(): bool => $cancelled);
+    $signal = CancellationSignal::fromCallable(static function () use (&$cancelled): bool {
+        return $cancelled;
+    });
     $sender = WebhookSender::usingHttpWithRetryProfile(
         HttpClient::using($transport),
         attempts: 2,
