@@ -8,7 +8,7 @@ $reportPath = $argv[3] ?? '';
 
 $decoded = json_decode((string) file_get_contents($scenarioPath), true);
 if (!is_array($decoded)) {
-    exit(1);
+    throw new RuntimeException('Concurrent HTTP fixture scenario must decode to an array.');
 }
 
 $delays = [];
@@ -18,17 +18,19 @@ foreach ($decoded as $path => $delayMs) {
     }
 }
 
-$server = @stream_socket_server('tcp://127.0.0.1:0', $errno, $errstr);
+$server = stream_socket_server('tcp://127.0.0.1:0', $errno, $errstr);
 if ($server === false) {
     file_put_contents($reportPath, json_encode(['error' => sprintf('%s (%d)', $errstr, $errno)]));
-    exit(1);
+
+    throw new RuntimeException('Unable to bind concurrent HTTP fixture server.');
 }
 
 stream_set_blocking($server, false);
 $address = stream_socket_get_name($server, false);
 if (!is_string($address) || !str_contains($address, ':')) {
     fclose($server);
-    exit(1);
+
+    throw new RuntimeException('Unable to resolve concurrent HTTP fixture server address.');
 }
 
 $port = (int) substr(strrchr($address, ':'), 1);
@@ -55,11 +57,11 @@ while ($completed < $expected && microtime(true) < $deadline) {
 
     $write = [];
     $except = [];
-    @stream_select($read, $write, $except, 0, 10_000);
+    stream_select($read, $write, $except, 0, 10_000);
 
     foreach ($read as $stream) {
         if ($stream === $server) {
-            while (($client = @stream_socket_accept($server, 0)) !== false) {
+            while (($client = stream_socket_accept($server, 0)) !== false) {
                 stream_set_blocking($client, false);
                 $clients[(int) $client] = [
                     'stream' => $client,
@@ -113,7 +115,7 @@ while ($completed < $expected && microtime(true) < $deadline) {
             . 'Connection: close' . "\r\n\r\n"
             . $body;
 
-        @fwrite($client['stream'], $response);
+        fwrite($client['stream'], $response);
         fclose($client['stream']);
         unset($clients[$id]);
         $completed++;
