@@ -1,20 +1,22 @@
-# TalkingBytes 2.1 — Foundation 3 Integration Hardening Plan
+# TalkingBytes 2.1 — Foundation 3 Integration Hardening & Runtime Ownership Plan
 
 ## Status
 
-Target release: **TalkingBytes 2.1.x**
+Recommended target release: **TalkingBytes 2.1.x**
 
 Baseline:
 
-- branch: main
-- tag: 2.0.0
+- working branch: talkingbytes-2.1/foundation-integration-hardening
+- implementation baseline branch: main
+- released baseline: 2.0.0
 - baseline commit: 86d0e9dde8124ddeacea8ba7f81911af584b879b
+- current planning head before this revision: 69a2d8f8c019358999a9fd48bf5edf42f51a914d
 - primary consumer: Foundation 3 runtime plan point 26.9
-- plan state: **PLANNED**
+- plan state: **PLANNED / RESCANNED**
 
-TalkingBytes 2.0 already established the intended protocol architecture. This is a focused 2.1 integration-hardening release, not another architectural rewrite.
+TalkingBytes 2.0 already established the intended protocol architecture. The 2.1 release should harden that architecture for persistent workers, Fibers, framework integration and high-throughput use while moving protocol composition out of Foundation where it currently leaks upward.
 
-The release goal is to make the existing HTTP, Email, Webhook and gRPC surfaces safe and explicit for persistent workers, Fibers and framework integration while keeping all protocol mechanics owned by TalkingBytes.
+The default release remains 2.1 because the required work can be implemented additively. Promote the release to the next major only if implementation proves that a public removal, incompatible constructor/signature change, or incompatible configuration semantic is genuinely required. Do not create a major release merely to permit cleanup that can remain additive.
 
 ---
 
@@ -22,7 +24,7 @@ The release goal is to make the existing HTTP, Email, Webhook and gRPC surfaces 
 
 ### 1.1 Compatibility
 
-TalkingBytes 2.1 should remain additive and minor-release compatible wherever practical.
+Keep 2.1 additive and minor-release compatible wherever practical.
 
 Priority order:
 
@@ -35,7 +37,7 @@ Priority order:
 7. API clarity
 8. compatibility
 
-If a security or correctness defect cannot be corrected compatibly, make the smallest necessary correction and document it explicitly.
+If a correctness or security defect cannot be fixed compatibly, make the smallest necessary correction, document it, and use the major-version decision gate in Section 18.
 
 ### 1.2 Runtime floor
 
@@ -51,6 +53,17 @@ Do not add Foundation, InterMix, CacheLayer, DBLayer, Omnibus, Pathwise or anoth
 
 Optional integrations remain behind native contracts and adapters.
 
+### 1.4 Extension policy
+
+Do not make pcntl or posix required extensions.
+
+- posix may be used opportunistically for safer Unix child-process group termination where available.
+- pcntl must not be used implicitly by normal HTTP, email, webhook or gRPC object graphs.
+- do not add fork-based protocol concurrency.
+- do not install process-global signal handlers from ordinary protocol clients/transports.
+- if a standalone CLI signal-to-cancellation adapter is eventually added, it must be explicit opt-in, restore previous handlers, remain optional and be independently tested.
+- Foundation keeps ownership of its worker/supervisor signal lifecycle.
+
 ---
 
 ## 2. Ownership Boundary
@@ -58,31 +71,37 @@ Optional integrations remain behind native contracts and adapters.
 ### TalkingBytes owns
 
 - outbound HTTP request preparation and transport;
-- redirect processing, HTTP streaming, retry and transport security;
-- HTTP authentication, signing and cookie mechanics;
+- redirect processing, HTTP streaming, concurrent request mechanics, retry and transport security;
+- HTTP authentication, signing, idempotency and cookie mechanics;
+- protocol-native client/factory composition from already-resolved values;
 - inbound and outbound email protocol mechanics;
-- SMTP, sendmail, PHP mail and spool transports;
+- SMTP, sendmail, PHP mail, spool and logging transports;
 - IMAP and POP3 mailbox behavior;
 - MIME parsing, transfer decoding, charset decoding and attachment extraction;
 - DKIM, authentication-result parsing and bounce classification;
-- webhook signing, verification, timestamp validation and replay-store contract;
+- webhook signing, verification, timestamp validation, retry semantics and replay-store contract;
 - gRPC request/response models;
 - gRPC metadata, deadlines, status mapping, retry and stream mechanics;
 - generated/native gRPC adapters;
+- host-controllable inbound gRPC exchange adaptation;
+- protocol-level cancellation checks where an operation can wait, retry, stream or poll;
 - protocol fakes, assertion helpers, events and native benchmarks.
 
 ### Foundation owns
 
-- named application profiles;
+- named application profile lookup and default profile selection;
 - capability selection and dependency activation;
 - DI lifetime selection;
-- application secret and configuration mapping;
-- application path policy;
+- application secret resolution and production policy;
+- application path resolution;
+- application-level configuration source mapping;
 - CacheLayer-backed webhook replay-store implementation;
 - worker heartbeat, stop and release-generation lifecycle;
-- application service/handler mapping;
+- process supervision for Foundation console/scheduler/application commands;
+- application service/handler lookup and DI mapping;
 - application logging/audit policy;
-- direct-versus-Foundation bridge benchmarks.
+- application notification/template mapping;
+- direct-versus-TalkingBytes bridge benchmarks.
 
 ### Explicit non-ownership
 
@@ -92,8 +111,26 @@ TalkingBytes must not become:
 - an HTTP application framework/server;
 - a cache/database abstraction;
 - a queue or worker supervisor;
+- a generic application process manager;
 - a home-grown gRPC wire stack;
-- a process manager.
+- a service container;
+- a named application-profile repository.
+
+### Foundation code that should remain in Foundation
+
+Do not move these merely to make Foundation smaller:
+
+- CacheLayerWebhookReplayStore;
+- production TLS policy and deployment-specific security policy;
+- change-me/default-secret rejection;
+- named profile lookup;
+- application path expansion;
+- DI service-to-gRPC-handler resolution;
+- auth notification mapping/templates;
+- notification recipient routing;
+- Foundation ProcessRunner used by console, module and scheduler execution.
+
+TalkingBytes should only absorb the lower-level protocol composition currently duplicated around those policies.
 
 ---
 
@@ -103,92 +140,230 @@ TalkingBytes must not become:
 
 CommunicationEventBus stores a static dispatcher.
 
-The current docs already describe this static bus as a compatibility adapter and recommend injected EventDispatcher objects for long-running workers. However, production runtime paths still call the static bus directly, including:
+Production runtime paths still call it directly, including:
 
 - Email/Receiver/SpoolEmailReceiver;
 - Email/Mailbox/SocketMailboxRuntime;
 - Email/Parser/BounceParser.
 
-This is undesirable for persistent workers and Fiber-interleaved execution because one process-global listener can outlive the logical operation that installed it.
+The static bus is already documented as compatibility-only, but these runtime paths still make global state part of normal execution.
 
-### 3.2 HTTP graph is immutable, selected collaborators are not
+### 3.2 HTTP graph is immutable, selected collaborators are mutable
 
-HttpClient uses immutable fluent composition, but selected collaborators intentionally contain mutable state:
+HttpClient is fluent/immutable, but these collaborators intentionally retain state:
 
 - CookieJar;
 - CircuitBreaker;
 - RateLimiter;
 - fake/spy transports.
 
-This is correct functionality, but the lifetime contract is not explicit enough for host frameworks. Sharing such an instance at the wrong scope can leak cookie, breaker, limiter or test state between unrelated requests/jobs.
+Host lifetime rules must therefore be explicit and tested.
 
 ### 3.3 Webhook replay abstraction is correctly host-neutral
 
-WebhookReplayStore::claim(namespace, deliveryId, ttlSeconds) already expresses the right lower-layer requirement:
+WebhookReplayStore::claim(namespace, deliveryId, ttlSeconds) expresses the correct lower-layer requirement:
 
 - atomic first claim;
 - bounded TTL;
 - duplicate detection.
 
-Foundation can implement the contract with CacheLayer without creating a TalkingBytes-to-CacheLayer dependency.
-
-The contract should be hardened and tested, not replaced.
+Foundation should keep its CacheLayer implementation. TalkingBytes should harden the contract and tests, not acquire a CacheLayer dependency.
 
 ### 3.4 Inbound gRPC currently stops at dispatch
 
-GrpcInboundDispatcher correctly maps normalized inbound requests to application handlers.
+GrpcInboundDispatcher maps normalized inbound requests to handlers but does not provide a host-facing accepted-call/source/exchange boundary that a Foundation worker can drive one call at a time.
 
-TalkingBytes does not yet expose a clean host-facing accepted-call/runtime boundary that a Foundation worker can drive one cycle at a time.
+### 3.5 Inbound gRPC currently leaks implementation detail into response metadata
 
-Foundation should not recreate gRPC protocol adaptation merely to fit its worker lifecycle.
+When an inbound handler throws, GrpcInboundDispatcher returns a GrpcInboundResponse containing the exception class in response metadata.
 
-### 3.5 Observability redaction is not uniformly strict
+That metadata can cross the protocol boundary. Internal exception classes must not be returned to remote callers by default.
 
-HTTP, webhook and mailbox paths already contain useful redaction, but some gRPC and email event paths can expose raw failure strings.
+The exception class may be retained in local observability where policy permits, but not in the wire response.
 
-Raw exception messages may contain endpoints, metadata or credential-bearing lower-layer text. Runtime events should prefer structured and sanitized failure data.
+### 3.6 Observability redaction is not uniformly strict
 
-### 3.6 Optional capability coldness needs release evidence
+Some protocol events still include raw result errors or exception messages.
 
-Native gRPC and several mail-related extensions/packages are optional by design.
+Email/spool events can also expose operational paths or message subjects. These are not authentication secrets, but they may be sensitive application/PII data and should not be default observability fields when a stable identifier/category is sufficient.
 
-The release must explicitly prove that unrelated protocol usage does not eagerly require or initialize optional capabilities.
+### 3.7 Optional capability coldness needs release evidence
+
+Native gRPC and multiple mail-related capabilities are optional by design.
+
+Unrelated protocol use must not eagerly require or initialize optional capabilities.
+
+### 3.8 Timing is only partially monotonic
+
+Core/Support/Clock already supports a monotonic source using hrtime, and gRPC retry uses it.
+
+Other runtime paths still use microtime(true) or time() for durations/deadlines, including:
+
+- HTTP transport/pool durations;
+- webhook delivery duration;
+- gRPC client/transport/inbound event durations;
+- SMTP command timing;
+- sendmail timeout handling;
+- IMAP/POP3 deadlines;
+- mailbox watch loops;
+- spool receive events;
+- Emailer events.
+
+Elapsed time and deadlines should use the monotonic clock. Wall time should remain only where protocol semantics require real timestamps, such as webhook signature timestamps.
+
+### 3.9 Waiting and cancellation are inconsistent
+
+TalkingBytes already has Sleeper and mailbox watch callbacks such as shouldStop, but waiting behavior is fragmented:
+
+- retry paths sleep through Sleeper;
+- sendmail uses raw usleep loops;
+- POP3 watch uses time plus raw usleep;
+- IMAP watch uses stream_select plus raw usleep fallback;
+- generated/native gRPC stream loops do not expose a uniform cancellation check;
+- HTTP multi does not accept a cooperative cancellation signal.
+
+Persistent hosts need one small lower-layer cancellation contract so Foundation can adapt its heartbeat/stop/release policy without TalkingBytes depending on Foundation.
+
+### 3.10 Sendmail process supervision is weaker than Foundation process execution
+
+SendmailTransport owns a private proc_open loop and terminates the direct child with proc_terminate.
+
+Foundation has stronger generic process handling with timeout/cancellation and optional POSIX process-group termination. The full Foundation ProcessRunner must not move into TalkingBytes because Foundation uses it for console/scheduler/application process execution.
+
+TalkingBytes should instead own a narrow sendmail child-process supervisor with:
+
+- array command/no shell;
+- bounded stdout/stderr capture;
+- monotonic timeout;
+- cooperative cancellation;
+- graceful then forced termination;
+- optional POSIX process-group termination when safely available;
+- portable direct-child fallback.
+
+### 3.11 Foundation duplicates TalkingBytes protocol composition
+
+Foundation CommunicationProfiles currently composes TalkingBytes behavior for:
+
+- HTTP auth;
+- CookieJar;
+- HTTP retry;
+- RateLimiter;
+- CircuitBreaker;
+- idempotency;
+- gRPC retry;
+- generated/native gRPC client selection;
+- webhook signing and retry.
+
+Foundation EmailProfiles currently composes:
+
+- transport-driver selection;
+- fallbacks;
+- retry;
+- rate limiting;
+- DKIM;
+- sender transport config.
+
+Foundation NotificationGraphFactory also reconstructs EmailLimits from arrays.
+
+These are protocol-native composition concerns once paths/secrets/default profile names have already been resolved.
+
+### 3.12 Generated gRPC stub adaptation uses exception-driven signature probing
+
+GeneratedStubGrpcInvoker opens streaming calls by attempting one invocation signature and catching ArgumentCountError or TypeError before trying another.
+
+Catching TypeError around the method invocation can accidentally treat a real TypeError from inside a user/generated stub as an invocation-shape mismatch and may duplicate side effects.
+
+Resolve/validate the call shape deterministically instead of probing by executing and catching broad TypeError.
+
+### 3.13 HTTP multi concurrency is chunked, not a rolling window
+
+CurlMultiTransport currently array-chunks requests by max concurrency, waits for the full chunk to complete, then schedules the next chunk.
+
+This causes avoidable head-of-line blocking when one slow request holds back scheduling even though another slot has become free.
+
+A rolling-window scheduler can improve throughput and latency without adding threads or fork-based concurrency.
+
+### 3.14 Raw global error-handler usage requires an isolation audit
+
+Several paths temporarily call set_error_handler for warning capture/suppression.
+
+Most restore it in finally and do not deliberately suspend a Fiber while installed, so this is not automatically a defect. Still, the release should prove that no code path can yield/call arbitrary user code while a temporary process-global handler is installed.
+
+Prefer expression-local/native error handling where practical.
 
 ---
 
-## 4. Workstream 1 — P0 Runtime Event-State Isolation
+## 4. Workstream 1 — P0 Runtime Global-State Isolation
 
 ### Goal
 
-Injected EventDispatcher instances become the authoritative runtime observability mechanism.
-
-CommunicationEventBus remains compatibility-only.
+Normal TalkingBytes object graphs must not depend on process-global mutable state.
 
 ### Tasks
 
-- [ ] Add or propagate optional EventDispatcher dependencies through native email factories where required.
-- [ ] Convert SpoolEmailReceiver lifecycle events from static bus dispatch to an injected dispatcher.
+- [ ] Propagate optional EventDispatcher dependencies through email sender/receiver/mailbox/parser factories where events are emitted.
+- [ ] Convert SpoolEmailReceiver lifecycle events to injected dispatch.
 - [ ] Convert mailbox command events away from direct CommunicationEventBus use.
 - [ ] Convert BounceParser event emission away from direct CommunicationEventBus use.
-- [ ] Audit every production src/ reference to CommunicationEventBus.
-- [ ] Ensure newly created protocol/runtime code never requires process-global event state.
-- [ ] Preserve CommunicationEventBus only as a compatibility facade.
-- [ ] Keep dispatch best-effort: observer failures must never alter protocol results.
-- [ ] Add sequential persistent-runtime tests proving event listeners do not leak between operations.
-- [ ] Add Fiber-interleaving tests for execution paths that can overlap.
-- [ ] Update events documentation to make injection the primary path.
+- [ ] Audit every production src reference to CommunicationEventBus.
+- [ ] Keep CommunicationEventBus only as a compatibility facade.
+- [ ] Ensure new runtime code never requires the static bus.
+- [ ] Keep dispatch best-effort: listener failures must not alter protocol results or cleanup.
+- [ ] Audit temporary set_error_handler regions.
+- [ ] Ensure no temporary global error handler spans arbitrary user callbacks, Fiber suspension, event dispatch or long-lived loops.
+- [ ] Add sequential persistent-runtime tests proving event listeners and temporary runtime state do not leak.
+- [ ] Add Fiber-interleaving tests for relevant stateless/object-scoped paths.
+- [ ] Update events documentation to make injection authoritative.
 
 ### Acceptance
 
-A normal object graph created through public factory/constructor APIs must not depend on static event state.
+A normal graph created through public constructors/factories must work correctly with CommunicationEventBus untouched.
 
 ---
 
-## 5. Workstream 2 — P0 Mutable-State Lifetime Contracts
+## 5. Workstream 2 — P0 Monotonic Time, Cancellation and Interruptible Waiting
 
 ### Goal
 
-Document and test which objects are immutable, reusable or execution/session state.
+Long-running/retrying operations become host-controllable without TalkingBytes owning the host lifecycle.
+
+### Direction
+
+Introduce the smallest useful cancellation abstraction. Exact naming may change.
+
+Conceptually:
+
+- CancellationSignal::isRequested(): bool;
+- a never-cancelled implementation;
+- optional adapter from a callable;
+- no dependency on Foundation;
+- no global registry.
+
+Do not create a general task framework.
+
+### Tasks
+
+- [ ] Standardize elapsed durations and internal deadlines on Core/Support/Clock::monotonic().
+- [ ] Keep Clock::timestamp()/wall time only for protocol timestamps that require real time.
+- [ ] Extend waiting support so retry/backoff sleeps can be interrupted in bounded slices when a cancellation signal is supplied.
+- [ ] Keep the current simple Sleeper path cheap when no cancellation is supplied.
+- [ ] Allow RetryExecutor to stop before the next attempt when cancelled.
+- [ ] Allow HTTP retry and gRPC retry to stop before sleeping/retrying when cancelled.
+- [ ] Allow WebhookSender retry to stop cooperatively.
+- [ ] Allow mailbox watch loops to consume the same cancellation abstraction while retaining callable compatibility where practical.
+- [ ] Allow generated/native gRPC streaming loops to check cancellation between messages/writes/reads where the native API permits.
+- [ ] Allow the inbound gRPC accepted-call bridge to stop before accepting the next exchange.
+- [ ] Allow CurlMultiTransport to stop scheduling and terminate/close active work safely when host cancellation is requested, if libcurl semantics permit deterministic cleanup.
+- [ ] Add deterministic fake-clock/fake-sleeper/cancellation tests.
+- [ ] Verify cancellation never skips required resource cleanup.
+
+### Foundation handoff
+
+Foundation adapts heartbeat loss, stop token and release-generation replacement into the TalkingBytes cancellation boundary. TalkingBytes does not know those Foundation concepts.
+
+---
+
+## 6. Workstream 3 — P0 Mutable-State Lifetime Contracts
 
 ### Required classifications
 
@@ -204,141 +379,266 @@ Document and test which objects are immutable, reusable or execution/session sta
 | GrpcClient | immutable graph over invoker | invoker lifetime dependent |
 | GrpcInboundDispatcher | immutable handler graph | reusable if handlers are safe |
 | Emailer | immutable graph over transport | transport lifetime dependent |
+| SMTP transport | per-send connection today | reusable graph if collaborators are safe |
 | mailbox/socket transports | connection/session state | execution/worker owned |
+| generated gRPC/native invokers | native channel/stub lifetime dependent | host/profile scoped deliberately |
 | fakes/spies | mutable test state | test scoped |
 
 ### Tasks
 
-- [ ] Add the lifetime matrix to architecture/runtime documentation.
-- [ ] Prove fluent client operations never mutate previous instances.
-- [ ] Prove cookie state exists only when a CookieJar is explicitly attached.
-- [ ] Prove separate cookie jars do not cross-contaminate.
-- [ ] Prove separate CircuitBreaker instances do not share counters.
-- [ ] Prove separate RateLimiter instances do not share tokens.
-- [ ] Add Fiber/interleaving tests around mutable collaborators.
-- [ ] Keep shared resilience state an explicit host decision.
-- [ ] Do not introduce a global resilience registry.
-- [ ] Verify auth tokens and credentials are retained only inside explicitly configured client graphs.
+- [ ] Publish the matrix in architecture/runtime docs.
+- [ ] Prove fluent operations do not mutate previous instances.
+- [ ] Prove CookieJar isolation.
+- [ ] Prove CircuitBreaker isolation.
+- [ ] Prove RateLimiter isolation.
+- [ ] Prove mailbox connections are not shared accidentally across scoped graphs.
+- [ ] Document native gRPC stub/channel lifetime expectations.
+- [ ] Add sequential/Fiber tests around mutable collaborators.
+- [ ] Do not introduce global resilience or native-client registries.
 - [ ] Ensure fake/spy state has deterministic new-instance/reset behavior.
 
 ---
 
-## 6. Workstream 3 — P0 Webhook Replay Hardening
+## 7. Workstream 4 — P0 Webhook Replay Hardening
 
 ### Goal
 
-Keep replay protection protocol-owned but storage-provider-neutral.
+Replay protection remains protocol-owned and storage-provider-neutral.
 
 ### Tasks
 
 - [ ] Keep WebhookReplayStore minimal.
-- [ ] Document that claim must be atomic across competing processes for production use.
-- [ ] Document that replay backend errors must fail closed.
-- [ ] Add a contention contract test where only one contender wins the same delivery claim.
-- [ ] Add a throwing-store test proving WebhookReceiver does not silently bypass replay protection.
+- [ ] Document that production claim must be atomic across competing processes.
+- [ ] Document backend errors as fail-closed.
+- [ ] Add a contention contract test where only one contender wins.
+- [ ] Add a throwing-store test proving replay protection is not bypassed.
 - [ ] Preserve strict positive TTL validation.
-- [ ] Preserve bounded namespace and delivery-ID validation.
+- [ ] Preserve bounded namespace/delivery-ID validation.
 - [ ] Preserve signature/timestamp verification before replay claim.
-- [ ] Preserve replay claim before a verified event is returned to application code.
-- [ ] Ensure replay observability never exposes raw secret, signature or body data.
-- [ ] Do not add CacheLayer as a TalkingBytes dependency.
+- [ ] Preserve replay claim before a verified event is returned.
+- [ ] Mark InMemoryWebhookReplayStore clearly as single-process/test/local-use unless its guarantees are sufficient for the documented deployment.
+- [ ] Ensure replay observability never exposes raw secret/signature/body.
+- [ ] Do not add CacheLayer.
 
 ### Foundation handoff
 
-Foundation continues implementing WebhookReplayStore using CacheLayer atomic setIfAbsent under Foundation's own security cache-key domain.
+Foundation keeps CacheLayerWebhookReplayStore and its Foundation security cache-key domain.
 
 ---
 
-## 7. Workstream 4 — P0 Host-Controlled Inbound gRPC Runtime Bridge
+## 8. Workstream 5 — P0 Host-Controlled Inbound gRPC Runtime Bridge
 
 ### Goal
 
-Allow Foundation or another host to execute inbound gRPC through its own worker lifecycle without reimplementing TalkingBytes protocol adaptation.
-
-GrpcInboundDispatcher remains the application dispatch boundary.
-
-TalkingBytes does not become the worker supervisor.
+Foundation or another host can run inbound gRPC through its own lifecycle without recreating TalkingBytes protocol adaptation.
 
 ### Target flow
 
 native/server runtime
-→ TalkingBytes inbound adapter/source
-→ accepted gRPC exchange
-→ normalized GrpcInboundRequest
+→ TalkingBytes inbound source/adapter
+→ accepted exchange
+→ GrpcInboundRequest
 → GrpcInboundDispatcher
 → GrpcInboundResponse
-→ native exchange completion
-
-Exact class names may change while implementing. The ownership boundary must not.
+→ TalkingBytes exchange completion
 
 ### Required characteristics
 
-- [ ] Add a small host-facing contract for obtaining/accepting one inbound gRPC exchange.
-- [ ] The accepted exchange exposes a normalized GrpcInboundRequest.
-- [ ] TalkingBytes owns mapping GrpcInboundResponse/status/metadata back to the native exchange.
-- [ ] Provide a single-cycle or otherwise host-controllable execution API.
-- [ ] Allow Foundation to check heartbeat, stop token and release generation between accepted calls.
-- [ ] Do not hide an infinite process loop inside TalkingBytes unless cancellation/lifecycle control is explicit.
-- [ ] Preserve gRPC method normalization.
-- [ ] Preserve metadata mapping.
-- [ ] Preserve deadline mapping.
-- [ ] Preserve status/error mapping.
-- [ ] Add a fake inbound source/exchange for deterministic integration tests.
+- [ ] Add a small contract for accepting/obtaining one inbound gRPC exchange.
+- [ ] Accepted exchange exposes normalized GrpcInboundRequest.
+- [ ] TalkingBytes maps GrpcInboundResponse/status/metadata back to the native exchange.
+- [ ] Provide a one-cycle or otherwise host-controllable execution API.
+- [ ] Accept cancellation between calls and, where supported, during streams.
+- [ ] Do not hide an uncontrolled infinite process loop.
+- [ ] Preserve method normalization, metadata, deadline and status mapping.
+- [ ] Add fake inbound source/exchange utilities.
 - [ ] Do not add socket/process supervision.
 - [ ] Do not require Foundation or Omnibus.
-- [ ] Keep ext-grpc and generated-runtime dependencies optional until their adapters are selected.
-- [ ] Document the exact inbound streaming modes actually supported.
-- [ ] Do not claim inbound server/client/bidirectional streaming unless native inbound adapters implement them.
-- [ ] If inbound streaming is added, keep it incremental, bounded and host-cancellable.
+- [ ] Keep ext-grpc and grpc/grpc cold until selected.
+- [ ] Document exact inbound streaming modes actually implemented.
+- [ ] Keep inbound streaming incremental and bounded.
 
-### Foundation handoff
+### Security correction
 
-Foundation wraps this one-cycle protocol boundary with the existing Foundation worker heartbeat, stop-token and release-generation lifecycle.
+- [ ] Remove handler exception class from GrpcInboundResponse wire metadata.
+- [ ] Return stable INTERNAL status/message only.
+- [ ] Keep richer exception classification only in local events/logging when safe.
+- [ ] Add a test proving remote responses do not reveal exception class, file path, trace or raw exception message.
 
 ---
 
-## 8. Workstream 5 — P1 Persistent-Runtime Email Hardening
+## 9. Workstream 6 — P0/P1 Persistent-Runtime Email and Sendmail Process Hardening
+
+### Email runtime tasks
+
+- [ ] Propagate injected EventDispatcher objects through EmailSenderFactory, EmailReceiverFactory and EmailMailboxFactory.
+- [ ] Keep Emailer transport composition native to TalkingBytes.
+- [ ] Keep SMTP/sendmail/mail/spool behavior native.
+- [ ] Keep IMAP/POP3 behavior native.
+- [ ] Keep MIME/parsing/DKIM/bounce behavior native.
+- [ ] Define mailbox connection ownership and deterministic close/logout behavior.
+- [ ] Ensure failed sessions cannot poison newly constructed instances.
+- [ ] Preserve bounded line/message/attachment/parser limits.
+- [ ] Preserve spool locking, quarantine and safe move semantics.
+- [ ] Replace wall-clock logical deadlines with monotonic clock.
+- [ ] Replace raw watch-loop sleeps with injectable waiting where useful.
+- [ ] Keep IMAP IDLE cancellation responsive.
+- [ ] Keep POP3 polling cancellation responsive.
+- [ ] Add persistent-worker and cancellation tests.
+
+### Sendmail subprocess tasks
+
+- [ ] Keep command execution as an argument array and bypass the shell.
+- [ ] Extract the private process loop into a narrow internal sendmail child-process helper if that reduces duplication/complexity.
+- [ ] Use monotonic timeout.
+- [ ] Add cooperative cancellation.
+- [ ] Keep stdout/stderr capture bounded.
+- [ ] Terminate gracefully, wait a bounded grace period, then force termination.
+- [ ] When posix_setpgid/posix_getpgid/posix_kill are available and safe, place the child in its own process group and terminate the group so descendants are not orphaned.
+- [ ] Fall back to direct proc_terminate when POSIX group control is unavailable.
+- [ ] Do not require ext-posix.
+- [ ] Do not require ext-pcntl.
+- [ ] Do not import Foundation ProcessRunner or make TalkingBytes a generic process package.
+- [ ] Add tests for timeout, cancellation, forced termination and cleanup.
+- [ ] Add optional Unix process-group coverage where CI supports it.
+- [ ] Verify Windows/non-POSIX fallback behavior remains valid.
+
+### pcntl policy
+
+- [ ] Do not register SIGINT/SIGTERM handlers inside SendmailTransport, SMTP, HTTP, webhook or gRPC normal paths.
+- [ ] Foundation continues translating its worker signals into cancellation.
+- [ ] Consider an explicit standalone PcntlSignalCancellation adapter only if a non-Foundation CLI use case justifies it.
+- [ ] If such an adapter is added, it must restore previous handlers and never become a default dependency path.
+
+---
+
+## 10. Workstream 7 — P1 Native Composition Builders to Shrink Foundation
 
 ### Goal
 
-Keep TalkingBytes' full native inbound/outbound email system while making persistent-worker ownership explicit.
+Foundation should select named profiles and resolve application values. TalkingBytes should turn resolved protocol configuration into protocol objects.
+
+Do not introduce Foundation-specific configuration names or a large profile framework.
+
+Prefer extending existing factories/facades before adding many new abstractions.
+
+### HTTP composition
+
+Move the mechanics currently in Foundation CommunicationProfiles::decorateHttp into a TalkingBytes-native builder/factory:
+
+- [ ] auth driver composition;
+- [ ] CookieJar opt-in;
+- [ ] retry policy composition;
+- [ ] RateLimiter composition;
+- [ ] CircuitBreaker composition;
+- [ ] idempotency middleware composition.
+
+Foundation should still:
+
+- choose the named HTTP profile;
+- resolve secrets;
+- enforce production TLS policy;
+- decide DI lifetime.
+
+### gRPC composition
+
+- [ ] Add a direct TalkingBytes convenience path for generated stubs so Foundation does not construct GeneratedStubGrpcInvoker itself unless it needs customization.
+- [ ] Centralize native/generated/streaming client composition in TalkingBytes.
+- [ ] Centralize gRPC retry-profile application in TalkingBytes.
+- [ ] Allow EventDispatcher injection through usingNative/usingNativeStreaming/generated-stub paths.
+- [ ] Keep service/handler lookup in Foundation.
+
+### Webhook composition
+
+- [ ] Keep signing, verifier/receiver creation and retry-profile mechanics in TalkingBytes.
+- [ ] Allow a resolved outbound/inbound config array or small typed config to be applied without Foundation recreating protocol rules.
+- [ ] Keep secret source resolution and production-secret policy in Foundation.
+- [ ] Keep replay-store implementation in Foundation.
+
+### Email composition
+
+Expand native email factory capability so Foundation no longer has to own protocol transport/decorator mechanics:
+
+- [ ] transport driver creation from resolved transport config;
+- [ ] fallback transport composition;
+- [ ] retry policy composition;
+- [ ] rate-limit composition;
+- [ ] DKIM config/application after path/secret resolution;
+- [ ] parser-limit parsing.
+
+Specific easy win:
+
+- [ ] add EmailLimits::fromArray() using TalkingBytes-native strict config parsing so Foundation NotificationGraphFactory does not duplicate EmailLimits construction.
+
+Foundation should still:
+
+- choose named sender/transport/mailbox/receiver profiles;
+- resolve relative application paths;
+- resolve private keys/secrets from application configuration;
+- apply default From policy;
+- own notification/template routing.
+
+### Acceptance
+
+After the Foundation follow-up:
+
+- CommunicationProfiles should mostly perform profile lookup, host policy and delegation.
+- EmailProfiles should mostly perform profile lookup/path resolution and delegation.
+- no protocol retry/auth/cookie/DKIM/fallback algorithm should be recreated in Foundation.
+
+---
+
+## 11. Workstream 8 — P1 HTTP Concurrent Scheduler and Runtime Control
+
+### Goal
+
+Improve throughput without threads, forks or a new async framework.
 
 ### Tasks
 
-- [ ] Propagate injected EventDispatcher objects through EmailSenderFactory, EmailReceiverFactory and EmailMailboxFactory where required.
-- [ ] Keep Emailer transport composition native to TalkingBytes.
-- [ ] Keep SMTP/sendmail/mail/spool behavior native.
-- [ ] Keep IMAP/POP3 mailbox behavior native.
-- [ ] Keep MIME/parsing/DKIM/bounce behavior native.
-- [ ] Define mailbox/socket connection ownership.
-- [ ] Define logout/close/shutdown behavior for connection-bearing objects.
-- [ ] Ensure one failed mailbox/session cannot poison subsequently constructed instances.
-- [ ] Preserve bounded line/message/attachment/parse limits.
-- [ ] Preserve spool processing/quarantine behavior.
-- [ ] Preserve file locking and safe move semantics.
-- [ ] Add sequential persistent-worker tests for sender, receiver and mailbox boundaries.
-- [ ] Add Fiber/interleaving tests for stateless parser paths where useful.
-- [ ] Prove no static event listener leaks across mail operations.
+- [ ] Replace array_chunk batch scheduling with a rolling cURL multi window up to maxConcurrency.
+- [ ] As soon as one handle completes, schedule the next pending request.
+- [ ] Preserve result ordering by original keys.
+- [ ] Preserve bounded concurrency.
+- [ ] Preserve cleanup on every failure/listener/cancellation path.
+- [ ] Preserve current truthful stopSchedulingOnFailure semantics.
+- [ ] When a failure is observed and stop-scheduling is enabled, stop adding new requests immediately.
+- [ ] Do not claim active-request fail-fast cancellation unless it is actually implemented.
+- [ ] If cancellation is supplied, close/remove active handles safely and return deterministic cancelled results/metadata.
+- [ ] Keep manual redirect security behavior; do not re-enable unsafe automatic redirect handling in CurlMultiTransport.
+- [ ] Move pool durations to monotonic Clock.
+- [ ] Benchmark chunked 2.0 behavior versus rolling-window 2.1 behavior with mixed fast/slow fake/local endpoints.
+- [ ] Track allocation/handle cleanup under repeated runs.
 
 ### Non-goal
 
-Do not add Foundation-specific profile/config objects to TalkingBytes.
+Do not add pcntl_fork, pthreads, parallel, ReactPHP or Amp merely for this scheduler.
 
 ---
 
-## 9. Workstream 6 — P1 Observability and Secret Redaction
+## 12. Workstream 9 — P1 gRPC Native Adapter Determinism and Streaming Control
+
+### Tasks
+
+- [ ] Remove exception-driven TypeError probing for generated streaming call shape.
+- [ ] Resolve the supported generated-stub call shape before executing the real call.
+- [ ] Prefer explicit adapter metadata/callable strategy or bounded reflection cached at adapter construction.
+- [ ] Never retry an invocation merely because a TypeError was thrown from inside the invoked method.
+- [ ] Validate method maps early.
+- [ ] Keep generated/native package capability checks cold.
+- [ ] Add cancellation checks between outbound stream writes and inbound reads where possible.
+- [ ] Preserve incremental streaming; never accumulate full streams.
+- [ ] Ensure callback exceptions close/finalize native call resources deterministically.
+- [ ] Add tests proving no duplicate side effect occurs during call-shape resolution.
+- [ ] Add tests for cancellation, callback failure and final status/trailer handling.
+
+---
+
+## 13. Workstream 10 — P1 Observability, Redaction and Data-Minimization
 
 ### Goal
 
-No default protocol event or log context should expose application secrets.
-
-### Audit domains
-
-- HTTP
-- Webhook
-- gRPC
-- Email
-- Mailbox
+Default events/log context must not expose secrets or unnecessary payload/PII.
 
 ### Tasks
 
@@ -346,156 +646,182 @@ No default protocol event or log context should expose application secrets.
 - [ ] Never emit raw bearer/API tokens.
 - [ ] Never emit cookie values.
 - [ ] Never emit proxy credentials.
-- [ ] Never emit webhook secrets.
-- [ ] Never emit raw webhook signatures.
-- [ ] Never emit webhook bodies as observability fields.
-- [ ] Never emit SMTP/mailbox passwords.
-- [ ] Never emit raw authentication commands.
+- [ ] Never emit webhook secrets/signatures/bodies.
+- [ ] Never emit SMTP/mailbox passwords or raw auth commands.
 - [ ] Avoid raw gRPC metadata values unless explicitly classified safe.
-- [ ] Stop blindly copying raw exception messages into protocol events.
-- [ ] Prefer exception class, status/code and bounded sanitized categories.
-- [ ] Keep caller-facing CommunicationResult detail useful; observability may deliberately be stricter.
-- [ ] Add sentinel-secret tests and assert sentinel values never appear in emitted event/log payloads.
-- [ ] Keep redaction overhead bounded on hot paths.
+- [ ] Do not copy raw exception messages blindly into protocol events.
+- [ ] Prefer stable failure category, exception class where locally appropriate, protocol status/code and bounded sanitized diagnostics.
+- [ ] Remove exception class from remote gRPC response metadata.
+- [ ] Review SMTP transcript capture and document it as explicit diagnostic data with clear redaction guarantees.
+- [ ] Remove or gate spool absolute paths and email subjects from default events when they are not required.
+- [ ] Keep caller-facing CommunicationResult diagnostics useful; local observability may intentionally be stricter.
+- [ ] Add sentinel-secret and sentinel-PII tests across HTTP, webhook, gRPC, email and mailbox event payloads.
+- [ ] Keep hot-path redaction overhead bounded.
 
 ---
 
-## 10. Workstream 7 — P1 Optional Capability Coldness
-
-### Goal
-
-Selecting one protocol must not eagerly activate another protocol's optional requirements.
+## 14. Workstream 11 — P1 Optional Capability and Extension Coldness
 
 ### Acceptance matrix
 
-- [ ] HTTP works without ext-grpc and grpc/grpc.
+- [ ] HTTP works without ext-grpc, grpc/grpc, ext-posix and ext-pcntl.
 - [ ] Webhook works without native gRPC packages.
-- [ ] Basic outbound email does not require IMAP-specific extensions.
-- [ ] IMAP/POP3 optional capability checks occur only when those paths are selected.
+- [ ] Basic outbound email works without IMAP-specific optional extensions.
+- [ ] SMTP works without ext-posix/ext-pcntl.
+- [ ] Sendmail works with portable proc_* fallback when ext-posix is absent.
+- [ ] POSIX process-group hardening activates only when functions are available.
+- [ ] IMAP/POP3 optional checks occur only when selected.
 - [ ] RSA DKIM does not require Sodium.
 - [ ] Ed25519 DKIM fails clearly only when selected and Sodium is unavailable.
-- [ ] Native/generated gRPC paths fail with actionable messages only when selected.
-- [ ] Composer suggest metadata matches real runtime requirements.
-- [ ] Documentation matches Composer optional capability metadata.
+- [ ] Native/generated gRPC fails clearly only when selected.
+- [ ] Composer suggest metadata matches actual optional behavior.
+- [ ] Add ext-posix to suggest only if the released implementation actually uses it as an optional sendmail hardening path.
+- [ ] Do not add ext-pcntl to suggest unless an explicit public pcntl adapter is shipped.
+- [ ] Documentation matches Composer metadata.
 - [ ] Avoid unrelated extension/class probing on protocol hot paths.
 
 ---
 
-## 11. Workstream 8 — P1 Native Benchmark Evidence
+## 15. Workstream 12 — P1 Native Benchmark and Soak Evidence
 
 TalkingBytes owns native protocol benchmarks.
 
-Foundation owns Foundation-bridge comparison benchmarks.
+Foundation owns bridge attribution.
 
-### HTTP benchmark coverage
+### HTTP
 
 - [ ] immutable client construction;
+- [ ] resolved-profile/factory construction;
 - [ ] request preparation;
 - [ ] fake transport send;
 - [ ] cookie-enabled send;
-- [ ] retry middleware overhead;
-- [ ] rate-limiter overhead;
-- [ ] circuit-breaker overhead;
-- [ ] repeated-run memory growth.
+- [ ] retry/rate-limit/circuit overhead;
+- [ ] rolling multi scheduler;
+- [ ] cancellation cleanup;
+- [ ] repeated-run memory/handle growth.
 
-### Webhook benchmark coverage
+### Webhook
 
 - [ ] signing;
 - [ ] verification;
 - [ ] verification plus replay claim;
-- [ ] duplicate rejection.
+- [ ] duplicate rejection;
+- [ ] retry/cancellation overhead.
 
-### gRPC benchmark coverage
+### gRPC
 
-- [ ] unary client dispatch;
+- [ ] unary dispatch;
 - [ ] inbound dispatcher;
-- [ ] new host inbound-exchange adapter;
-- [ ] retry decision path;
-- [ ] generated/native adapter overhead when available;
-- [ ] streaming adapter overhead without eager stream materialization.
+- [ ] host accepted-exchange bridge;
+- [ ] retry decision;
+- [ ] generated/native adapter;
+- [ ] streaming without eager materialization;
+- [ ] cancellation check overhead.
 
-### Email benchmark coverage
+### Email
 
 - [ ] message preparation;
 - [ ] null/fake send;
 - [ ] parser;
 - [ ] spool receive;
-- [ ] deterministic mailbox adapter overhead where practical.
+- [ ] deterministic mailbox adapter;
+- [ ] sendmail process-control overhead;
+- [ ] 1/10/25 MB payload paths already relevant to the existing benchmark suite.
 
-### Benchmark rules
+### Rules
 
 - [ ] Do not add Foundation as a benchmark dependency.
-- [ ] Separate CPU microbenchmarks from network/disk I/O.
+- [ ] Separate CPU microbenchmarks from network/disk/process I/O.
 - [ ] Record peak memory where meaningful.
-- [ ] Add repeated-run checks for unexpected memory/state growth.
-- [ ] Preserve clear ownership attribution.
+- [ ] Add repeated-run soak checks for state/resource growth.
+- [ ] Use monotonic timing for benchmark duration measurement.
+- [ ] Preserve clear attribution.
 
 ---
 
-## 12. Workstream 9 — Documentation and Release Metadata
+## 16. Documentation and Release Metadata
 
-- [ ] Update architecture docs with the lifetime/ownership matrix.
-- [ ] Update events docs: injected dispatcher primary, static bus compatibility-only.
-- [ ] Update webhook replay docs with atomic and fail-closed requirements.
-- [ ] Update gRPC inbound docs for the host-runtime bridge.
+- [ ] Update architecture docs with ownership/lifetime/cancellation boundaries.
+- [ ] Update events docs: injected dispatcher primary; static bus compatibility-only.
+- [ ] Update HTTP concurrency docs for rolling scheduling and cancellation semantics.
+- [ ] Update webhook replay docs with atomic/fail-closed requirements.
+- [ ] Update gRPC inbound docs for the host-runtime bridge and wire-error data minimization.
+- [ ] Update gRPC generated/native docs for deterministic adapter behavior.
 - [ ] Update email docs for persistent-worker connection ownership.
-- [ ] Update security docs with secret/redaction guarantees.
+- [ ] Update sendmail docs for timeout/cancellation/POSIX optional behavior.
+- [ ] Update security docs with secret/PII redaction guarantees.
 - [ ] Update performance docs with persistent-runtime guidance.
-- [ ] Update testing docs with isolation and fake inbound-runtime examples.
-- [ ] Update release checklist with static-state, optional-cold and secret-sentinel gates.
-- [ ] Keep README examples aligned with the released API.
-- [ ] Keep Composer requirements/suggestions synchronized with actual runtime behavior.
+- [ ] Update testing docs with isolation, fake cancellation and fake inbound-runtime examples.
+- [ ] Update release checklist with static-state, monotonic-time, cancellation, optional-cold and secret-sentinel gates.
+- [ ] Keep README examples aligned with released APIs.
+- [ ] Keep Composer requirements/suggestions synchronized with real runtime behavior.
 
 ---
 
-## 13. Likely File Touch Map
+## 17. Likely File Touch Map
 
-This is a planning map, not a requirement to modify every listed file.
+This is a planning map, not a requirement to modify every file.
 
-### Core/events
+### Core/runtime support
 
-- src/Core/Event/CommunicationEventBus.php
-- src/Core/Event/EventDispatcher.php
-- src/Core/Event/BestEffortEventDispatcher.php
-- docs/events.rst
+- src/Core/Event/*
+- src/Core/Support/Clock.php
+- src/Core/Support/Sleeper.php
+- src/Core/Support/RetryExecutor.php
+- new minimal cancellation support if required
+
+### HTTP
+
+- src/Http/HttpClient.php
+- src/Http/HttpClientConfig.php
+- optional new native HttpClientFactory or equivalent
+- src/Http/Concurrent/CurlMultiTransport.php
+- src/Http/Concurrent/RequestPool.php
+- src/Http/Transport/CurlTransport.php
+- src/Http/Middleware/*
+- src/Http/Cookie/CookieJar.php
+- src/Resilience/CircuitBreaker.php
+- src/Resilience/RateLimiter.php
 
 ### Email
 
 - src/Email/Email.php
+- src/Email/Emailer.php
 - src/Email/EmailSenderFactory.php
 - src/Email/EmailReceiverFactory.php
 - src/Email/EmailMailboxFactory.php
+- src/Email/Config/EmailLimits.php
+- src/Email/Config/DkimConfig.php where useful
+- src/Email/Transport/SendmailTransport.php
+- src/Email/Transport/SmtpTransport.php
 - src/Email/Receiver/SpoolEmailReceiver.php
 - src/Email/Mailbox/SocketMailboxRuntime.php
+- src/Email/Mailbox/ImapSocketTransport.php
+- src/Email/Mailbox/Pop3SocketTransport.php
 - src/Email/Parser/BounceParser.php
-- relevant Email/Mailbox/Bounce tests
-
-### HTTP/state
-
-- src/Http/HttpClient.php
-- src/Http/Cookie/CookieJar.php
-- src/Http/Middleware/*
-- src/Resilience/CircuitBreaker.php
-- src/Resilience/RateLimiter.php
-- relevant HTTP/resilience tests
+- relevant tests
 
 ### Webhook
 
-- src/Webhook/Contracts/WebhookReplayStore.php
+- src/Webhook/Webhook.php
+- src/Webhook/WebhookSender.php
 - src/Webhook/WebhookReceiver.php
 - src/Webhook/WebhookVerifier.php
-- src/Webhook/WebhookSender.php
-- tests/Webhook*
-- docs/webhook/*
+- src/Webhook/Contracts/WebhookReplayStore.php
+- src/Webhook/Replay/InMemoryWebhookReplayStore.php
+- relevant tests/docs
 
 ### gRPC
 
+- src/Grpc/GrpcClient.php
 - src/Grpc/GrpcInboundDispatcher.php
-- src/Grpc/Receiver/*
+- src/Grpc/Middleware/RetryMiddleware.php
+- src/Grpc/Native/GeneratedStubGrpcInvoker.php
 - src/Grpc/Native/*
+- src/Grpc/Receiver/*
 - src/Grpc/Testing/*
-- tests/Grpc*
-- docs/grpc/*
+- optional native GrpcClientFactory or equivalent
+- relevant tests/docs
 
 ### Benchmarks/release
 
@@ -511,124 +837,208 @@ This is a planning map, not a requirement to modify every listed file.
 
 ---
 
-## 14. Execution Order
+## 18. Major/Minor Decision Gate
 
-### Batch 1 — Runtime-state cleanup
+### Stay on 2.1 when
 
-- remove static-event dependency from primary runtime paths;
-- propagate EventDispatcher injection;
-- add persistent-runtime and Fiber isolation coverage;
-- document lifetime semantics.
+- new cancellation/time/factory APIs are additive;
+- CommunicationEventBus can remain as a compatibility facade;
+- existing constructor signatures can gain only optional parameters or factory alternatives;
+- generated gRPC correction can preserve current public contracts;
+- rolling HTTP scheduling changes internal behavior without invalidating documented guarantees;
+- SendmailTransport can be hardened internally;
+- Foundation can migrate to new native builders without removing old TalkingBytes entry points.
 
-### Batch 2 — Secret and observability hardening
+### Promote to the next major only when implementation proves one of these is required
 
-- audit protocol events/logs;
-- remove raw secret/failure leakage;
-- add secret-sentinel tests.
+- removing CommunicationEventBus rather than merely bypassing it;
+- making EventDispatcher mandatory in existing public constructors;
+- replacing existing public config keys/semantics incompatibly;
+- removing/renaming public methods rather than adding better alternatives;
+- changing gRPC streaming contracts incompatibly;
+- changing Emailer/transport public ownership semantics incompatibly.
 
-### Batch 3 — Webhook replay acceptance
+### Next-major cleanup candidates, not 2.1 release gates
 
-- lock the atomic/fail-closed replay contract;
-- add concurrency/error acceptance coverage;
-- preserve storage-provider neutrality.
-
-### Batch 4 — Inbound gRPC hosting boundary
-
-- introduce accepted-call/source contract;
-- connect it to GrpcInboundDispatcher;
-- add fake source/exchange;
-- prove host-controlled one-cycle execution;
-- prove deadline/status/metadata mapping.
-
-### Batch 5 — Email persistent-runtime acceptance
-
-- complete event injection in mail paths;
-- test connection/session ownership;
-- retain native send/receive/parser behavior.
-
-### Batch 6 — Optional cold graphs
-
-- test protocols with unrelated optional dependencies absent;
-- align errors, docs and Composer metadata.
-
-### Batch 7 — Native benchmarks and docs
-
-- expand native benchmark evidence;
-- update architecture/security/testing/performance/release documentation.
-
-### Batch 8 — Exact-head release gate
-
-Run the complete PHPForge matrix and tag only after the exact final head passes every closure gate.
+- remove the static CommunicationEventBus completely;
+- collapse superseded compatibility factories/methods after a deprecation period;
+- consider a persistent SMTP session/connection-reuse abstraction with strict idle/max-message/reset/fork-safety policy;
+- reconsider any public cancellation/config APIs that cannot be made cleanly additive;
+- remove legacy configuration aliases if they exist and are no longer valuable.
 
 ---
 
-## 15. Foundation 3 Handoff
+## 19. Execution Order
+
+### Batch 1 — Runtime-state, clock and cancellation foundation
+
+- remove primary static-event dependency;
+- add/propagate injected dispatch;
+- standardize monotonic timing;
+- introduce minimal cooperative cancellation;
+- add persistent/Fiber isolation tests.
+
+### Batch 2 — gRPC security and host boundary
+
+- remove exception metadata leakage;
+- add accepted-exchange/source boundary;
+- add cancellation;
+- add fake runtime;
+- preserve status/deadline/metadata semantics.
+
+### Batch 3 — Email runtime and sendmail process hardening
+
+- event injection;
+- mailbox/session ownership;
+- monotonic deadlines;
+- cancellation-aware watch behavior;
+- sendmail child-process supervision;
+- optional POSIX process-group safety.
+
+### Batch 4 — Native protocol composition builders
+
+- EmailLimits::fromArray;
+- HTTP resolved-profile builder;
+- email transport/decorator builder;
+- gRPC native/generated/retry builder;
+- webhook resolved-policy composition;
+- tests proving Foundation no longer needs to recreate protocol mechanics.
+
+### Batch 5 — Webhook replay acceptance
+
+- atomic/fail-closed contract;
+- contention/error tests;
+- preserve provider neutrality.
+
+### Batch 6 — HTTP rolling multi scheduler
+
+- rolling window;
+- stop-scheduling behavior;
+- cancellation/cleanup;
+- throughput benchmark.
+
+### Batch 7 — gRPC generated adapter determinism
+
+- remove TypeError execution probing;
+- deterministic call-shape resolution;
+- streaming cancellation/failure cleanup.
+
+### Batch 8 — Observability and data minimization
+
+- raw failure audit;
+- secret/PII sentinels;
+- transcript/path/subject policy.
+
+### Batch 9 — Optional cold graphs, docs and benchmarks
+
+- extension/package absence matrix;
+- native benchmark evidence;
+- architecture/security/testing/performance docs;
+- Composer metadata.
+
+### Batch 10 — Exact-head release gate
+
+Run the full PHPForge and supported PHP/dependency matrix only after the final implementation head is frozen.
+
+---
+
+## 20. Foundation 3 Handoff
 
 After TalkingBytes 2.1 is released:
 
-- [ ] Foundation raises its communication floor from ^2.0 to ^2.1 only if the new host-facing APIs are required.
-- [ ] Foundation keeps CommunicationProfiles as application composition only.
-- [ ] Foundation keeps HTTP clients scoped when cookie/resilience state can be mutable.
-- [ ] Foundation does not duplicate TalkingBytes HTTP retry, signing, cookie or transport mechanics.
-- [ ] Foundation keeps the CacheLayer replay implementation in Foundation.
-- [ ] TalkingBytes keeps only the replay contract.
-- [ ] Foundation selects webhook verifier/receiver lifetimes according to actual state.
-- [ ] Foundation routes inbound gRPC through its existing worker heartbeat/stop/release lifecycle using the new TalkingBytes host-runtime boundary.
-- [ ] Foundation does not implement the gRPC network stack.
-- [ ] Foundation continues using native TalkingBytes sender/receiver/mailbox APIs.
+- [ ] Foundation raises its communication floor to ^2.1 only when the released APIs are consumed.
+- [ ] Foundation keeps named application profile lookup.
+- [ ] Foundation keeps path/secret resolution and production policy.
+- [ ] Foundation keeps DI lifetime selection.
+- [ ] Foundation keeps CacheLayerWebhookReplayStore.
+- [ ] Foundation keeps gRPC handler service lookup.
+- [ ] Foundation keeps ProcessRunner for console/scheduler/application subprocesses.
+- [ ] Foundation maps worker heartbeat/stop/release replacement into TalkingBytes cancellation.
+- [ ] Foundation removes duplicated HTTP auth/cookie/retry/rate-limit/circuit/idempotency composition when TalkingBytes native composition is available.
+- [ ] Foundation removes duplicated gRPC retry/native/generated composition when TalkingBytes owns it.
+- [ ] Foundation removes duplicated webhook retry/signing composition where TalkingBytes can consume resolved values directly.
+- [ ] Foundation removes duplicated email transport/fallback/retry/rate-limit/DKIM composition where TalkingBytes factories can consume resolved config.
+- [ ] Foundation replaces manual EmailLimits construction with TalkingBytes parsing.
+- [ ] Foundation keeps default From and notification/template routing as application policy.
+- [ ] Foundation keeps HTTP clients scoped when mutable state is attached.
+- [ ] Foundation routes inbound gRPC through the new host-controlled boundary.
 - [ ] Foundation proves communication secrets are absent from generated metadata, cache keys and logs.
 - [ ] Foundation adds direct-TalkingBytes-versus-Foundation bridge benchmark attribution.
-- [ ] Foundation closes runtime-plan point 26.9 only on the exact-head PHPForge matrix.
+- [ ] Foundation closes runtime plan point 26.9 only on exact-head green CI.
+
+### Expected Foundation simplification targets
+
+The follow-up should materially reduce logic in:
+
+- src/Communication/CommunicationProfiles.php;
+- src/Communication/CommunicationGraphFactory.php;
+- src/Notifications/EmailProfiles.php;
+- src/Notifications/NotificationGraphFactory.php.
+
+Do not delete the host-policy parts of those classes merely to reduce line count.
 
 ---
 
-## 16. Completion Gate
+## 21. Completion Gate
 
-TalkingBytes 2.1 is complete only when all of the following are true:
+TalkingBytes 2.1 is complete only when:
 
 - [ ] no primary runtime path depends on process-global CommunicationEventBus state;
-- [ ] mutable HTTP/resilience/session state has explicit lifetime semantics;
-- [ ] sequential and Fiber-interleaved state-isolation tests pass;
-- [ ] webhook replay is documented and tested as atomic and fail-closed;
-- [ ] no CacheLayer or Foundation runtime dependency was introduced;
-- [ ] inbound gRPC has a host-controllable adapter boundary suitable for Foundation workers;
-- [ ] gRPC network/process ownership remains correctly outside TalkingBytes;
+- [ ] temporary global runtime state is scoped/restored and cannot span user/Fiber suspension paths;
+- [ ] elapsed-time/deadline logic uses monotonic time where appropriate;
+- [ ] retry/watch/stream/process waits support cooperative cancellation where materially useful;
+- [ ] mutable protocol/session/resilience state has explicit lifetime semantics;
+- [ ] sequential and Fiber-interleaved isolation tests pass;
+- [ ] webhook replay is atomic/fail-closed by contract and tests;
+- [ ] no CacheLayer/Foundation/Omnibus runtime dependency was introduced;
+- [ ] inbound gRPC has a host-controllable accepted-exchange boundary;
+- [ ] inbound gRPC wire errors do not reveal internal exception classes/messages/traces;
+- [ ] generated gRPC adapter no longer relies on broad TypeError execution probing;
 - [ ] native inbound/outbound email APIs remain authoritative;
-- [ ] secret-sentinel tests pass across HTTP, webhook, gRPC, email and mailbox events/logging;
+- [ ] sendmail timeout/cancellation/process-tree cleanup is deterministic;
+- [ ] posix use is optional and pcntl is not required/default;
+- [ ] HTTP multi scheduling uses a rolling concurrency window or the optimization is explicitly rejected with benchmark evidence;
+- [ ] Foundation protocol-composition duplication has corresponding native TalkingBytes APIs ready for consumption;
+- [ ] secret/PII sentinel tests pass across protocol observability;
 - [ ] unrelated optional capabilities remain cold until selected;
-- [ ] native protocol benchmark evidence is recorded with correct attribution;
-- [ ] PHPForge QA/static/security gates pass on the supported PHP/dependency matrix;
+- [ ] native protocol benchmark and soak evidence is recorded;
+- [ ] PHPForge QA/static/security gates pass on supported PHP/dependency matrices;
 - [ ] documentation builds warning-free;
-- [ ] release metadata/examples match the final API;
+- [ ] release metadata/examples match final APIs;
 - [ ] the exact final commit is tagged only after the complete matrix is green.
 
 ---
 
-## 17. Explicitly Out of Scope
+## 22. Explicitly Out of Scope
 
 Do not use 2.1 to add:
 
 - another universal communication envelope;
 - Foundation-specific service providers/configuration;
-- CacheLayer, DBLayer or Omnibus as TalkingBytes runtime dependencies;
+- CacheLayer, DBLayer or Omnibus runtime dependencies;
 - an HTTP application server/framework;
 - a general worker supervisor;
+- a generic process-management package;
+- fork-based HTTP/email concurrency;
 - a custom gRPC wire implementation;
-- application-specific profile ownership;
-- another major-version-scale redesign;
-- unrelated feature expansion that does not improve TalkingBytes protocol correctness or the Foundation 3 integration boundary.
+- application-specific named profile ownership;
+- unrelated queue/messaging functionality;
+- a major architectural rewrite that does not directly improve protocol correctness, runtime ownership, performance or Foundation integration.
 
 ---
 
-## 18. Immediate Starting Point
+## 23. Immediate Starting Point
 
-Start with **Batch 1 — Runtime-state cleanup**.
+Start with **Batch 1 — Runtime-state, clock and cancellation foundation**.
 
-First objective:
+First objectives:
 
 1. remove direct CommunicationEventBus dependence from SpoolEmailReceiver, mailbox runtime paths and BounceParser;
-2. propagate injected EventDispatcher objects through existing native factories;
-3. add sequential persistent-runtime and Fiber isolation tests;
-4. keep the static bus only as compatibility behavior.
+2. propagate injected EventDispatcher objects through native factories;
+3. introduce the minimal cancellation contract and interruptible wait behavior;
+4. move duration/deadline logic toward Clock::monotonic();
+5. add sequential persistent-runtime and Fiber isolation tests.
 
-Do not modify Foundation during this first batch. TalkingBytes should first expose the clean lower-layer behavior; Foundation should consume the released result afterward.
+Then do the gRPC wire-error correction early because the current exception-class response metadata is a concrete boundary leak.
+
+Do not modify Foundation until TalkingBytes exposes the clean lower-layer APIs. Foundation should consume the released result afterward.
