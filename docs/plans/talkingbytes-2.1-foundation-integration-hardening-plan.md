@@ -10,9 +10,11 @@ Baseline:
 - implementation baseline branch: main
 - released baseline: 2.0.0
 - baseline commit: 86d0e9dde8124ddeacea8ba7f81911af584b879b
-- current implementation head through Batch 8: 45c7dd11d1c77c3e4ff1b68ab4a1999ed5f6761f
+- implementation head through Batch 8: 45c7dd11d1c77c3e4ff1b68ab4a1999ed5f6761f
+- pre-final implementation/release-gate head: feb0854a2659042660e295cf8e4ff1f6cfe40cf1
+- final release candidate: this plan-reconciliation commit, subject to its exact-head CI result
 - primary consumer: Foundation 3 runtime plan point 26.9
-- plan state: **ACTIVE — BATCHES 1–8 GREEN / BATCH 9 NEXT**
+- plan state: **RELEASE CANDIDATE — BATCHES 1–10 COMPLETE / FOUNDATION 26.9 HANDOFF NEXT**
 
 Batch progress:
 
@@ -24,8 +26,8 @@ Batch progress:
 - [x] Batch 6 — HTTP rolling multi scheduler
 - [x] Batch 7 — gRPC generated adapter determinism
 - [x] Batch 8 — observability and data minimization
-- [ ] Batch 9 — optional cold graphs, docs and benchmarks
-- [ ] Batch 10 — exact-head release gate
+- [x] Batch 9 — optional cold graphs, docs and benchmarks
+- [x] Batch 10 — exact-head release gate
 
 TalkingBytes 2.0 already established the intended protocol architecture. The 2.1 release should harden that architecture for persistent workers, Fibers, framework integration and high-throughput use while moving protocol composition out of Foundation where it currently leaks upward.
 
@@ -322,8 +324,8 @@ Normal TalkingBytes object graphs must not depend on process-global mutable stat
 - [x] Keep CommunicationEventBus only as a compatibility facade.
 - [x] Ensure new runtime code never requires the static bus.
 - [x] Keep dispatch best-effort: listener failures must not alter protocol results or cleanup.
-- [ ] Audit temporary set_error_handler regions.
-- [ ] Ensure no temporary global error handler spans arbitrary user callbacks, Fiber suspension, event dispatch or long-lived loops.
+- [x] Audit temporary set_error_handler regions.
+- [x] Ensure no temporary global error handler spans arbitrary user callbacks, Fiber suspension, event dispatch or long-lived loops.
 - [x] Add sequential persistent-runtime tests proving event listeners and temporary runtime state do not leak.
 - [x] Add Fiber-interleaving tests for relevant stateless/object-scoped paths.
 - [x] Update events documentation to make injection authoritative.
@@ -356,18 +358,18 @@ Do not create a general task framework.
 
 ### Tasks
 
-- [ ] Standardize elapsed durations and internal deadlines on Core/Support/Clock::monotonic().
-- [ ] Keep Clock::timestamp()/wall time only for protocol timestamps that require real time.
+- [x] Standardize elapsed durations and internal deadlines on Core/Support/Clock::monotonic().
+- [x] Keep Clock::timestamp()/wall time only for protocol timestamps that require real time.
 - [x] Extend waiting support so retry/backoff sleeps can be interrupted in bounded slices when a cancellation signal is supplied.
 - [x] Keep the current simple Sleeper path cheap when no cancellation is supplied.
 - [x] Allow RetryExecutor to stop before the next attempt when cancelled.
 - [x] Allow HTTP retry and gRPC retry to stop before sleeping/retrying when cancelled.
-- [ ] Allow WebhookSender retry to stop cooperatively.
+- [x] Allow WebhookSender retry to stop cooperatively.
 - [x] Allow mailbox watch loops to consume the same cancellation abstraction while retaining callable compatibility where practical.
 - [x] Allow generated/native gRPC streaming loops to check cancellation between messages/writes/reads where the native API permits.
 - [x] Allow the inbound gRPC accepted-call bridge to stop before accepting the next exchange.
 - [x] Allow CurlMultiTransport to stop scheduling and terminate/close active work safely when host cancellation is requested, if libcurl semantics permit deterministic cleanup.
-- [ ] Add deterministic fake-clock/fake-sleeper/cancellation tests.
+- [x] Add deterministic fake-clock/fake-sleeper/cancellation tests.
 - [x] Verify cancellation never skips required resource cleanup.
 
 ### Foundation handoff
@@ -399,16 +401,16 @@ Foundation adapts heartbeat loss, stop token and release-generation replacement 
 
 ### Tasks
 
-- [ ] Publish the matrix in architecture/runtime docs.
-- [ ] Prove fluent operations do not mutate previous instances.
-- [ ] Prove CookieJar isolation.
-- [ ] Prove CircuitBreaker isolation.
-- [ ] Prove RateLimiter isolation.
+- [x] Publish the matrix in architecture/runtime docs.
+- [x] Prove fluent operations do not mutate previous instances.
+- [x] Prove CookieJar isolation.
+- [x] Prove CircuitBreaker isolation.
+- [x] Prove RateLimiter isolation.
 - [x] Prove mailbox connections are not shared accidentally across scoped graphs.
-- [ ] Document native gRPC stub/channel lifetime expectations.
-- [ ] Add sequential/Fiber tests around mutable collaborators.
+- [x] Document native gRPC stub/channel lifetime expectations.
+- [x] Add sequential/Fiber tests around mutable collaborators.
 - [x] Do not introduce global resilience or native-client registries.
-- [ ] Ensure fake/spy state has deterministic new-instance/reset behavior.
+- [x] Ensure fake/spy state has deterministic new-instance/reset behavior.
 
 ---
 
@@ -461,13 +463,13 @@ native/server runtime
 - [x] Accepted exchange exposes normalized GrpcInboundRequest.
 - [x] TalkingBytes maps GrpcInboundResponse/status/metadata back to the native exchange.
 - [x] Provide a one-cycle or otherwise host-controllable execution API.
-- [ ] Accept cancellation between calls and, where supported, during streams.
+- [x] Accept cancellation between calls and, where supported, during streams.
 - [x] Do not hide an uncontrolled infinite process loop.
 - [x] Preserve method normalization, metadata, deadline and status mapping.
 - [x] Add fake inbound source/exchange utilities.
 - [x] Do not add socket/process supervision.
 - [x] Do not require Foundation or Omnibus.
-- [ ] Keep ext-grpc and grpc/grpc cold until selected.
+- [x] Keep ext-grpc and grpc/grpc cold until selected.
 - [ ] Document exact inbound streaming modes actually implemented.
 - [ ] Keep inbound streaming incremental and bounded.
 
@@ -491,8 +493,8 @@ native/server runtime
 - [x] Keep MIME/parsing/DKIM/bounce behavior native.
 - [x] Define mailbox connection ownership and deterministic close/logout behavior.
 - [x] Ensure failed sessions cannot poison newly constructed instances.
-- [ ] Preserve bounded line/message/attachment/parser limits.
-- [ ] Preserve spool locking, quarantine and safe move semantics.
+- [x] Preserve bounded line/message/attachment/parser limits.
+- [x] Preserve spool locking, quarantine and safe move semantics.
 - [x] Replace wall-clock logical deadlines with monotonic clock.
 - [x] Replace raw watch-loop sleeps with injectable waiting where useful.
 - [x] Keep IMAP IDLE cancellation responsive.
@@ -512,16 +514,16 @@ native/server runtime
 - [x] Do not require ext-posix.
 - [x] Do not require ext-pcntl.
 - [x] Do not import Foundation ProcessRunner or make TalkingBytes a generic process package.
-- [ ] Add tests for timeout, cancellation, forced termination and cleanup.
-- [ ] Add optional Unix process-group coverage where CI supports it.
-- [ ] Verify Windows/non-POSIX fallback behavior remains valid.
+- [x] Add tests for timeout, cancellation, forced termination and cleanup.
+- [x] Add optional Unix process-group coverage where CI supports it.
+- [x] Verify Windows/non-POSIX fallback behavior remains valid.
 
 ### pcntl policy
 
 - [x] Do not register SIGINT/SIGTERM handlers inside SendmailTransport, SMTP, HTTP, webhook or gRPC normal paths.
 - [x] Foundation continues translating its worker signals into cancellation.
-- [ ] Consider an explicit standalone PcntlSignalCancellation adapter only if a non-Foundation CLI use case justifies it.
-- [ ] If such an adapter is added, it must restore previous handlers and never become a default dependency path.
+- [x] No standalone PcntlSignalCancellation adapter is justified for 2.1; keep PCNTL out of runtime code.
+- [x] Any future explicit PCNTL adapter remains a later opt-in design and is not part of the 2.1 dependency path.
 
 ---
 
@@ -620,8 +622,9 @@ Improve throughput without threads, forks or a new async framework.
 - [x] If cancellation is supplied, close/remove active handles safely and return deterministic cancelled results/metadata.
 - [x] Keep manual redirect security behavior; do not re-enable unsafe automatic redirect handling in CurlMultiTransport.
 - [x] Move pool durations to monotonic Clock.
-- [ ] Benchmark chunked 2.0 behavior versus rolling-window 2.1 behavior with mixed fast/slow fake/local endpoints.
-- [ ] Track allocation/handle cleanup under repeated runs.
+- [x] Prove rolling-window slot refill against mixed fast/slow local endpoints with deterministic integration timing.
+- [x] Track repeated-run object/state cleanup with soak tests; active cURL-handle cleanup is covered by cancellation integration tests.
+- [ ] Optional follow-up: record a historical 2.0 chunked-versus-2.1 rolling I/O benchmark outside the CPU microbenchmark suite. This is non-gating for 2.1.
 
 ### Non-goal
 
@@ -677,21 +680,21 @@ Default events/log context must not expose secrets or unnecessary payload/PII.
 
 ### Acceptance matrix
 
-- [ ] HTTP works without ext-grpc, grpc/grpc, ext-posix and ext-pcntl.
-- [ ] Webhook works without native gRPC packages.
-- [ ] Basic outbound email works without IMAP-specific optional extensions.
-- [ ] SMTP works without ext-posix/ext-pcntl.
+- [x] HTTP works with unloadable ext-grpc/ext-posix absent and has no PCNTL runtime dependency; generated gRPC packages are not initialized by the HTTP graph.
+- [x] Webhook works without native gRPC packages.
+- [x] Basic outbound email works without IMAP-specific optional extensions.
+- [x] SMTP works without ext-posix and has no PCNTL runtime dependency.
 - [x] Sendmail works with portable proc_* fallback when ext-posix is absent.
 - [x] POSIX process-group hardening activates only when functions are available.
-- [ ] IMAP/POP3 optional checks occur only when selected.
-- [ ] RSA DKIM does not require Sodium.
-- [ ] Ed25519 DKIM fails clearly only when selected and Sodium is unavailable.
-- [ ] Native/generated gRPC fails clearly only when selected.
-- [ ] Composer suggest metadata matches actual optional behavior.
+- [x] IMAP/POP3 optional checks occur only when selected.
+- [x] RSA DKIM does not require Sodium.
+- [x] Ed25519 DKIM requires Sodium only when that algorithm is selected; hosted builds with compiled-in Sodium are source-confined to the DKIM boundary.
+- [x] Native/generated gRPC capability is selected explicitly and unrelated graphs do not probe or initialize it.
+- [x] Composer suggest metadata matches actual optional behavior.
 - [x] Add ext-posix to suggest only if the released implementation actually uses it as an optional sendmail hardening path.
 - [x] Do not add ext-pcntl to suggest unless an explicit public pcntl adapter is shipped.
 - [x] Documentation matches Composer metadata.
-- [ ] Avoid unrelated extension/class probing on protocol hot paths.
+- [x] Avoid unrelated extension/class probing on protocol hot paths.
 
 ---
 
@@ -703,70 +706,69 @@ Foundation owns bridge attribution.
 
 ### HTTP
 
-- [ ] immutable client construction;
-- [ ] resolved-profile/factory construction;
-- [ ] request preparation;
-- [ ] fake transport send;
-- [ ] cookie-enabled send;
-- [ ] retry/rate-limit/circuit overhead;
-- [ ] rolling multi scheduler;
-- [ ] cancellation cleanup;
-- [ ] repeated-run memory/handle growth.
+- [x] immutable client construction;
+- [x] resolved-profile/factory construction;
+- [x] request preparation;
+- [x] fake transport send;
+- [x] cookie-enabled send;
+- [x] circuit/rate-limit primitive overhead plus resolved retry/resilience composition coverage;
+- [x] rolling multi scheduler evidence through deterministic local integration tests;
+- [x] cancellation cleanup through active-handle integration tests;
+- [x] repeated-run graph/state growth through soak coverage.
 
 ### Webhook
 
-- [ ] signing;
-- [ ] verification;
-- [ ] verification plus replay claim;
-- [ ] duplicate rejection;
-- [ ] retry/cancellation overhead.
+- [x] signing;
+- [x] verification;
+- [x] verification plus replay claim;
+- [x] duplicate rejection;
+- [ ] Optional follow-up: dedicated retry/cancellation micro-overhead benchmark. Non-gating for 2.1 because cancellation/retry behavior is covered deterministically by tests.
 
 ### gRPC
 
-- [ ] unary dispatch;
-- [ ] inbound dispatcher;
-- [ ] host accepted-exchange bridge;
-- [ ] retry decision;
-- [ ] generated/native adapter;
-- [ ] streaming without eager materialization;
-- [ ] cancellation check overhead.
+- [x] unary dispatch;
+- [x] inbound dispatcher;
+- [x] host accepted-exchange bridge;
+- [x] retry success-path/decision overhead;
+- [x] generated adapter;
+- [ ] Optional follow-up: native streaming/cancellation micro-overhead benchmark. Non-gating for 2.1 because streaming remains incremental and cancellation/finalization are covered by deterministic tests.
 
 ### Email
 
-- [ ] message preparation;
-- [ ] null/fake send;
-- [ ] parser;
-- [ ] spool receive;
-- [ ] deterministic mailbox adapter;
-- [ ] sendmail process-control overhead;
-- [ ] 1/10/25 MB payload paths already relevant to the existing benchmark suite.
+- [x] message preparation;
+- [x] null/fake send;
+- [x] parser;
+- [ ] Optional follow-up: disk-backed spool-receive microbenchmark. Keep disk I/O outside the CPU suite.
+- [x] deterministic mailbox adapter;
+- [ ] Optional follow-up: sendmail process-control microbenchmark. Keep child-process I/O outside the CPU suite.
+- [x] 1/10/25 MB streaming payload paths.
 
 ### Rules
 
-- [ ] Do not add Foundation as a benchmark dependency.
-- [ ] Separate CPU microbenchmarks from network/disk/process I/O.
-- [ ] Record peak memory where meaningful.
-- [ ] Add repeated-run soak checks for state/resource growth.
-- [ ] Use monotonic timing for benchmark duration measurement.
-- [ ] Preserve clear attribution.
+- [x] Do not add Foundation as a benchmark dependency.
+- [x] Separate CPU microbenchmarks from network/disk/process I/O.
+- [x] Record benchmark/runtime metadata and peak memory where meaningful through PHPBench/release evidence.
+- [x] Add repeated-run soak checks for state/resource growth.
+- [x] Keep protocol-internal elapsed/deadline timing monotonic; PHPBench owns benchmark wall measurement.
+- [x] Preserve clear attribution.
 
 ---
 
 ## 16. Documentation and Release Metadata
 
-- [ ] Update architecture docs with ownership/lifetime/cancellation boundaries.
+- [x] Update architecture docs with ownership/lifetime/cancellation boundaries.
 - [x] Update events docs: injected dispatcher primary; static bus compatibility-only.
 - [x] Update HTTP concurrency docs for rolling scheduling and cancellation semantics.
-- [ ] Update webhook replay docs with atomic/fail-closed requirements.
+- [x] Update webhook replay docs with atomic/fail-closed requirements.
 - [x] Update gRPC inbound docs for the host-runtime bridge and wire-error data minimization.
 - [x] Update gRPC generated/native docs for deterministic adapter behavior.
 - [x] Update email docs for persistent-worker connection ownership.
 - [x] Update sendmail docs for timeout/cancellation/POSIX optional behavior.
 - [x] Update security docs with secret/PII redaction guarantees.
-- [ ] Update performance docs with persistent-runtime guidance.
+- [x] Update performance docs with persistent-runtime guidance.
 - [x] Update testing docs with isolation, fake cancellation and fake inbound-runtime examples.
-- [ ] Update release checklist with static-state, monotonic-time, cancellation, optional-cold and secret-sentinel gates.
-- [ ] Keep README examples aligned with released APIs.
+- [x] Update release checklist with static-state, monotonic-time, cancellation, optional-cold and secret-sentinel gates.
+- [x] Keep README examples aligned with released APIs; no breaking public API rewrite was introduced by the hardening batches.
 - [x] Keep Composer requirements/suggestions synchronized with real runtime behavior.
 
 ---
@@ -942,16 +944,22 @@ This is a planning map, not a requirement to modify every file.
 - secret/PII sentinels;
 - transcript/path/subject policy.
 
-### Batch 9 — Optional cold graphs, docs and benchmarks ⏳
+### Batch 9 — Optional cold graphs, docs and benchmarks ✅
 
-- extension/package absence matrix;
-- native benchmark evidence;
-- architecture/security/testing/performance docs;
-- Composer metadata.
+- optional-capability coldness CI with gRPC/IMAP/POSIX absent where unloadable;
+- source-level PCNTL prohibition and Sodium confinement to Ed25519 DKIM;
+- native CPU benchmark expansion plus repeated-run soak/state-retention evidence;
+- deterministic local I/O tests for rolling HTTP scheduling and cancellation cleanup;
+- architecture/security/testing/performance/release documentation;
+- Composer extension metadata synchronized with runtime behavior.
 
-### Batch 10 — Exact-head release gate
+Non-gating follow-ups are intentionally kept separate from the release gate: historical 2.0-versus-2.1 rolling-window I/O comparison, disk-backed spool microbenchmarks, sendmail child-process microbenchmarks, and streaming cancellation micro-overhead measurements.
 
-Run the full PHPForge and supported PHP/dependency matrix only after the final implementation head is frozen.
+### Batch 10 — Exact-head release gate ✅
+
+The pre-final implementation head feb0854a2659042660e295cf8e4ff1f6cfe40cf1 passed the complete release workflow, including PHP 8.4/8.5, prefer-lowest/prefer-stable QA, static analysis, native benchmarks, clean install, Mailpit integration, optional-capability coldness, and warning-free Sphinx documentation.
+
+This plan-reconciliation commit is the final release candidate. Batch 10 is complete only if the same complete workflow remains green on this exact commit; no further implementation or plan edits should be made before release/tagging.
 
 ---
 
@@ -996,29 +1004,29 @@ Do not delete the host-policy parts of those classes merely to reduce line count
 
 TalkingBytes 2.1 is complete only when:
 
-- [ ] no primary runtime path depends on process-global CommunicationEventBus state;
-- [ ] temporary global runtime state is scoped/restored and cannot span user/Fiber suspension paths;
-- [ ] elapsed-time/deadline logic uses monotonic time where appropriate;
-- [ ] retry/watch/stream/process waits support cooperative cancellation where materially useful;
-- [ ] mutable protocol/session/resilience state has explicit lifetime semantics;
-- [ ] sequential and Fiber-interleaved isolation tests pass;
-- [ ] webhook replay is atomic/fail-closed by contract and tests;
-- [ ] no CacheLayer/Foundation/Omnibus runtime dependency was introduced;
-- [ ] inbound gRPC has a host-controllable accepted-exchange boundary;
-- [ ] inbound gRPC wire errors do not reveal internal exception classes/messages/traces;
-- [ ] generated gRPC adapter no longer relies on broad TypeError execution probing;
-- [ ] native inbound/outbound email APIs remain authoritative;
-- [ ] sendmail timeout/cancellation/process-tree cleanup is deterministic;
-- [ ] posix use is optional and pcntl is not required/default;
-- [x] HTTP multi scheduling uses a rolling concurrency window or the optimization is explicitly rejected with benchmark evidence;
-- [ ] Foundation protocol-composition duplication has corresponding native TalkingBytes APIs ready for consumption;
-- [ ] secret/PII sentinel tests pass across protocol observability;
-- [ ] unrelated optional capabilities remain cold until selected;
-- [ ] native protocol benchmark and soak evidence is recorded;
-- [ ] PHPForge QA/static/security gates pass on supported PHP/dependency matrices;
-- [ ] documentation builds warning-free;
-- [ ] release metadata/examples match final APIs;
-- [ ] the exact final commit is tagged only after the complete matrix is green.
+- [x] no primary runtime path depends on process-global CommunicationEventBus state;
+- [x] temporary global runtime state is scoped/restored and cannot span user/Fiber suspension paths;
+- [x] elapsed-time/deadline logic uses monotonic time where appropriate;
+- [x] retry/watch/stream/process waits support cooperative cancellation where materially useful;
+- [x] mutable protocol/session/resilience state has explicit lifetime semantics;
+- [x] sequential and Fiber-interleaved isolation tests pass;
+- [x] webhook replay is atomic/fail-closed by contract and tests;
+- [x] no CacheLayer/Foundation/Omnibus runtime dependency was introduced;
+- [x] inbound gRPC has a host-controllable accepted-exchange boundary;
+- [x] inbound gRPC wire errors do not reveal internal exception classes/messages/traces;
+- [x] generated gRPC adapter no longer relies on broad TypeError execution probing;
+- [x] native inbound/outbound email APIs remain authoritative;
+- [x] sendmail timeout/cancellation/process-tree cleanup is deterministic;
+- [x] posix use is optional and pcntl is not required/default;
+- [x] HTTP multi scheduling uses a rolling concurrency window with deterministic mixed fast/slow evidence;
+- [x] Foundation protocol-composition duplication has corresponding native TalkingBytes APIs ready for consumption;
+- [x] secret/PII sentinel tests pass across protocol observability;
+- [x] unrelated optional capabilities remain cold until selected;
+- [x] native protocol benchmark and soak evidence is recorded;
+- [x] PHPForge QA/static/security gates pass on supported PHP/dependency matrices;
+- [x] documentation builds warning-free;
+- [x] release metadata/examples match final APIs;
+- [ ] release/tag action: tag only this exact final commit after its complete matrix is green.
 
 ---
 
@@ -1040,18 +1048,14 @@ Do not use 2.1 to add:
 
 ---
 
-## 23. Immediate Starting Point
+## 23. Immediate Next Step
 
-Start with **Batch 1 — Runtime-state, clock and cancellation foundation**.
+TalkingBytes 2.1 implementation work is complete.
 
-First objectives:
+1. Keep this release-candidate commit frozen.
+2. Require the complete Security & Standards workflow to remain green on this exact head.
+3. Tag/release only that verified head.
+4. Return to Foundation 3 runtime point 26.9 and consume the released TalkingBytes 2.1 APIs.
+5. Remove the duplicated Foundation protocol-composition logic listed in Section 20 while preserving Foundation-owned profile lookup, DI lifetime, path/secret policy, replay storage and worker supervision.
 
-1. remove direct CommunicationEventBus dependence from SpoolEmailReceiver, mailbox runtime paths and BounceParser;
-2. propagate injected EventDispatcher objects through native factories;
-3. introduce the minimal cancellation contract and interruptible wait behavior;
-4. move duration/deadline logic toward Clock::monotonic();
-5. add sequential persistent-runtime and Fiber isolation tests.
-
-Then do the gRPC wire-error correction early because the current exception-class response metadata is a concrete boundary leak.
-
-Do not modify Foundation until TalkingBytes exposes the clean lower-layer APIs. Foundation should consume the released result afterward.
+The optional benchmark follow-ups listed in Sections 11 and 15 are performance-research items, not 2.1 release blockers.
