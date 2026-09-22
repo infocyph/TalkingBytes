@@ -33,6 +33,7 @@ It provides:
 
    events
    middleware-and-resilience
+   resolved-composition
    testing
    security
    performance

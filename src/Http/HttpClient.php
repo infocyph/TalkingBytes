@@ -64,10 +64,13 @@ final readonly class HttpClient
         return new self($transport ?? new FakeHttpTransport());
     }
 
-    public static function fromConfig(HttpClientConfig $config): self
-    {
+    public static function fromConfig(
+        HttpClientConfig $config,
+        ?EventDispatcher $events = null,
+        ?HttpTransport $transport = null,
+    ): self {
         return new self(
-            transport: new CurlTransport(),
+            transport: $transport ?? new CurlTransport($events),
             defaultOptions: new CurlOptions(
                 timeoutSeconds: $config->timeoutSeconds,
                 connectTimeoutSeconds: $config->connectTimeoutSeconds,
@@ -85,6 +88,18 @@ final readonly class HttpClient
             ),
             defaultHeaders: $config->defaultHeaders,
         );
+    }
+
+    /**
+     * @param array<string, mixed> $config
+     */
+    public static function fromResolvedConfig(
+        array $config,
+        ?EventDispatcher $events = null,
+        ?CancellationSignal $cancellation = null,
+        ?HttpTransport $transport = null,
+    ): self {
+        return (new HttpClientFactory($events, $cancellation))->fromArray($config, $transport);
     }
 
     public static function multi(int $maxConcurrency = 10, ?EventDispatcher $events = null): Concurrent\RequestPool

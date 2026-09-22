@@ -54,6 +54,58 @@ final readonly class DkimConfig
     }
 
     /**
+     * @param array<string, mixed> $config
+     */
+    public static function fromArray(array $config): self
+    {
+        $domain = trim(ConfigValue::string($config, 'domain', ''));
+        $selector = trim(ConfigValue::string($config, 'selector', ''));
+        $algorithmName = ConfigValue::string($config, 'algorithm', DkimAlgorithm::RsaSha256->value);
+        $algorithm = DkimAlgorithm::tryFrom($algorithmName)
+            ?? throw new InvalidArgumentException('Unsupported DKIM algorithm.');
+
+        $headers = array_key_exists('headersToSign', $config)
+            ? ConfigValue::stringList($config, 'headersToSign', [])
+            : ConfigValue::stringList(
+                $config,
+                'headers',
+                ['from', 'to', 'subject', 'date', 'message-id', 'mime-version', 'content-type'],
+            );
+
+        $privateKey = self::resolvedString($config, ['privateKey', 'private_key']);
+        $privateKeyPath = self::resolvedString($config, ['privateKeyPath', 'private_key_path']);
+        if ($privateKey !== null && $privateKeyPath !== null) {
+            throw new InvalidArgumentException('Configure either a DKIM private key or private key path, not both.');
+        }
+
+        if ($privateKeyPath !== null) {
+            if (!is_file($privateKeyPath) || !is_readable($privateKeyPath)) {
+                throw new InvalidArgumentException(sprintf('DKIM private key path is not readable: %s', $privateKeyPath));
+            }
+
+            $loaded = file_get_contents($privateKeyPath);
+            if (!is_string($loaded) || trim($loaded) === '') {
+                throw new InvalidArgumentException(sprintf('DKIM private key file is empty: %s', $privateKeyPath));
+            }
+            $privateKey = $loaded;
+        }
+
+        if ($privateKey === null) {
+            throw new InvalidArgumentException('DKIM signing requires a private key or private key path.');
+        }
+
+        return new self(
+            domain: $domain,
+            selector: $selector,
+            privateKey: $privateKey,
+            headersToSign: $headers,
+            algorithm: $algorithm,
+            headerCanonicalization: ConfigValue::string($config, 'headerCanonicalization', 'relaxed'),
+            bodyCanonicalization: ConfigValue::string($config, 'bodyCanonicalization', 'relaxed'),
+        );
+    }
+
+    /**
      * @param list<string> $headersToSign
      */
     public static function fromPrivateKeyPath(
@@ -100,6 +152,27 @@ final readonly class DkimConfig
                 throw new InvalidArgumentException(sprintf('DKIM %s contains an invalid DNS label.', $label));
             }
         }
+    }
+
+    /**
+     * @param array<string, mixed> $config
+     * @param list<string> $keys
+     */
+    private static function resolvedString(array $config, array $keys): ?string
+    {
+        foreach ($keys as $key) {
+            $value = $config[$key] ?? null;
+            if (!is_string($value)) {
+                continue;
+            }
+
+            $value = trim($value);
+            if ($value !== '') {
+                return $value;
+            }
+        }
+
+        return null;
     }
 
     private function assertPrivateKeyIsReadable(string $privateKey): void

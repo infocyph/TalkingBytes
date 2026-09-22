@@ -11,6 +11,7 @@ use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
 use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
 use Infocyph\TalkingBytes\Grpc\Contract\GrpcMiddleware;
 use Infocyph\TalkingBytes\Grpc\Middleware\RetryMiddleware;
+use Infocyph\TalkingBytes\Grpc\Native\GeneratedStubGrpcInvoker;
 use Infocyph\TalkingBytes\Grpc\Native\NativeGrpcInvoker;
 use Infocyph\TalkingBytes\Grpc\Native\NativeGrpcResult;
 use Infocyph\TalkingBytes\Grpc\Native\NativeGrpcStreamingInvoker;
@@ -50,8 +51,20 @@ final readonly class GrpcClient
         return new self(new GrpcTransport($caller, $events), events: $events);
     }
 
-    public static function usingNative(NativeGrpcInvoker $invoker): self
-    {
+    public static function usingGeneratedStub(
+        object $stubClient,
+        array $methodMap = [],
+        ?EventDispatcher $events = null,
+    ): self {
+        $invoker = new GeneratedStubGrpcInvoker($stubClient, $methodMap);
+
+        return self::usingNativeStreaming($invoker, $invoker, $events);
+    }
+
+    public static function usingNative(
+        NativeGrpcInvoker $invoker,
+        ?EventDispatcher $events = null,
+    ): self {
         return self::using(
             static function (GrpcRequest $request) use ($invoker): GrpcResponse {
                 $native = $invoker->invoke(
@@ -69,14 +82,20 @@ final readonly class GrpcClient
                     metadata: $native->metadata,
                 );
             },
+            $events,
         );
     }
 
     public static function usingNativeStreaming(
         NativeGrpcInvoker $invoker,
         NativeGrpcStreamingInvoker $streamingInvoker,
+        ?EventDispatcher $events = null,
     ): self {
-        return new self(self::usingNative($invoker)->transport, streamingInvoker: $streamingInvoker);
+        return new self(
+            self::usingNative($invoker, $events)->transport,
+            streamingInvoker: $streamingInvoker,
+            events: $events,
+        );
     }
 
     /**

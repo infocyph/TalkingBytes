@@ -30,6 +30,24 @@ final readonly class EmailLimits
         $this->assertPositive('maxHeaderLineBytes', $this->maxHeaderLineBytes);
     }
 
+    /**
+     * @param array<string, mixed> $config
+     */
+    public static function fromArray(array $config): self
+    {
+        return new self(
+            maxMessageBytes: ConfigValue::int($config, 'maxMessageBytes', 10_485_760),
+            maxAttachmentBytes: ConfigValue::int($config, 'maxAttachmentBytes', 26_214_400),
+            maxAttachmentCount: ConfigValue::int($config, 'maxAttachmentCount', 500),
+            maxDecodedBodyBytes: ConfigValue::int($config, 'maxDecodedBodyBytes', 10_485_760),
+            maxMimeDepth: ConfigValue::int($config, 'maxMimeDepth', 20),
+            maxMimeParts: ConfigValue::int($config, 'maxMimeParts', 500),
+            maxHeaderBytes: ConfigValue::int($config, 'maxHeaderBytes', 131_072),
+            maxHeaderCount: ConfigValue::int($config, 'maxHeaderCount', 2_000),
+            maxHeaderLineBytes: ConfigValue::int($config, 'maxHeaderLineBytes', 998),
+        );
+    }
+
     private function assertPositive(string $name, int $value): void
     {
         if ($value > 0) {
