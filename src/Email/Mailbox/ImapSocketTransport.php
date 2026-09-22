@@ -361,6 +361,17 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
         throw new MailboxAuthenticationException(implode("\n", $response->lines));
     }
 
+    private function closeConnection(): void
+    {
+        if (is_resource($this->connection)) {
+            fclose($this->connection);
+        }
+
+        $this->connection = null;
+        $this->capabilities = [];
+        $this->selectedFolder = null;
+    }
+
     private function expectOk(ImapResponse $response, string $stage): ImapResponse
     {
         if ($response->isOk()) {
@@ -372,17 +383,6 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
             $stage,
             implode(' | ', $response->lines),
         ));
-    }
-
-    private function closeConnection(): void
-    {
-        if (is_resource($this->connection)) {
-            fclose($this->connection);
-        }
-
-        $this->connection = null;
-        $this->capabilities = [];
-        $this->selectedFolder = null;
     }
 
     private function hasCapability(string $capability): bool
