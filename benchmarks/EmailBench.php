@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Infocyph\TalkingBytes\Benchmarks;
 
+use Infocyph\TalkingBytes\Email\Emailer;
 use Infocyph\TalkingBytes\Email\EmailMessage;
 use Infocyph\TalkingBytes\Email\Parser\RawEmailParser;
 use Infocyph\TalkingBytes\Email\System\RawEmailBuilder;
@@ -16,7 +17,11 @@ final class EmailBench
 {
     private RawEmailBuilder $builder;
 
+    private Emailer $fakeEmailer;
+
     private EmailMessage $message;
+
+    private Emailer $nullEmailer;
 
     private RawEmailParser $parser;
 
@@ -26,6 +31,8 @@ final class EmailBench
     {
         $this->builder = new RawEmailBuilder();
         $this->parser = new RawEmailParser();
+        $this->nullEmailer = Emailer::usingNull();
+        $this->fakeEmailer = Emailer::fake();
         $this->message = EmailMessage::new()
             ->from('sender@example.com', 'Sender Name')
             ->to('alice@example.com', 'bob@example.com')
@@ -56,6 +63,20 @@ final class EmailBench
                 unset($chunk);
             },
         );
+    }
+
+    #[Iterations(5)]
+    #[Revs(100)]
+    public function benchFakeSend(): void
+    {
+        $this->fakeEmailer->send($this->message);
+    }
+
+    #[Iterations(5)]
+    #[Revs(500)]
+    public function benchNullSend(): void
+    {
+        $this->nullEmailer->send($this->message);
     }
 
     #[Iterations(5)]

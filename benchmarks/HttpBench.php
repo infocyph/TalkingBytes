@@ -8,10 +8,13 @@ use Closure;
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
 use Infocyph\TalkingBytes\Http\Contract\HttpMiddleware;
 use Infocyph\TalkingBytes\Http\Contract\HttpTransport;
+use Infocyph\TalkingBytes\Http\Cookie\CookieJar;
 use Infocyph\TalkingBytes\Http\HttpClient;
+use Infocyph\TalkingBytes\Http\HttpClientFactory;
 use Infocyph\TalkingBytes\Http\HttpRequest;
 use Infocyph\TalkingBytes\Http\Support\HeaderBag;
 use Infocyph\TalkingBytes\Http\Support\QueryParams;
+use Infocyph\TalkingBytes\Http\Testing\FakeHttpTransport;
 use PhpBench\Attributes\BeforeMethods;
 use PhpBench\Attributes\Iterations;
 use PhpBench\Attributes\Revs;
@@ -20,6 +23,13 @@ use PhpBench\Attributes\Revs;
 final class HttpBench
 {
     private HttpClient $client;
+
+    private HttpClient $cookieClient;
+
+    private HttpClient $fakeClient;
+
+    /** @var array<string, mixed> */
+    private array $resolvedConfig;
 
     private HttpRequest $request;
 
@@ -41,6 +51,19 @@ final class HttpBench
             ->withMiddleware($middleware)
             ->withMiddleware($middleware)
             ->withMiddleware($middleware);
+        $this->fakeClient = HttpClient::using(new FakeHttpTransport());
+        $this->cookieClient = HttpClient::using(new FakeHttpTransport())
+            ->withCookieJar(new CookieJar());
+        $this->resolvedConfig = [
+            'timeoutSeconds' => 5,
+            'defaultHeaders' => ['Accept' => 'application/json'],
+            'auth' => ['driver' => 'bearer', 'token' => 'bench-token'],
+            'cookies' => ['enabled' => true],
+            'retry' => ['enabled' => true, 'attempts' => 2, 'base_delay_ms' => 0],
+            'rate_limit' => ['enabled' => true, 'max_requests' => 100000, 'per_seconds' => 1],
+            'circuit_breaker' => ['enabled' => true, 'failure_threshold' => 5, 'cool_down_seconds' => 30],
+            'idempotency' => ['enabled' => true, 'header' => 'Idempotency-Key'],
+        ];
         $this->request = HttpRequest::post('https://api.example.com/v1/orders?existing=1#frag')
             ->header('X-App', 'TalkingBytes')
             ->header('X-Trace', 'bench-123')
@@ -79,10 +102,31 @@ final class HttpBench
     }
 
     #[Iterations(5)]
+    #[Revs(500)]
+    public function benchCookieEnabledFakeSend(): void
+    {
+        $this->cookieClient->send($this->request);
+    }
+
+    #[Iterations(5)]
+    #[Revs(1000)]
+    public function benchFakeTransportSend(): void
+    {
+        $this->fakeClient->send($this->request);
+    }
+
+    #[Iterations(5)]
     #[Revs(1000)]
     public function benchHeaderBag(): void
     {
         new HeaderBag(['Accept' => 'application/json', 'X-Trace' => ['one', 'two']]);
+    }
+
+    #[Iterations(5)]
+    #[Revs(1000)]
+    public function benchImmutableClientConstruction(): void
+    {
+        HttpClient::using(new FakeHttpTransport());
     }
 
     #[Iterations(5)]
@@ -97,5 +141,19 @@ final class HttpBench
     public function benchOrderedQueryParams(): void
     {
         new QueryParams(['a' => [1, 2], 'active' => true]);
+    }
+
+    #[Iterations(5)]
+    #[Revs(1000)]
+    public function benchPrepareRequest(): void
+    {
+        $this->request->prepareForTransport();
+    }
+
+    #[Iterations(5)]
+    #[Revs(250)]
+    public function benchResolvedFactoryConstruction(): void
+    {
+        (new HttpClientFactory())->fromArray($this->resolvedConfig, new FakeHttpTransport());
     }
 }

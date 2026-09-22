@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Infocyph\TalkingBytes\Benchmarks;
 
-use Infocyph\TalkingBytes\Core\Event\CommunicationEventBus;
 use Infocyph\TalkingBytes\Webhook\Model\WebhookSignature;
 use Infocyph\TalkingBytes\Webhook\Replay\InMemoryWebhookReplayStore;
 use Infocyph\TalkingBytes\Webhook\Signing\WebhookSignatureParser;
@@ -20,7 +19,11 @@ final class WebhookBench
 
     private string $payload;
 
+    private int $replayCounter = 0;
+
     private InMemoryWebhookReplayStore $replayStore;
+
+    private WebhookSignature $signature;
 
     private string $signatureHeader;
 
@@ -30,8 +33,6 @@ final class WebhookBench
 
     public function setUp(): void
     {
-        CommunicationEventBus::listen(null);
-
         $this->payload = json_encode([
             'id' => 1001,
             'event' => 'invoice.paid',
@@ -45,10 +46,19 @@ final class WebhookBench
             ],
         ], JSON_THROW_ON_ERROR);
         $this->timestamp = 1_720_000_000;
-        $this->signatureHeader = (new WebhookSignature('secret'))->buildHeader($this->payload, $this->timestamp);
+        $this->signature = new WebhookSignature('secret');
+        $this->signatureHeader = $this->signature->buildHeader($this->payload, $this->timestamp);
         $this->verifier = new WebhookVerifier(['current-secret', 'secret'], 300);
         $this->parser = new WebhookSignatureParser();
         $this->replayStore = new InMemoryWebhookReplayStore(10_000);
+        $this->replayStore->claim('bench', 'duplicate', 60);
+    }
+
+    #[Iterations(5)]
+    #[Revs(1000)]
+    public function benchDuplicateRejection(): void
+    {
+        $this->replayStore->claim('bench', 'duplicate', 60);
     }
 
     #[Iterations(5)]
@@ -62,7 +72,24 @@ final class WebhookBench
     #[Revs(1000)]
     public function benchReplayClaim(): void
     {
-        $this->replayStore->claim('bench', bin2hex(random_bytes(8)), 60);
+        $this->replayCounter++;
+        $this->replayStore->claim('bench', 'delivery-' . $this->replayCounter, 60);
+    }
+
+    #[Iterations(5)]
+    #[Revs(1000)]
+    public function benchSignWebhook(): void
+    {
+        $this->signature->buildHeader($this->payload, $this->timestamp);
+    }
+
+    #[Iterations(5)]
+    #[Revs(1000)]
+    public function benchVerificationAndReplayClaim(): void
+    {
+        $this->verifier->verify($this->payload, $this->signatureHeader, $this->timestamp);
+        $this->replayCounter++;
+        $this->replayStore->claim('verify', 'delivery-' . $this->replayCounter, 60);
     }
 
     #[Iterations(5)]
