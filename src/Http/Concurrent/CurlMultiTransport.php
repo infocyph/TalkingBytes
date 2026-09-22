@@ -10,6 +10,7 @@ use Infocyph\TalkingBytes\Core\Event\NullEventDispatcher;
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
 use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
 use Infocyph\TalkingBytes\Core\Support\Clock;
+use Infocyph\TalkingBytes\Core\Support\ObservabilitySanitizer;
 use Infocyph\TalkingBytes\Core\Support\Sleeper;
 use Infocyph\TalkingBytes\Http\HttpRequest;
 use Infocyph\TalkingBytes\Http\Internal\CurlHandleConfigurator;
@@ -265,7 +266,7 @@ final readonly class CurlMultiTransport
             'method' => $request->method->value,
             'url' => HttpRedactor::redactUrl($request->buildUrl()),
             'status' => $result->statusCode,
-            'error' => $result->error,
+            'failure_category' => $result->successful ? null : (ObservabilitySanitizer::resultContext($result)['failure_category'] ?? 'transport_error'),
             'transport' => 'curl-multi',
         ]);
     }

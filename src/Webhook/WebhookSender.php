@@ -8,6 +8,7 @@ use Infocyph\TalkingBytes\Core\Event\BestEffortEventDispatcher;
 use Infocyph\TalkingBytes\Core\Event\EventDispatcher;
 use Infocyph\TalkingBytes\Core\Event\NullEventDispatcher;
 use Infocyph\TalkingBytes\Core\Support\Clock;
+use Infocyph\TalkingBytes\Core\Support\ObservabilitySanitizer;
 use Infocyph\TalkingBytes\Core\Support\Sleeper;
 use Infocyph\TalkingBytes\Http\HttpClient;
 use Infocyph\TalkingBytes\Http\HttpRequest;
@@ -87,7 +88,7 @@ final readonly class WebhookSender
             'url' => $redactedUrl,
             'attempt' => 1,
         ]);
-        $startedAt = microtime(true);
+        $startedAt = $this->clock->monotonic();
         $attempt = 1;
         $retryPolicy = $this->retryProfile?->toHttpRetryPolicy();
 
@@ -120,7 +121,7 @@ final readonly class WebhookSender
                 'url' => $redactedUrl,
                 'attempt' => $attempt + 1,
                 'status_code' => $result->statusCode,
-                'error' => $result->error,
+                'failure_category' => ObservabilitySanitizer::resultContext($result)['failure_category'] ?? 'transport_error',
             ]);
 
             $delayMs = $decision->delayMs;
@@ -139,7 +140,7 @@ final readonly class WebhookSender
             statusCode: $result->statusCode,
             error: $result->error,
             metadata: [
-                'duration_ms' => (int) ((microtime(true) - $startedAt) * 1000),
+                'duration_ms' => (int) (($this->clock->monotonic() - $startedAt) * 1000),
                 'has_signature' => $this->signingSecret !== null,
             ],
         );

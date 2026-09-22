@@ -9,6 +9,7 @@ use Infocyph\TalkingBytes\Core\Event\BestEffortEventDispatcher;
 use Infocyph\TalkingBytes\Core\Event\EventDispatcher;
 use Infocyph\TalkingBytes\Core\Event\NullEventDispatcher;
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
+use Infocyph\TalkingBytes\Core\Support\ObservabilitySanitizer;
 use Infocyph\TalkingBytes\Grpc\GrpcStatus;
 use Throwable;
 
@@ -48,7 +49,7 @@ final readonly class GrpcTransport
                 'transport' => 'grpc',
                 'method' => $grpcRequest->method,
                 'duration_ms' => $durationMs,
-                'error' => $exception->getMessage(),
+                ...ObservabilitySanitizer::throwableContext($exception),
             ]);
 
             $error = new GrpcCallError(

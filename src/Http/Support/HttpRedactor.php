@@ -11,12 +11,14 @@ final class HttpRedactor
      */
     private const array SENSITIVE_HEADERS = [
         'authorization',
+        'proxy-authorization',
         'cookie',
         'set-cookie',
         'x-api-key',
         'api-key',
         'x-auth-token',
         'x-access-token',
+        'x-tb-signature',
     ];
 
     /**

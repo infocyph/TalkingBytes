@@ -269,7 +269,6 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
         $startedAt = $this->clock->monotonic();
         $this->events->dispatch('email.receive.start', [
             'source' => 'spool',
-            'path' => $sourceFile,
             'consume' => $consume,
         ]);
 
@@ -281,8 +280,7 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
                 $this->events->dispatch('email.receive.finish', [
                     'source' => 'spool',
                     'successful' => false,
-                    'path' => $processingFile,
-                    'error' => 'Unable to read spool file.',
+                    'failure_category' => 'read_failure',
                     'duration_ms' => (int) round(($this->clock->monotonic() - $startedAt) * 1000),
                 ]);
 
@@ -294,14 +292,14 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
             $this->markFailed($processingFile, $exception->getMessage());
             $this->events->dispatch('email.parse.failed', [
                 'source' => 'spool',
-                'path' => $processingFile,
-                'error' => $exception->getMessage(),
+                'failure_category' => 'parse_failure',
+                'exception_class' => $exception::class,
             ]);
             $this->events->dispatch('email.receive.finish', [
                 'source' => 'spool',
                 'successful' => false,
-                'path' => $processingFile,
-                'error' => $exception->getMessage(),
+                'failure_category' => 'parse_failure',
+                'exception_class' => $exception::class,
                 'duration_ms' => (int) round(($this->clock->monotonic() - $startedAt) * 1000),
             ]);
 
@@ -315,8 +313,6 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
         $this->events->dispatch('email.receive.finish', [
             'source' => 'spool',
             'successful' => true,
-            'path' => $processingFile,
-            'subject' => $parsed->subject,
             'duration_ms' => (int) round(($this->clock->monotonic() - $startedAt) * 1000),
         ]);
 

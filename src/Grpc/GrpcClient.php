@@ -9,6 +9,7 @@ use Infocyph\TalkingBytes\Core\Event\EventDispatcher;
 use Infocyph\TalkingBytes\Core\Event\NullEventDispatcher;
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
 use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
+use Infocyph\TalkingBytes\Core\Support\ObservabilitySanitizer;
 use Infocyph\TalkingBytes\Grpc\Contract\GrpcMiddleware;
 use Infocyph\TalkingBytes\Grpc\Middleware\RetryMiddleware;
 use Infocyph\TalkingBytes\Grpc\Native\GeneratedStubGrpcInvoker;
@@ -252,7 +253,7 @@ final readonly class GrpcClient
                 'type' => $streamType,
                 'method' => $method,
                 'duration_ms' => $durationMs,
-                'error' => $exception->getMessage(),
+                ...ObservabilitySanitizer::throwableContext($exception),
             ]);
 
             $error = new GrpcCallError(

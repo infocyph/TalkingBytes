@@ -83,7 +83,7 @@ Important ``SmtpConfig`` options:
 - ``authMechanism``: ``Auto``, ``Plain``, ``Login``, ``None``
 - ``utf8Policy``: ``Reject``, ``Auto``, ``Require``
 - ``allowEightBitMime``
-- ``captureTranscript`` (debug metadata)
+- ``captureTranscript`` (explicit diagnostic metadata; disabled by default)
 - ``maxMessageBytes``
 
 Per-recipient status
@@ -132,3 +132,15 @@ shutdown protection.
 
 For watch loops, ``watchUntilCancelled()`` adapts the shared
 ``CancellationSignal`` while the existing callable stop hook remains available.
+
+SMTP transcript diagnostics
+---------------------------
+
+``captureTranscript`` is an explicit opt-in debugging surface, not default
+observability. Client authentication payloads are replaced with ``[REDACTED]``
+and message DATA bodies are represented only by byte count.
+
+The transcript can still contain envelope addresses, non-authentication SMTP
+commands, capability text, and server response text. Treat it as sensitive
+diagnostic data, retain it only when necessary, and do not enable it as routine
+production logging.

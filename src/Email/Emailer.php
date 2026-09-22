@@ -10,6 +10,7 @@ use Infocyph\TalkingBytes\Core\Event\NullEventDispatcher;
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
 use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
 use Infocyph\TalkingBytes\Core\Support\Clock;
+use Infocyph\TalkingBytes\Core\Support\ObservabilitySanitizer;
 use Infocyph\TalkingBytes\Core\Support\Sleeper;
 use Infocyph\TalkingBytes\Email\Config\DkimConfig;
 use Infocyph\TalkingBytes\Email\Config\LogEmailConfig;
@@ -110,7 +111,6 @@ final readonly class Emailer
     public function send(EmailMessage $message): CommunicationResult
     {
         $this->events->dispatch('email.send.start', [
-            'subject' => $message->headersData()->subject,
             'to_count' => count($message->envelope()->to),
             'cc_count' => count($message->envelope()->cc),
             'bcc_count' => count($message->envelope()->bcc),
@@ -121,7 +121,7 @@ final readonly class Emailer
 
         $this->events->dispatch('email.send.finish', [
             'successful' => $result->successful,
-            'error' => $result->error,
+            'failure_category' => $result->successful ? null : (ObservabilitySanitizer::resultContext($result)['failure_category'] ?? 'transport_error'),
             'duration_ms' => (int) round(($this->clock->monotonic() - $startedAt) * 1000),
             'transport' => is_string($result->metadata['transport'] ?? null)
                 ? $result->metadata['transport']

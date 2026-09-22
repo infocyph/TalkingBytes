@@ -23,10 +23,8 @@ final class MailboxCommandRedactor
 
     private static function redactImap(string $command): string
     {
-        if (preg_match('/^\s*LOGIN\s+(.+?)\s+(.+)$/i', $command, $matches) === 1) {
-            $username = trim($matches[1]);
-
-            return sprintf('LOGIN %s [REDACTED]', $username);
+        if (preg_match('/^\s*LOGIN\s+(.+?)\s+(.+)$/i', $command) === 1) {
+            return 'LOGIN [REDACTED] [REDACTED]';
         }
 
         if (preg_match('/^\s*AUTHENTICATE\s+(.+)$/i', $command) === 1) {
@@ -42,10 +40,12 @@ final class MailboxCommandRedactor
             return 'PASS [REDACTED]';
         }
 
-        if (preg_match('/^\s*APOP\s+(.+?)\s+(.+)$/i', $command, $matches) === 1) {
-            $username = trim($matches[1]);
+        if (preg_match('/^\s*USER\s+.+$/i', $command) === 1) {
+            return 'USER [REDACTED]';
+        }
 
-            return sprintf('APOP %s [REDACTED]', $username);
+        if (preg_match('/^\s*APOP\s+(.+?)\s+(.+)$/i', $command) === 1) {
+            return 'APOP [REDACTED] [REDACTED]';
         }
 
         if (preg_match('/^\s*AUTH\s+.+$/i', $command) === 1) {

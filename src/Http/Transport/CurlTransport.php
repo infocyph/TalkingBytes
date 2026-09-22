@@ -8,6 +8,7 @@ use Infocyph\TalkingBytes\Core\Event\BestEffortEventDispatcher;
 use Infocyph\TalkingBytes\Core\Event\EventDispatcher;
 use Infocyph\TalkingBytes\Core\Event\NullEventDispatcher;
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
+use Infocyph\TalkingBytes\Core\Support\ObservabilitySanitizer;
 use Infocyph\TalkingBytes\Http\Contract\HttpTransport;
 use Infocyph\TalkingBytes\Http\HttpRequest;
 use Infocyph\TalkingBytes\Http\Internal\CurlHandleConfigurator;
@@ -207,7 +208,7 @@ final readonly class CurlTransport implements HttpTransport
 
         $this->events->dispatch('http.request.failed', [
             ...$payload,
-            'error' => $result->error,
+            'failure_category' => ObservabilitySanitizer::resultContext($result)['failure_category'] ?? 'transport_error',
         ]);
     }
 
