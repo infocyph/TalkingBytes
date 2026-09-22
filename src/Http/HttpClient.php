@@ -13,6 +13,7 @@ use Infocyph\TalkingBytes\Auth\SignedRequestAuth;
 use Infocyph\TalkingBytes\Core\Event\EventDispatcher;
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
 use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
+use Infocyph\TalkingBytes\Core\Support\Clock;
 use Infocyph\TalkingBytes\Http\Body\MultipartBody;
 use Infocyph\TalkingBytes\Http\Contract\HttpMiddleware;
 use Infocyph\TalkingBytes\Http\Contract\HttpTransport;
@@ -54,9 +55,9 @@ final readonly class HttpClient
         $this->pipeline = new HttpPipeline($transport, $middlewares);
     }
 
-    public static function curl(?EventDispatcher $events = null): self
+    public static function curl(?EventDispatcher $events = null, ?Clock $clock = null): self
     {
-        return new self(new CurlTransport($events));
+        return new self(new CurlTransport($events, $clock));
     }
 
     public static function fake(?FakeHttpTransport $transport = null): self
@@ -68,9 +69,10 @@ final readonly class HttpClient
         HttpClientConfig $config,
         ?EventDispatcher $events = null,
         ?HttpTransport $transport = null,
+        ?Clock $clock = null,
     ): self {
         return new self(
-            transport: $transport ?? new CurlTransport($events),
+            transport: $transport ?? new CurlTransport($events, $clock),
             defaultOptions: new CurlOptions(
                 timeoutSeconds: $config->timeoutSeconds,
                 connectTimeoutSeconds: $config->connectTimeoutSeconds,
@@ -98,8 +100,9 @@ final readonly class HttpClient
         ?EventDispatcher $events = null,
         ?CancellationSignal $cancellation = null,
         ?HttpTransport $transport = null,
+        ?Clock $clock = null,
     ): self {
-        return new HttpClientFactory($events, $cancellation)->fromArray($config, $transport);
+        return new HttpClientFactory($events, $cancellation, $clock)->fromArray($config, $transport);
     }
 
     public static function multi(

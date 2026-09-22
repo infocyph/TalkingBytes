@@ -6,6 +6,7 @@ namespace Infocyph\TalkingBytes\Http;
 
 use Infocyph\TalkingBytes\Core\Event\EventDispatcher;
 use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
+use Infocyph\TalkingBytes\Core\Support\Clock;
 use Infocyph\TalkingBytes\Http\Contract\HttpTransport;
 use Infocyph\TalkingBytes\Http\Cookie\CookieJar;
 use Infocyph\TalkingBytes\Http\Retry\HttpRetryPolicy;
@@ -18,6 +19,7 @@ final readonly class HttpClientFactory
     public function __construct(
         private ?EventDispatcher $events = null,
         private ?CancellationSignal $cancellation = null,
+        private ?Clock $clock = null,
     ) {}
 
     /**
@@ -31,6 +33,7 @@ final readonly class HttpClientFactory
             HttpClientConfig::fromArray($config),
             $this->events,
             $transport,
+            $this->clock,
         );
 
         $client = $this->applyAuth($client, self::section($config, 'auth'));

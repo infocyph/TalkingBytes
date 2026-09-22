@@ -8,6 +8,7 @@ use Infocyph\TalkingBytes\Core\Event\BestEffortEventDispatcher;
 use Infocyph\TalkingBytes\Core\Event\EventDispatcher;
 use Infocyph\TalkingBytes\Core\Event\NullEventDispatcher;
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
+use Infocyph\TalkingBytes\Core\Support\Clock;
 use Infocyph\TalkingBytes\Core\Support\ObservabilitySanitizer;
 use Infocyph\TalkingBytes\Http\Contract\HttpTransport;
 use Infocyph\TalkingBytes\Http\HttpRequest;
@@ -24,17 +25,20 @@ use Throwable;
 
 final readonly class CurlTransport implements HttpTransport
 {
+    private Clock $clock;
+
     private EventDispatcher $events;
 
-    public function __construct(?EventDispatcher $events = null)
+    public function __construct(?EventDispatcher $events = null, ?Clock $clock = null)
     {
         $this->events = new BestEffortEventDispatcher($events ?? new NullEventDispatcher());
+        $this->clock = $clock ?? Clock::system();
     }
 
     public function send(HttpRequest $request): CommunicationResult
     {
         $request = $request->prepareForTransport();
-        $startedAt = microtime(true);
+        $startedAt = $this->clock->monotonic();
         $this->dispatchStartEvent($request, $request->buildUrl());
         $current = $request;
         $visited = [];
@@ -196,7 +200,7 @@ final readonly class CurlTransport implements HttpTransport
             'url' => HttpRedactor::redactUrl($request->buildUrl()),
             'status' => $result->statusCode,
             'successful' => $result->successful,
-            'duration_ms' => (int) ((microtime(true) - $startedAt) * 1000),
+            'duration_ms' => (int) (($this->clock->monotonic() - $startedAt) * 1000),
             'transport' => 'curl',
         ];
 

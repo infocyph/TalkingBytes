@@ -6,6 +6,7 @@ namespace Infocyph\TalkingBytes\Grpc;
 
 use Infocyph\TalkingBytes\Core\Event\EventDispatcher;
 use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
+use Infocyph\TalkingBytes\Core\Support\Clock;
 use Infocyph\TalkingBytes\Grpc\Native\NativeGrpcInvoker;
 use Infocyph\TalkingBytes\Grpc\Native\NativeGrpcStreamingInvoker;
 use Infocyph\TalkingBytes\Grpc\Retry\GrpcRetryPolicy;
@@ -18,6 +19,7 @@ final readonly class GrpcClientFactory
     public function __construct(
         private ?EventDispatcher $events = null,
         private ?CancellationSignal $cancellation = null,
+        private ?Clock $clock = null,
     ) {}
 
     /**
@@ -27,7 +29,7 @@ final readonly class GrpcClientFactory
     public function using(callable $caller, array $config = []): GrpcClient
     {
         return $this->applyResolvedConfig(
-            GrpcClient::using($caller, $this->events),
+            GrpcClient::using($caller, $this->events, $this->clock),
             $config,
         );
     }
@@ -47,6 +49,7 @@ final readonly class GrpcClientFactory
                 $methodMap,
                 $this->events,
                 $this->cancellation,
+                $this->clock,
             ),
             $config,
         );
@@ -61,8 +64,8 @@ final readonly class GrpcClientFactory
         array $config = [],
     ): GrpcClient {
         $client = $streamingInvoker instanceof NativeGrpcStreamingInvoker
-            ? GrpcClient::usingNativeStreaming($invoker, $streamingInvoker, $this->events)
-            : GrpcClient::usingNative($invoker, $this->events);
+            ? GrpcClient::usingNativeStreaming($invoker, $streamingInvoker, $this->events, $this->clock)
+            : GrpcClient::usingNative($invoker, $this->events, $this->clock);
 
         return $this->applyResolvedConfig($client, $config);
     }

@@ -91,7 +91,7 @@ final readonly class Emailer
 
     public static function usingSmtp(SmtpConfig $config, ?EventDispatcher $events = null, ?Clock $clock = null): self
     {
-        return new self(new SmtpTransport($config), $events, $clock);
+        return new self(new SmtpTransport($config, clock: $clock), $events, $clock);
     }
 
     public static function usingSpool(SpoolConfig $config, ?EventDispatcher $events = null, ?Clock $clock = null): self
