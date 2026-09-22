@@ -10,9 +10,22 @@ Baseline:
 - implementation baseline branch: main
 - released baseline: 2.0.0
 - baseline commit: 86d0e9dde8124ddeacea8ba7f81911af584b879b
-- current planning head before this revision: 69a2d8f8c019358999a9fd48bf5edf42f51a914d
+- current implementation head through Batch 3: 908dc992e1b9b430fb084b2c283c5217fcc9f8b9
 - primary consumer: Foundation 3 runtime plan point 26.9
-- plan state: **PLANNED / RESCANNED**
+- plan state: **ACTIVE — BATCHES 1–3 GREEN / BATCH 4 NEXT**
+
+Batch progress:
+
+- [x] Batch 1 — runtime-state, clock and cancellation foundation
+- [x] Batch 2 — gRPC security and host boundary
+- [x] Batch 3 — email runtime and sendmail process hardening
+- [ ] Batch 4 — native protocol composition builders
+- [ ] Batch 5 — webhook replay acceptance
+- [ ] Batch 6 — HTTP rolling multi scheduler
+- [ ] Batch 7 — gRPC generated adapter determinism
+- [ ] Batch 8 — observability and data minimization
+- [ ] Batch 9 — optional cold graphs, docs and benchmarks
+- [ ] Batch 10 — exact-head release gate
 
 TalkingBytes 2.0 already established the intended protocol architecture. The 2.1 release should harden that architecture for persistent workers, Fibers, framework integration and high-throughput use while moving protocol composition out of Foundation where it currently leaks upward.
 
@@ -301,19 +314,19 @@ Normal TalkingBytes object graphs must not depend on process-global mutable stat
 
 ### Tasks
 
-- [ ] Propagate optional EventDispatcher dependencies through email sender/receiver/mailbox/parser factories where events are emitted.
-- [ ] Convert SpoolEmailReceiver lifecycle events to injected dispatch.
-- [ ] Convert mailbox command events away from direct CommunicationEventBus use.
-- [ ] Convert BounceParser event emission away from direct CommunicationEventBus use.
-- [ ] Audit every production src reference to CommunicationEventBus.
-- [ ] Keep CommunicationEventBus only as a compatibility facade.
-- [ ] Ensure new runtime code never requires the static bus.
-- [ ] Keep dispatch best-effort: listener failures must not alter protocol results or cleanup.
+- [x] Propagate optional EventDispatcher dependencies through email sender/receiver/mailbox/parser factories where events are emitted.
+- [x] Convert SpoolEmailReceiver lifecycle events to injected dispatch.
+- [x] Convert mailbox command events away from direct CommunicationEventBus use.
+- [x] Convert BounceParser event emission away from direct CommunicationEventBus use.
+- [x] Audit every production src reference to CommunicationEventBus.
+- [x] Keep CommunicationEventBus only as a compatibility facade.
+- [x] Ensure new runtime code never requires the static bus.
+- [x] Keep dispatch best-effort: listener failures must not alter protocol results or cleanup.
 - [ ] Audit temporary set_error_handler regions.
 - [ ] Ensure no temporary global error handler spans arbitrary user callbacks, Fiber suspension, event dispatch or long-lived loops.
-- [ ] Add sequential persistent-runtime tests proving event listeners and temporary runtime state do not leak.
-- [ ] Add Fiber-interleaving tests for relevant stateless/object-scoped paths.
-- [ ] Update events documentation to make injection authoritative.
+- [x] Add sequential persistent-runtime tests proving event listeners and temporary runtime state do not leak.
+- [x] Add Fiber-interleaving tests for relevant stateless/object-scoped paths.
+- [x] Update events documentation to make injection authoritative.
 
 ### Acceptance
 
@@ -345,14 +358,14 @@ Do not create a general task framework.
 
 - [ ] Standardize elapsed durations and internal deadlines on Core/Support/Clock::monotonic().
 - [ ] Keep Clock::timestamp()/wall time only for protocol timestamps that require real time.
-- [ ] Extend waiting support so retry/backoff sleeps can be interrupted in bounded slices when a cancellation signal is supplied.
-- [ ] Keep the current simple Sleeper path cheap when no cancellation is supplied.
-- [ ] Allow RetryExecutor to stop before the next attempt when cancelled.
-- [ ] Allow HTTP retry and gRPC retry to stop before sleeping/retrying when cancelled.
+- [x] Extend waiting support so retry/backoff sleeps can be interrupted in bounded slices when a cancellation signal is supplied.
+- [x] Keep the current simple Sleeper path cheap when no cancellation is supplied.
+- [x] Allow RetryExecutor to stop before the next attempt when cancelled.
+- [x] Allow HTTP retry and gRPC retry to stop before sleeping/retrying when cancelled.
 - [ ] Allow WebhookSender retry to stop cooperatively.
-- [ ] Allow mailbox watch loops to consume the same cancellation abstraction while retaining callable compatibility where practical.
+- [x] Allow mailbox watch loops to consume the same cancellation abstraction while retaining callable compatibility where practical.
 - [ ] Allow generated/native gRPC streaming loops to check cancellation between messages/writes/reads where the native API permits.
-- [ ] Allow the inbound gRPC accepted-call bridge to stop before accepting the next exchange.
+- [x] Allow the inbound gRPC accepted-call bridge to stop before accepting the next exchange.
 - [ ] Allow CurlMultiTransport to stop scheduling and terminate/close active work safely when host cancellation is requested, if libcurl semantics permit deterministic cleanup.
 - [ ] Add deterministic fake-clock/fake-sleeper/cancellation tests.
 - [ ] Verify cancellation never skips required resource cleanup.
@@ -391,10 +404,10 @@ Foundation adapts heartbeat loss, stop token and release-generation replacement 
 - [ ] Prove CookieJar isolation.
 - [ ] Prove CircuitBreaker isolation.
 - [ ] Prove RateLimiter isolation.
-- [ ] Prove mailbox connections are not shared accidentally across scoped graphs.
+- [x] Prove mailbox connections are not shared accidentally across scoped graphs.
 - [ ] Document native gRPC stub/channel lifetime expectations.
 - [ ] Add sequential/Fiber tests around mutable collaborators.
-- [ ] Do not introduce global resilience or native-client registries.
+- [x] Do not introduce global resilience or native-client registries.
 - [ ] Ensure fake/spy state has deterministic new-instance/reset behavior.
 
 ---
@@ -444,26 +457,26 @@ native/server runtime
 
 ### Required characteristics
 
-- [ ] Add a small contract for accepting/obtaining one inbound gRPC exchange.
-- [ ] Accepted exchange exposes normalized GrpcInboundRequest.
-- [ ] TalkingBytes maps GrpcInboundResponse/status/metadata back to the native exchange.
-- [ ] Provide a one-cycle or otherwise host-controllable execution API.
+- [x] Add a small contract for accepting/obtaining one inbound gRPC exchange.
+- [x] Accepted exchange exposes normalized GrpcInboundRequest.
+- [x] TalkingBytes maps GrpcInboundResponse/status/metadata back to the native exchange.
+- [x] Provide a one-cycle or otherwise host-controllable execution API.
 - [ ] Accept cancellation between calls and, where supported, during streams.
-- [ ] Do not hide an uncontrolled infinite process loop.
-- [ ] Preserve method normalization, metadata, deadline and status mapping.
-- [ ] Add fake inbound source/exchange utilities.
-- [ ] Do not add socket/process supervision.
-- [ ] Do not require Foundation or Omnibus.
+- [x] Do not hide an uncontrolled infinite process loop.
+- [x] Preserve method normalization, metadata, deadline and status mapping.
+- [x] Add fake inbound source/exchange utilities.
+- [x] Do not add socket/process supervision.
+- [x] Do not require Foundation or Omnibus.
 - [ ] Keep ext-grpc and grpc/grpc cold until selected.
 - [ ] Document exact inbound streaming modes actually implemented.
 - [ ] Keep inbound streaming incremental and bounded.
 
 ### Security correction
 
-- [ ] Remove handler exception class from GrpcInboundResponse wire metadata.
-- [ ] Return stable INTERNAL status/message only.
-- [ ] Keep richer exception classification only in local events/logging when safe.
-- [ ] Add a test proving remote responses do not reveal exception class, file path, trace or raw exception message.
+- [x] Remove handler exception class from GrpcInboundResponse wire metadata.
+- [x] Return stable INTERNAL status/message only.
+- [x] Keep richer exception classification only in local events/logging when safe.
+- [x] Add a test proving remote responses do not reveal exception class, file path, trace or raw exception message.
 
 ---
 
@@ -471,42 +484,42 @@ native/server runtime
 
 ### Email runtime tasks
 
-- [ ] Propagate injected EventDispatcher objects through EmailSenderFactory, EmailReceiverFactory and EmailMailboxFactory.
-- [ ] Keep Emailer transport composition native to TalkingBytes.
-- [ ] Keep SMTP/sendmail/mail/spool behavior native.
-- [ ] Keep IMAP/POP3 behavior native.
-- [ ] Keep MIME/parsing/DKIM/bounce behavior native.
-- [ ] Define mailbox connection ownership and deterministic close/logout behavior.
-- [ ] Ensure failed sessions cannot poison newly constructed instances.
+- [x] Propagate injected EventDispatcher objects through EmailSenderFactory, EmailReceiverFactory and EmailMailboxFactory.
+- [x] Keep Emailer transport composition native to TalkingBytes.
+- [x] Keep SMTP/sendmail/mail/spool behavior native.
+- [x] Keep IMAP/POP3 behavior native.
+- [x] Keep MIME/parsing/DKIM/bounce behavior native.
+- [x] Define mailbox connection ownership and deterministic close/logout behavior.
+- [x] Ensure failed sessions cannot poison newly constructed instances.
 - [ ] Preserve bounded line/message/attachment/parser limits.
 - [ ] Preserve spool locking, quarantine and safe move semantics.
-- [ ] Replace wall-clock logical deadlines with monotonic clock.
-- [ ] Replace raw watch-loop sleeps with injectable waiting where useful.
-- [ ] Keep IMAP IDLE cancellation responsive.
-- [ ] Keep POP3 polling cancellation responsive.
-- [ ] Add persistent-worker and cancellation tests.
+- [x] Replace wall-clock logical deadlines with monotonic clock.
+- [x] Replace raw watch-loop sleeps with injectable waiting where useful.
+- [x] Keep IMAP IDLE cancellation responsive.
+- [x] Keep POP3 polling cancellation responsive.
+- [x] Add persistent-worker and cancellation tests.
 
 ### Sendmail subprocess tasks
 
-- [ ] Keep command execution as an argument array and bypass the shell.
-- [ ] Extract the private process loop into a narrow internal sendmail child-process helper if that reduces duplication/complexity.
-- [ ] Use monotonic timeout.
-- [ ] Add cooperative cancellation.
-- [ ] Keep stdout/stderr capture bounded.
-- [ ] Terminate gracefully, wait a bounded grace period, then force termination.
-- [ ] When posix_setpgid/posix_getpgid/posix_kill are available and safe, place the child in its own process group and terminate the group so descendants are not orphaned.
-- [ ] Fall back to direct proc_terminate when POSIX group control is unavailable.
-- [ ] Do not require ext-posix.
-- [ ] Do not require ext-pcntl.
-- [ ] Do not import Foundation ProcessRunner or make TalkingBytes a generic process package.
+- [x] Keep command execution as an argument array and bypass the shell.
+- [x] Extract the private process loop into a narrow internal sendmail child-process helper if that reduces duplication/complexity.
+- [x] Use monotonic timeout.
+- [x] Add cooperative cancellation.
+- [x] Keep stdout/stderr capture bounded.
+- [x] Terminate gracefully, wait a bounded grace period, then force termination.
+- [x] When posix_setpgid/posix_getpgid/posix_kill are available and safe, place the child in its own process group and terminate the group so descendants are not orphaned.
+- [x] Fall back to direct proc_terminate when POSIX group control is unavailable.
+- [x] Do not require ext-posix.
+- [x] Do not require ext-pcntl.
+- [x] Do not import Foundation ProcessRunner or make TalkingBytes a generic process package.
 - [ ] Add tests for timeout, cancellation, forced termination and cleanup.
 - [ ] Add optional Unix process-group coverage where CI supports it.
 - [ ] Verify Windows/non-POSIX fallback behavior remains valid.
 
 ### pcntl policy
 
-- [ ] Do not register SIGINT/SIGTERM handlers inside SendmailTransport, SMTP, HTTP, webhook or gRPC normal paths.
-- [ ] Foundation continues translating its worker signals into cancellation.
+- [x] Do not register SIGINT/SIGTERM handlers inside SendmailTransport, SMTP, HTTP, webhook or gRPC normal paths.
+- [x] Foundation continues translating its worker signals into cancellation.
 - [ ] Consider an explicit standalone PcntlSignalCancellation adapter only if a non-Foundation CLI use case justifies it.
 - [ ] If such an adapter is added, it must restore previous handlers and never become a default dependency path.
 
@@ -668,16 +681,16 @@ Default events/log context must not expose secrets or unnecessary payload/PII.
 - [ ] Webhook works without native gRPC packages.
 - [ ] Basic outbound email works without IMAP-specific optional extensions.
 - [ ] SMTP works without ext-posix/ext-pcntl.
-- [ ] Sendmail works with portable proc_* fallback when ext-posix is absent.
-- [ ] POSIX process-group hardening activates only when functions are available.
+- [x] Sendmail works with portable proc_* fallback when ext-posix is absent.
+- [x] POSIX process-group hardening activates only when functions are available.
 - [ ] IMAP/POP3 optional checks occur only when selected.
 - [ ] RSA DKIM does not require Sodium.
 - [ ] Ed25519 DKIM fails clearly only when selected and Sodium is unavailable.
 - [ ] Native/generated gRPC fails clearly only when selected.
 - [ ] Composer suggest metadata matches actual optional behavior.
-- [ ] Add ext-posix to suggest only if the released implementation actually uses it as an optional sendmail hardening path.
-- [ ] Do not add ext-pcntl to suggest unless an explicit public pcntl adapter is shipped.
-- [ ] Documentation matches Composer metadata.
+- [x] Add ext-posix to suggest only if the released implementation actually uses it as an optional sendmail hardening path.
+- [x] Do not add ext-pcntl to suggest unless an explicit public pcntl adapter is shipped.
+- [x] Documentation matches Composer metadata.
 - [ ] Avoid unrelated extension/class probing on protocol hot paths.
 
 ---
@@ -742,19 +755,19 @@ Foundation owns bridge attribution.
 ## 16. Documentation and Release Metadata
 
 - [ ] Update architecture docs with ownership/lifetime/cancellation boundaries.
-- [ ] Update events docs: injected dispatcher primary; static bus compatibility-only.
+- [x] Update events docs: injected dispatcher primary; static bus compatibility-only.
 - [ ] Update HTTP concurrency docs for rolling scheduling and cancellation semantics.
 - [ ] Update webhook replay docs with atomic/fail-closed requirements.
-- [ ] Update gRPC inbound docs for the host-runtime bridge and wire-error data minimization.
+- [x] Update gRPC inbound docs for the host-runtime bridge and wire-error data minimization.
 - [ ] Update gRPC generated/native docs for deterministic adapter behavior.
-- [ ] Update email docs for persistent-worker connection ownership.
-- [ ] Update sendmail docs for timeout/cancellation/POSIX optional behavior.
+- [x] Update email docs for persistent-worker connection ownership.
+- [x] Update sendmail docs for timeout/cancellation/POSIX optional behavior.
 - [ ] Update security docs with secret/PII redaction guarantees.
 - [ ] Update performance docs with persistent-runtime guidance.
-- [ ] Update testing docs with isolation, fake cancellation and fake inbound-runtime examples.
+- [x] Update testing docs with isolation, fake cancellation and fake inbound-runtime examples.
 - [ ] Update release checklist with static-state, monotonic-time, cancellation, optional-cold and secret-sentinel gates.
 - [ ] Keep README examples aligned with released APIs.
-- [ ] Keep Composer requirements/suggestions synchronized with real runtime behavior.
+- [x] Keep Composer requirements/suggestions synchronized with real runtime behavior.
 
 ---
 
@@ -870,7 +883,7 @@ This is a planning map, not a requirement to modify every file.
 
 ## 19. Execution Order
 
-### Batch 1 — Runtime-state, clock and cancellation foundation
+### Batch 1 — Runtime-state, clock and cancellation foundation ✅
 
 - remove primary static-event dependency;
 - add/propagate injected dispatch;
@@ -878,7 +891,7 @@ This is a planning map, not a requirement to modify every file.
 - introduce minimal cooperative cancellation;
 - add persistent/Fiber isolation tests.
 
-### Batch 2 — gRPC security and host boundary
+### Batch 2 — gRPC security and host boundary ✅
 
 - remove exception metadata leakage;
 - add accepted-exchange/source boundary;
@@ -886,7 +899,7 @@ This is a planning map, not a requirement to modify every file.
 - add fake runtime;
 - preserve status/deadline/metadata semantics.
 
-### Batch 3 — Email runtime and sendmail process hardening
+### Batch 3 — Email runtime and sendmail process hardening ✅
 
 - event injection;
 - mailbox/session ownership;
@@ -895,7 +908,7 @@ This is a planning map, not a requirement to modify every file.
 - sendmail child-process supervision;
 - optional POSIX process-group safety.
 
-### Batch 4 — Native protocol composition builders
+### Batch 4 — Native protocol composition builders ⏳
 
 - EmailLimits::fromArray;
 - HTTP resolved-profile builder;
