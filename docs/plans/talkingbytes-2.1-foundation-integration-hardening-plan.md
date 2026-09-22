@@ -12,14 +12,14 @@ Baseline:
 - baseline commit: 86d0e9dde8124ddeacea8ba7f81911af584b879b
 - current implementation head through Batch 3: 908dc992e1b9b430fb084b2c283c5217fcc9f8b9
 - primary consumer: Foundation 3 runtime plan point 26.9
-- plan state: **ACTIVE — BATCHES 1–3 GREEN / BATCH 4 NEXT**
+- plan state: **ACTIVE — BATCHES 1–4 GREEN / BATCH 5 NEXT**
 
 Batch progress:
 
 - [x] Batch 1 — runtime-state, clock and cancellation foundation
 - [x] Batch 2 — gRPC security and host boundary
 - [x] Batch 3 — email runtime and sendmail process hardening
-- [ ] Batch 4 — native protocol composition builders
+- [x] Batch 4 — native protocol composition builders
 - [ ] Batch 5 — webhook replay acceptance
 - [ ] Batch 6 — HTTP rolling multi scheduler
 - [ ] Batch 7 — gRPC generated adapter determinism
@@ -539,12 +539,12 @@ Prefer extending existing factories/facades before adding many new abstractions.
 
 Move the mechanics currently in Foundation CommunicationProfiles::decorateHttp into a TalkingBytes-native builder/factory:
 
-- [ ] auth driver composition;
-- [ ] CookieJar opt-in;
-- [ ] retry policy composition;
-- [ ] RateLimiter composition;
-- [ ] CircuitBreaker composition;
-- [ ] idempotency middleware composition.
+- [x] auth driver composition;
+- [x] CookieJar opt-in;
+- [x] retry policy composition;
+- [x] RateLimiter composition;
+- [x] CircuitBreaker composition;
+- [x] idempotency middleware composition.
 
 Foundation should still:
 
@@ -555,33 +555,33 @@ Foundation should still:
 
 ### gRPC composition
 
-- [ ] Add a direct TalkingBytes convenience path for generated stubs so Foundation does not construct GeneratedStubGrpcInvoker itself unless it needs customization.
-- [ ] Centralize native/generated/streaming client composition in TalkingBytes.
-- [ ] Centralize gRPC retry-profile application in TalkingBytes.
-- [ ] Allow EventDispatcher injection through usingNative/usingNativeStreaming/generated-stub paths.
-- [ ] Keep service/handler lookup in Foundation.
+- [x] Add a direct TalkingBytes convenience path for generated stubs so Foundation does not construct GeneratedStubGrpcInvoker itself unless it needs customization.
+- [x] Centralize native/generated/streaming client composition in TalkingBytes.
+- [x] Centralize gRPC retry-profile application in TalkingBytes.
+- [x] Allow EventDispatcher injection through usingNative/usingNativeStreaming/generated-stub paths.
+- [x] Keep service/handler lookup in Foundation.
 
 ### Webhook composition
 
-- [ ] Keep signing, verifier/receiver creation and retry-profile mechanics in TalkingBytes.
-- [ ] Allow a resolved outbound/inbound config array or small typed config to be applied without Foundation recreating protocol rules.
-- [ ] Keep secret source resolution and production-secret policy in Foundation.
-- [ ] Keep replay-store implementation in Foundation.
+- [x] Keep signing, verifier/receiver creation and retry-profile mechanics in TalkingBytes.
+- [x] Allow a resolved outbound/inbound config array or small typed config to be applied without Foundation recreating protocol rules.
+- [x] Keep secret source resolution and production-secret policy in Foundation.
+- [x] Keep replay-store implementation in Foundation.
 
 ### Email composition
 
 Expand native email factory capability so Foundation no longer has to own protocol transport/decorator mechanics:
 
-- [ ] transport driver creation from resolved transport config;
-- [ ] fallback transport composition;
-- [ ] retry policy composition;
-- [ ] rate-limit composition;
-- [ ] DKIM config/application after path/secret resolution;
-- [ ] parser-limit parsing.
+- [x] transport driver creation from resolved transport config;
+- [x] fallback transport composition;
+- [x] retry policy composition;
+- [x] rate-limit composition;
+- [x] DKIM config/application after path/secret resolution;
+- [x] parser-limit parsing.
 
 Specific easy win:
 
-- [ ] add EmailLimits::fromArray() using TalkingBytes-native strict config parsing so Foundation NotificationGraphFactory does not duplicate EmailLimits construction.
+- [x] add EmailLimits::fromArray() using TalkingBytes-native strict config parsing so Foundation NotificationGraphFactory does not duplicate EmailLimits construction.
 
 Foundation should still:
 
@@ -908,7 +908,7 @@ This is a planning map, not a requirement to modify every file.
 - sendmail child-process supervision;
 - optional POSIX process-group safety.
 
-### Batch 4 — Native protocol composition builders ⏳
+### Batch 4 — Native protocol composition builders ✅
 
 - EmailLimits::fromArray;
 - HTTP resolved-profile builder;
@@ -917,7 +917,7 @@ This is a planning map, not a requirement to modify every file.
 - webhook resolved-policy composition;
 - tests proving Foundation no longer needs to recreate protocol mechanics.
 
-### Batch 5 — Webhook replay acceptance
+### Batch 5 — Webhook replay acceptance ⏳
 
 - atomic/fail-closed contract;
 - contention/error tests;
