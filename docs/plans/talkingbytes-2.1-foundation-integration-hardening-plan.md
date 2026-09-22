@@ -10,9 +10,9 @@ Baseline:
 - implementation baseline branch: main
 - released baseline: 2.0.0
 - baseline commit: 86d0e9dde8124ddeacea8ba7f81911af584b879b
-- current implementation head through Batch 3: 908dc992e1b9b430fb084b2c283c5217fcc9f8b9
+- current implementation head through Batch 6: 79db70c184243fe1547bb207d3bfbe81f0788afe
 - primary consumer: Foundation 3 runtime plan point 26.9
-- plan state: **ACTIVE — BATCHES 1–5 GREEN / BATCH 6 NEXT**
+- plan state: **ACTIVE — BATCHES 1–6 GREEN / BATCH 7 NEXT**
 
 Batch progress:
 
@@ -21,7 +21,7 @@ Batch progress:
 - [x] Batch 3 — email runtime and sendmail process hardening
 - [x] Batch 4 — native protocol composition builders
 - [x] Batch 5 — webhook replay acceptance
-- [ ] Batch 6 — HTTP rolling multi scheduler
+- [x] Batch 6 — HTTP rolling multi scheduler
 - [ ] Batch 7 — gRPC generated adapter determinism
 - [ ] Batch 8 — observability and data minimization
 - [ ] Batch 9 — optional cold graphs, docs and benchmarks
@@ -366,9 +366,9 @@ Do not create a general task framework.
 - [x] Allow mailbox watch loops to consume the same cancellation abstraction while retaining callable compatibility where practical.
 - [ ] Allow generated/native gRPC streaming loops to check cancellation between messages/writes/reads where the native API permits.
 - [x] Allow the inbound gRPC accepted-call bridge to stop before accepting the next exchange.
-- [ ] Allow CurlMultiTransport to stop scheduling and terminate/close active work safely when host cancellation is requested, if libcurl semantics permit deterministic cleanup.
+- [x] Allow CurlMultiTransport to stop scheduling and terminate/close active work safely when host cancellation is requested, if libcurl semantics permit deterministic cleanup.
 - [ ] Add deterministic fake-clock/fake-sleeper/cancellation tests.
-- [ ] Verify cancellation never skips required resource cleanup.
+- [x] Verify cancellation never skips required resource cleanup.
 
 ### Foundation handoff
 
@@ -609,17 +609,17 @@ Improve throughput without threads, forks or a new async framework.
 
 ### Tasks
 
-- [ ] Replace array_chunk batch scheduling with a rolling cURL multi window up to maxConcurrency.
-- [ ] As soon as one handle completes, schedule the next pending request.
-- [ ] Preserve result ordering by original keys.
-- [ ] Preserve bounded concurrency.
-- [ ] Preserve cleanup on every failure/listener/cancellation path.
-- [ ] Preserve current truthful stopSchedulingOnFailure semantics.
-- [ ] When a failure is observed and stop-scheduling is enabled, stop adding new requests immediately.
-- [ ] Do not claim active-request fail-fast cancellation unless it is actually implemented.
-- [ ] If cancellation is supplied, close/remove active handles safely and return deterministic cancelled results/metadata.
-- [ ] Keep manual redirect security behavior; do not re-enable unsafe automatic redirect handling in CurlMultiTransport.
-- [ ] Move pool durations to monotonic Clock.
+- [x] Replace array_chunk batch scheduling with a rolling cURL multi window up to maxConcurrency.
+- [x] As soon as one handle completes, schedule the next pending request.
+- [x] Preserve result ordering by original keys.
+- [x] Preserve bounded concurrency.
+- [x] Preserve cleanup on every failure/listener/cancellation path.
+- [x] Preserve current truthful stopSchedulingOnFailure semantics.
+- [x] When a failure is observed and stop-scheduling is enabled, stop adding new requests immediately.
+- [x] Do not claim active-request fail-fast cancellation unless it is actually implemented.
+- [x] If cancellation is supplied, close/remove active handles safely and return deterministic cancelled results/metadata.
+- [x] Keep manual redirect security behavior; do not re-enable unsafe automatic redirect handling in CurlMultiTransport.
+- [x] Move pool durations to monotonic Clock.
 - [ ] Benchmark chunked 2.0 behavior versus rolling-window 2.1 behavior with mixed fast/slow fake/local endpoints.
 - [ ] Track allocation/handle cleanup under repeated runs.
 
@@ -756,7 +756,7 @@ Foundation owns bridge attribution.
 
 - [ ] Update architecture docs with ownership/lifetime/cancellation boundaries.
 - [x] Update events docs: injected dispatcher primary; static bus compatibility-only.
-- [ ] Update HTTP concurrency docs for rolling scheduling and cancellation semantics.
+- [x] Update HTTP concurrency docs for rolling scheduling and cancellation semantics.
 - [ ] Update webhook replay docs with atomic/fail-closed requirements.
 - [x] Update gRPC inbound docs for the host-runtime bridge and wire-error data minimization.
 - [ ] Update gRPC generated/native docs for deterministic adapter behavior.
@@ -923,14 +923,14 @@ This is a planning map, not a requirement to modify every file.
 - contention/error tests;
 - preserve provider neutrality.
 
-### Batch 6 — HTTP rolling multi scheduler ⏳
+### Batch 6 — HTTP rolling multi scheduler ✅
 
 - rolling window;
 - stop-scheduling behavior;
 - cancellation/cleanup;
 - throughput benchmark.
 
-### Batch 7 — gRPC generated adapter determinism
+### Batch 7 — gRPC generated adapter determinism ⏳
 
 - remove TypeError execution probing;
 - deterministic call-shape resolution;
@@ -1010,7 +1010,7 @@ TalkingBytes 2.1 is complete only when:
 - [ ] native inbound/outbound email APIs remain authoritative;
 - [ ] sendmail timeout/cancellation/process-tree cleanup is deterministic;
 - [ ] posix use is optional and pcntl is not required/default;
-- [ ] HTTP multi scheduling uses a rolling concurrency window or the optimization is explicitly rejected with benchmark evidence;
+- [x] HTTP multi scheduling uses a rolling concurrency window or the optimization is explicitly rejected with benchmark evidence;
 - [ ] Foundation protocol-composition duplication has corresponding native TalkingBytes APIs ready for consumption;
 - [ ] secret/PII sentinel tests pass across protocol observability;
 - [ ] unrelated optional capabilities remain cold until selected;
