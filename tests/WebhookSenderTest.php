@@ -5,6 +5,8 @@ declare(strict_types=1);
 use Infocyph\TalkingBytes\Core\Event\CommunicationEventBus;
 use Infocyph\TalkingBytes\Core\Event\CallableEventDispatcher;
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
+use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
+use Infocyph\TalkingBytes\Core\Support\Sleeper;
 use Infocyph\TalkingBytes\Http\HttpClient;
 use Infocyph\TalkingBytes\Http\HttpResponse;
 use Infocyph\TalkingBytes\Http\Testing\SequenceHttpTransport;
@@ -110,6 +112,63 @@ it('tracks webhook retry attempts and emits redacted retry events', function ():
         ->and($events[1]['event'])->toBe('webhook.retry')
         ->and($events[1]['payload']['url'])->toContain('token=%5BREDACTED%5D')
         ->and((string) ($events[1]['payload']['signature'] ?? ''))->toBe('');
+});
+
+
+it('stops before the first webhook attempt when cancellation is already requested', function (): void {
+    $transport = new SequenceHttpTransport([
+        CommunicationResult::success(200, new HttpResponse(200, '{"ok":true}')),
+    ]);
+    $sender = WebhookSender::usingHttp(HttpClient::using($transport))
+        ->withCancellation(CancellationSignal::fromCallable(static fn(): bool => true));
+
+    $delivery = $sender->send(
+        WebhookMessage::new('order.created')
+            ->payload(['order_id' => 1001])
+            ->url('https://hooks.example.test/orders'),
+    );
+
+    expect($transport->sentRequests())->toBe([])
+        ->and($delivery->result->successful)->toBeFalse()
+        ->and($delivery->result->metadata['cancelled'] ?? false)->toBeTrue()
+        ->and($delivery->delivery?->attempts)->toBe(0)
+        ->and($delivery->delivery?->metadata['cancelled'] ?? false)->toBeTrue();
+});
+
+it('interrupts webhook retry waiting when cancellation is requested', function (): void {
+    $cancelled = false;
+    $transport = new SequenceHttpTransport([
+        CommunicationResult::failure(
+            'HTTP request failed with status code 500.',
+            500,
+            new HttpResponse(500, '{"error":true}'),
+        ),
+        CommunicationResult::success(200, new HttpResponse(200, '{"ok":true}')),
+    ]);
+    $sleeper = new Sleeper(static function () use (&$cancelled): void {
+        $cancelled = true;
+    });
+    $signal = CancellationSignal::fromCallable(static fn(): bool => $cancelled);
+    $sender = WebhookSender::usingHttpWithRetryProfile(
+        HttpClient::using($transport),
+        attempts: 2,
+        baseDelayMs: 250,
+        sleeper: $sleeper,
+        cancellation: $signal,
+    );
+
+    $delivery = $sender->send(
+        WebhookMessage::new('order.created')
+            ->payload(['order_id' => 1001])
+            ->url('https://hooks.example.test/orders'),
+    );
+
+    expect($transport->sentRequests())->toHaveCount(1)
+        ->and($delivery->result->successful)->toBeFalse()
+        ->and($delivery->result->statusCode)->toBe(500)
+        ->and($delivery->result->metadata['cancelled'] ?? false)->toBeTrue()
+        ->and($delivery->delivery?->attempts)->toBe(1)
+        ->and($delivery->delivery?->metadata['cancelled'] ?? false)->toBeTrue();
 });
 
 it('rejects overriding reserved webhook headers', function (): void {
