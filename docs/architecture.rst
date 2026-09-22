@@ -73,7 +73,9 @@ DKIM. POSIX sendmail hardening is opportunistic and PCNTL is not part of the
 normal runtime graph.
 
 The security workflow contains a minimal-extension coldness gate that exercises
-these boundaries with the optional extensions disabled.
+these boundaries with unloadable gRPC, IMAP, and POSIX extensions disabled. It
+also enforces source-level confinement for compiled-in PCNTL and Sodium
+capabilities.
 
 Module boundaries
 -----------------

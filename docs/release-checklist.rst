@@ -15,8 +15,10 @@ Pre-release gates
 
 - verify the supported PHP and dependency-version matrix is green in CI
 - verify the Mailpit integration job is green
-- verify the optional-capability coldness job is green with gRPC, IMAP, POSIX,
-  PCNTL, and Sodium disabled
+- verify the optional-capability coldness job is green with unloadable gRPC,
+  IMAP, and POSIX extensions disabled
+- verify PCNTL has no runtime references and Sodium remains confined to the
+  Ed25519 DKIM implementation
 - verify no primary runtime path depends on ``CommunicationEventBus``
 - verify temporary process-global error handlers are restored and do not span
   user callbacks, event dispatch, Fiber suspension, or long-lived waits

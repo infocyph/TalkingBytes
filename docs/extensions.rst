@@ -42,9 +42,11 @@ Optional capabilities are selected lazily.
 - POSIX sendmail process-group hardening is opportunistic; the portable direct
   child termination path remains available when POSIX functions are absent.
 
-The CI optional-capability coldness gate runs with ``ext-grpc``,
-``ext-imap``, ``ext-posix``, ``ext-pcntl``, and ``ext-sodium``
-disabled and exercises the unrelated protocol graphs.
+The CI optional-capability coldness gate runs with unloadable ``ext-grpc``,
+``ext-imap``, and ``ext-posix`` disabled and exercises unrelated protocol
+graphs. Hosted PHP builds may compile PCNTL or Sodium in; the same gate therefore
+also enforces that no runtime PCNTL calls exist and that Sodium calls remain
+confined to the Ed25519 DKIM implementation.
 
 Fallback behavior
 -----------------
