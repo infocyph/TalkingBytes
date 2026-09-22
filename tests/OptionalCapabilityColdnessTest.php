@@ -127,3 +127,42 @@ it('fails Ed25519 DKIM clearly only when the capability is selected', function (
 
     expect($build()->algorithm)->toBe(DkimAlgorithm::Ed25519Sha256);
 });
+
+
+it('confines compiled-in optional capabilities to their selected feature boundary', function (): void {
+    $root = dirname(__DIR__) . '/src';
+    $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root));
+    $pcntlReferences = [];
+    $unexpectedSodiumReferences = [];
+    $allowedSodiumFiles = [
+        'Email/Config/DkimConfig.php',
+        'Email/Dkim/DkimSigner.php',
+        'Email/Dkim/DkimVerifier.php',
+    ];
+
+    foreach ($iterator as $file) {
+        if (!$file instanceof SplFileInfo || !$file->isFile() || $file->getExtension() !== 'php') {
+            continue;
+        }
+
+        $contents = file_get_contents($file->getPathname());
+        if (!is_string($contents)) {
+            continue;
+        }
+
+        $relative = str_replace('\\', '/', substr($file->getPathname(), strlen($root) + 1));
+        if (preg_match('/\\bpcntl_/', $contents) === 1) {
+            $pcntlReferences[] = $relative;
+        }
+
+        if (
+            preg_match('/\\bsodium_/', $contents) === 1
+            && !in_array($relative, $allowedSodiumFiles, true)
+        ) {
+            $unexpectedSodiumReferences[] = $relative;
+        }
+    }
+
+    expect($pcntlReferences)->toBe([])
+        ->and($unexpectedSodiumReferences)->toBe([]);
+});

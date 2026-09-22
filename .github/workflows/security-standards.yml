@@ -45,15 +45,6 @@ jobs:
           }
           '
 
-      - name: Verify compiled-in capability isolation
-        run: |
-          if grep -RInE --include='*.php' '\bpcntl_' src; then
-            echo "TalkingBytes runtime must not depend on PCNTL." >&2
-            exit 1
-          fi
-
-          unexpected_sodium="$(
-            grep -RIlE --include='*.php' '\bsodium_' src               | grep -Ev '^src/Email/(Config/DkimConfig|Dkim/DkimSigner|Dkim/DkimVerifier)\.php
       - name: Install dependencies
         run: composer install --no-interaction --prefer-dist --no-progress
 
