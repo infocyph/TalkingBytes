@@ -11,38 +11,29 @@ on:
 jobs:
   phpforge:
     uses: infocyph/phpforge/.github/workflows/security-standards.yml@main
-    permissions:
-      security-events: write
-      actions: read
-      contents: read
     with:
       php_versions: '["8.4","8.5"]'
       dependency_versions: '["prefer-lowest","prefer-stable"]'
       php_extensions: "curl, fileinfo, openssl"
-      composer_flags: ""
-      phpstan_memory_limit: "1G"
-      psalm_threads: "1"
+      run_qa: true
       run_analysis: true
-      run_svg_report: true
+      upload_sarif: true
+      run_benchmark: true
       run_clean_install: true
+      run_svg_report: true
+      fail_on_skipped_tests: true
+      integration_services: '[]'
+      service_topologies: '{}'
       benchmark_composer_script: ""
       benchmark_result_file: ""
       benchmark_baseline_file: ""
       benchmark_max_regression_percent: 2
       benchmark_stable_environment: false
-      fail_on_skipped_tests: true
-      enable_redis_service: false
-      enable_valkey_service: false
-      enable_memcached_service: false
-      enable_postgres_service: false
-      enable_mysql_service: false
-      enable_scylladb_service: false
-      enable_elasticsearch_service: false
-      enable_mongodb_service: false
-      service_db_name: "phpforge"
-      service_db_user: "phpforge"
-      service_db_password: "phpforge"
       artifact_retention_days: 61
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
 
   mailpit-integration:
     runs-on: ubuntu-latest
@@ -55,20 +46,21 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.5'
+          php-version: "8.5"
           extensions: curl, fileinfo, openssl
+          coverage: none
 
       - name: Install dependencies
-        run: composer install --no-interaction --prefer-dist
+        run: composer install --no-interaction --prefer-dist --no-progress
 
       - name: Run Mailpit integration test
         env:
-          RUN_MAILPIT_INTEGRATION: '1'
+          RUN_MAILPIT_INTEGRATION: "1"
           SMTP_HOST: 127.0.0.1
           SMTP_PORT: 1025
           MAILPIT_API_BASE: http://127.0.0.1:8025
