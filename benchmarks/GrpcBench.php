@@ -10,8 +10,10 @@ use Infocyph\TalkingBytes\Grpc\GrpcMetadata;
 use Infocyph\TalkingBytes\Grpc\GrpcStatus;
 use Infocyph\TalkingBytes\Grpc\Receiver\GrpcInboundRequest;
 use Infocyph\TalkingBytes\Grpc\Receiver\GrpcInboundResponse;
+use Infocyph\TalkingBytes\Grpc\Retry\GrpcRetryPolicy;
 use Infocyph\TalkingBytes\Grpc\Sender\GrpcRequest;
 use Infocyph\TalkingBytes\Grpc\Sender\GrpcResponse;
+use Infocyph\TalkingBytes\Grpc\Testing\FakeGrpcInboundSource;
 use PhpBench\Attributes\BeforeMethods;
 use PhpBench\Attributes\Iterations;
 use PhpBench\Attributes\Revs;
@@ -23,18 +25,54 @@ final class GrpcBench
 
     private GrpcInboundDispatcher $dispatcher;
 
+    private GrpcClient $generatedClient;
+
     private GrpcInboundRequest $inboundRequest;
 
     private GrpcRequest $request;
 
+    private GrpcClient $retryClient;
+
     public function setUp(): void
     {
-        $this->client = GrpcClient::using(
-            static fn(GrpcRequest $request): GrpcResponse => new GrpcResponse(
-                GrpcStatus::Ok,
-                $request->message,
-            ),
+        $caller = static fn(GrpcRequest $request): GrpcResponse => new GrpcResponse(
+            GrpcStatus::Ok,
+            $request->message,
         );
+
+        $this->client = GrpcClient::using($caller);
+        $this->retryClient = GrpcClient::using($caller)
+            ->withGrpcRetry(GrpcRetryPolicy::standard(attempts: 2, baseDelayMs: 0));
+
+        $stub = new class {
+            public function GetOrder(mixed $message, array $metadata = [], array $options = []): object
+            {
+                return new class($message) {
+                    public function __construct(private readonly mixed $message) {}
+
+                    public function wait(): array
+                    {
+                        return [$this->message, (object) ['code' => GrpcStatus::Ok->value]];
+                    }
+
+                    public function getMetadata(): array
+                    {
+                        return [];
+                    }
+
+                    public function getTrailingMetadata(): array
+                    {
+                        return [];
+                    }
+                };
+            }
+        };
+
+        $this->generatedClient = GrpcClient::usingGeneratedStub(
+            $stub,
+            ['/orders.v1.OrderService/GetOrder' => 'GetOrder'],
+        );
+
         $this->dispatcher = new GrpcInboundDispatcher([
             '/orders.v1.OrderService/GetOrder' => static fn(GrpcInboundRequest $request): GrpcInboundResponse =>
                 GrpcInboundResponse::ok($request->message),
@@ -49,6 +87,22 @@ final class GrpcBench
             '/orders.v1.OrderService/GetOrder',
             ['id' => 'order-1'],
         );
+    }
+
+    #[Iterations(5)]
+    #[Revs(500)]
+    public function benchGeneratedStubInvocation(): void
+    {
+        $this->generatedClient->send($this->request);
+    }
+
+    #[Iterations(5)]
+    #[Revs(1000)]
+    public function benchHostAcceptedExchangeBridge(): void
+    {
+        $source = new FakeGrpcInboundSource();
+        $source->enqueue($this->inboundRequest);
+        $this->dispatcher->serveOne($source);
     }
 
     #[Iterations(5)]
@@ -68,6 +122,13 @@ final class GrpcBench
             new GrpcMetadata(['x-request-id' => ['bench-1']]),
             1.5,
         );
+    }
+
+    #[Iterations(5)]
+    #[Revs(1000)]
+    public function benchRetryMiddlewareSuccessPath(): void
+    {
+        $this->retryClient->send($this->request);
     }
 
     #[Iterations(5)]

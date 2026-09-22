@@ -107,7 +107,7 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
             'path' => $originalPath,
             'original_path' => $originalPath,
             'processing_path' => $processingPath,
-            'consumed_at' => $consume ? gmdate(DATE_ATOM) : null,
+            'consumed_at' => $consume ? gmdate(DATE_ATOM, (int) floor($this->clock->timestamp())) : null,
             'size_bytes' => filesize($processingPath) ?: 0,
         ];
     }
@@ -151,7 +151,7 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
         }
 
         $extension = ltrim($this->config->extension, '.');
-        $now = time();
+        $now = (int) floor($this->clock->timestamp());
         $candidate = null;
         foreach (new FilesystemIterator($directory, FilesystemIterator::SKIP_DOTS) as $entry) {
             if (!$entry instanceof SplFileInfo) {
