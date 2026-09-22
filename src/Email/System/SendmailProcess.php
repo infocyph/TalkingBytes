@@ -22,21 +22,6 @@ final class SendmailProcess
 
     private const int TERMINATION_GRACE_MS = 100;
 
-    private readonly ?CancellationSignal $cancellation;
-
-    private readonly Clock $clock;
-
-    private readonly float $deadline;
-
-    private readonly ?int $processGroupId;
-
-    private readonly Sleeper $sleeper;
-
-    private readonly int $timeoutSeconds;
-
-    /** @var array<int, resource|null> */
-    private array $pipes;
-
     /** @var resource|null */
     private mixed $process;
 
@@ -50,22 +35,15 @@ final class SendmailProcess
      */
     private function __construct(
         mixed $process,
-        array $pipes,
-        float $deadline,
-        int $timeoutSeconds,
-        Clock $clock,
-        Sleeper $sleeper,
-        ?CancellationSignal $cancellation,
-        ?int $processGroupId,
+        private array $pipes,
+        private readonly float $deadline,
+        private readonly int $timeoutSeconds,
+        private readonly Clock $clock,
+        private readonly Sleeper $sleeper,
+        private readonly ?CancellationSignal $cancellation,
+        private readonly ?int $processGroupId,
     ) {
-        $this->cancellation = $cancellation;
-        $this->clock = $clock;
-        $this->deadline = $deadline;
-        $this->pipes = $pipes;
         $this->process = $process;
-        $this->processGroupId = $processGroupId;
-        $this->sleeper = $sleeper;
-        $this->timeoutSeconds = $timeoutSeconds;
     }
 
     public function __destruct()
@@ -128,12 +106,13 @@ final class SendmailProcess
             return;
         }
 
-        $status = proc_get_status($this->process);
+        $process = $this->process;
+        $status = proc_get_status($process);
         if ($status['running']) {
             $this->terminate();
         }
 
-        proc_close($this->process);
+        proc_close($process);
         $this->process = null;
     }
 
@@ -352,7 +331,8 @@ final class SendmailProcess
             return;
         }
 
-        $status = proc_get_status($this->process);
+        $process = $this->process;
+        $status = proc_get_status($process);
         if (!$status['running']) {
             return;
         }
@@ -360,7 +340,7 @@ final class SendmailProcess
         $this->signal(self::GRACEFUL_SIGNAL);
         $this->sleeper->milliseconds(self::TERMINATION_GRACE_MS);
 
-        $status = proc_get_status($this->process);
+        $status = proc_get_status($process);
         if ($status['running']) {
             $this->signal(self::FORCE_SIGNAL);
         }
