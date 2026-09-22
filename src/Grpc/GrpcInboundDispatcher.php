@@ -121,6 +121,21 @@ final class GrpcInboundDispatcher
         return $this->completeAcceptedExchange($exchange, $cancellation);
     }
 
+    /**
+     * @param callable(GrpcInboundRequest):GrpcInboundResponse|GrpcInboundHandlerInterface $handler
+     */
+    public function withHandler(string $method, callable|GrpcInboundHandlerInterface $handler): self
+    {
+        $method = GrpcMethodGuard::normalize($method);
+
+        $handlers = $this->handlers;
+        $handlers[$method] = $handler instanceof GrpcInboundHandlerInterface
+            ? $handler->handle(...)
+            : Closure::fromCallable($handler);
+
+        return new self($handlers, $this->events, $this->clock);
+    }
+
     private function completeAcceptedExchange(
         GrpcInboundExchange $exchange,
         ?CancellationSignal $cancellation,
@@ -136,18 +151,4 @@ final class GrpcInboundDispatcher
         return true;
     }
 
-    /**
-     * @param callable(GrpcInboundRequest):GrpcInboundResponse|GrpcInboundHandlerInterface $handler
-     */
-    public function withHandler(string $method, callable|GrpcInboundHandlerInterface $handler): self
-    {
-        $method = GrpcMethodGuard::normalize($method);
-
-        $handlers = $this->handlers;
-        $handlers[$method] = $handler instanceof GrpcInboundHandlerInterface
-            ? $handler->handle(...)
-            : Closure::fromCallable($handler);
-
-        return new self($handlers, $this->events, $this->clock);
-    }
 }
