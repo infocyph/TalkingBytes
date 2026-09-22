@@ -49,8 +49,8 @@ final class GrpcBench
             {
                 unset($metadata, $options);
 
-                return new class($message) {
-                    public function __construct(private readonly mixed $message) {}
+                $call = new class {
+                    public mixed $message = null;
 
                     public function wait(): array
                     {
@@ -67,6 +67,9 @@ final class GrpcBench
                         return [];
                     }
                 };
+                $call->message = $message;
+
+                return $call;
             }
         };
 
