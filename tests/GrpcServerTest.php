@@ -149,6 +149,8 @@ it('completes an already accepted grpc exchange as cancelled when host cancellat
 
         public function accept(?CancellationSignal $cancellation = null): ?GrpcInboundExchange
         {
+            unset($cancellation);
+
             return $this->exchange;
         }
     };

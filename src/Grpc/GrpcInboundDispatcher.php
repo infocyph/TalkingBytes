@@ -9,6 +9,7 @@ use Infocyph\TalkingBytes\Core\Event\BestEffortEventDispatcher;
 use Infocyph\TalkingBytes\Core\Event\EventDispatcher;
 use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
 use Infocyph\TalkingBytes\Core\Support\Clock;
+use Infocyph\TalkingBytes\Grpc\Receiver\GrpcInboundExchange;
 use Infocyph\TalkingBytes\Grpc\Receiver\GrpcInboundHandlerInterface;
 use Infocyph\TalkingBytes\Grpc\Receiver\GrpcInboundRequest;
 use Infocyph\TalkingBytes\Grpc\Receiver\GrpcInboundResponse;
@@ -117,6 +118,13 @@ final class GrpcInboundDispatcher
             return false;
         }
 
+        return $this->completeAcceptedExchange($exchange, $cancellation);
+    }
+
+    private function completeAcceptedExchange(
+        GrpcInboundExchange $exchange,
+        ?CancellationSignal $cancellation,
+    ): bool {
         if ($cancellation?->isRequested() === true) {
             $exchange->complete(GrpcInboundResponse::cancelled());
 

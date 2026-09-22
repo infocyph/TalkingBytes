@@ -11,16 +11,11 @@ use LogicException;
 
 final class FakeGrpcInboundExchange implements GrpcInboundExchange
 {
-    private readonly GrpcInboundRequest $inboundRequest;
-
     private bool $completed = false;
 
     private ?GrpcInboundResponse $response = null;
 
-    public function __construct(GrpcInboundRequest $request)
-    {
-        $this->inboundRequest = $request;
-    }
+    public function __construct(private readonly GrpcInboundRequest $inboundRequest) {}
 
     public function complete(GrpcInboundResponse $response): void
     {
