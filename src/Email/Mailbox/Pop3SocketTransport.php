@@ -17,6 +17,12 @@ use Infocyph\TalkingBytes\Email\Exception\MailboxProtocolException;
 
 final class Pop3SocketTransport implements Pop3Transport
 {
+    private readonly Clock $clock;
+
+    private readonly EventDispatcher $events;
+
+    private readonly Sleeper $sleeper;
+
     /**
      * @var list<string>
      */
@@ -26,12 +32,6 @@ final class Pop3SocketTransport implements Pop3Transport
      * @var resource|null
      */
     private mixed $connection = null;
-
-    private readonly Clock $clock;
-
-    private readonly EventDispatcher $events;
-
-    private readonly Sleeper $sleeper;
 
     public function __construct(
         private readonly Pop3Config $config,

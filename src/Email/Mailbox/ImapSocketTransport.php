@@ -17,6 +17,12 @@ use Infocyph\TalkingBytes\Email\Exception\MailboxProtocolException;
 
 final class ImapSocketTransport implements BodyStructureMailboxTransport, EnvelopeSummaryMailboxTransport, MailboxTransport, RawHeadersMailboxTransport, RawPartMailboxTransport, WatchableMailboxTransport
 {
+    private readonly Clock $clock;
+
+    private readonly EventDispatcher $events;
+
+    private readonly Sleeper $sleeper;
+
     /**
      * @var list<string>
      */
@@ -30,12 +36,6 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
     private ?string $selectedFolder = null;
 
     private int $tagCounter = 1;
-
-    private readonly Clock $clock;
-
-    private readonly EventDispatcher $events;
-
-    private readonly Sleeper $sleeper;
 
     public function __construct(
         private readonly ImapConfig $config,

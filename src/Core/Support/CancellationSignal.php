@@ -27,6 +27,7 @@ final readonly class CancellationSignal
         return new self(static fn(): bool => false);
     }
 
+    /** @phpstan-impure */
     public function isRequested(): bool
     {
         return (bool) ($this->requested)();

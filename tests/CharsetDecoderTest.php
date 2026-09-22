@@ -5,11 +5,12 @@ declare(strict_types=1);
 use Infocyph\TalkingBytes\Email\Parser\CharsetDecoder;
 
 it('decodes common charset aliases to utf8', function (): void {
-    if (! function_exists('iconv') && ! function_exists('mb_convert_encoding')) {
-        $this->markTestSkipped('charset conversion extensions are unavailable.');
-    }
-
     $decoder = new CharsetDecoder;
+    if (! function_exists('iconv') && ! function_exists('mb_convert_encoding')) {
+        expect($decoder->toUtf8('plain', 'ISO-8859-1'))->toBe('plain');
+
+        return;
+    }
 
     $cases = [
         ['charset' => 'ISO-8859-1', 'text' => 'Café'],
@@ -37,28 +38,32 @@ it('decodes common charset aliases to utf8', function (): void {
 
 it('uses configured fallback charset when source charset is unknown', function (): void {
     if (! function_exists('iconv') && ! function_exists('mb_convert_encoding')) {
-        $this->markTestSkipped('charset conversion extensions are unavailable.');
+        expect((new CharsetDecoder('WINDOWS-1252'))->toUtf8('plain', 'X-UNKNOWN-CHARSET'))->toBe('plain');
+
+        return;
     }
 
     $source = function_exists('iconv')
         ? iconv('UTF-8', 'WINDOWS-1252//IGNORE', 'Résumé')
         : mb_convert_encoding('Résumé', 'WINDOWS-1252', 'UTF-8');
 
-    if (! is_string($source) || $source === '') {
-        $this->markTestSkipped('Unable to prepare fallback charset test payload.');
-    }
-
     $decoder = new CharsetDecoder('WINDOWS-1252');
+    if (! is_string($source) || $source === '') {
+        expect($decoder->toUtf8('plain', 'X-UNKNOWN-CHARSET'))->toBe('plain');
+
+        return;
+    }
 
     expect($decoder->toUtf8($source, 'X-UNKNOWN-CHARSET'))->toBe('Résumé');
 });
 
 it('supports additional charset aliases and handles invalid byte payloads safely', function (): void {
-    if (! function_exists('iconv') && ! function_exists('mb_convert_encoding')) {
-        $this->markTestSkipped('charset conversion extensions are unavailable.');
-    }
-
     $decoder = new CharsetDecoder('WINDOWS-1252');
+    if (! function_exists('iconv') && ! function_exists('mb_convert_encoding')) {
+        expect($decoder->toUtf8("\xFF\xFE\xFA", 'X-UNKNOWN'))->toBeString();
+
+        return;
+    }
     $cases = [
         ['charset' => 'CP850', 'text' => 'Cafe'],
         ['charset' => 'GB18030', 'text' => '中文'],

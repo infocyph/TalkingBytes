@@ -27,6 +27,7 @@ final class RetryExecutor
             if ($cancellation?->isRequested() === true) {
                 return self::cancelled($count - 1);
             }
+
             try {
                 $result = $attempt();
             } catch (Throwable $throwable) {

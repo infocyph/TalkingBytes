@@ -2,8 +2,8 @@
 
 declare(strict_types=1);
 
+use Infocyph\TalkingBytes\Core\Event\CallableEventDispatcher;
 use Infocyph\TalkingBytes\Email\Config\ImapConfig;
-use Infocyph\TalkingBytes\Email\Email;
 use Infocyph\TalkingBytes\Email\Enum\ImapSecurity;
 use Infocyph\TalkingBytes\Email\Exception\MailboxConnectionException;
 use Infocyph\TalkingBytes\Email\Exception\MailboxProtocolException;
@@ -677,7 +677,7 @@ it('fetches summary over IMAP ENVELOPE command path', function (): void {
 
 it('redacts IMAP LOGIN password in mailbox command events', function (): void {
     $events = [];
-    Email::events(static function (string $event, array $payload) use (&$events): void {
+    $dispatcher = new CallableEventDispatcher(static function (string $event, array $payload) use (&$events): void {
         if (str_starts_with($event, 'mailbox.command.')) {
             $events[] = $payload;
         }
@@ -692,18 +692,20 @@ it('redacts IMAP LOGIN password in mailbox command events', function (): void {
         ],
     ]);
 
-    $mailbox = Mailbox::usingImap(new ImapConfig(
-        host: '127.0.0.1',
-        port: $server->port,
-        security: ImapSecurity::None,
-        username: 'user',
-        password: 'pass',
-    ));
+    $mailbox = Mailbox::usingImap(
+        new ImapConfig(
+            host: '127.0.0.1',
+            port: $server->port,
+            security: ImapSecurity::None,
+            username: 'user',
+            password: 'pass',
+        ),
+        events: $dispatcher,
+    );
 
     $mailbox->folders();
     $mailbox->transport()->logout();
     $server->stop();
-    Email::events(null);
 
     expect(array_any(
         $events,

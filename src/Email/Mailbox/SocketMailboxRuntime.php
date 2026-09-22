@@ -139,8 +139,7 @@ final class SocketMailboxRuntime
 
             throw new MailboxConnectionException(sprintf('Failed to read from %s socket.', strtoupper($protocol)));
         }
-        if (!str_ends_with($line, "
-") && !feof($connection)) {
+        if (!str_ends_with($line, "\n") && !feof($connection)) {
             throw new MailboxConnectionException(sprintf(
                 '%s response line exceeds %d bytes.',
                 strtoupper($protocol),
