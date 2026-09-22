@@ -12,7 +12,7 @@ Baseline:
 - baseline commit: 86d0e9dde8124ddeacea8ba7f81911af584b879b
 - current implementation head through Batch 3: 908dc992e1b9b430fb084b2c283c5217fcc9f8b9
 - primary consumer: Foundation 3 runtime plan point 26.9
-- plan state: **ACTIVE — BATCHES 1–4 GREEN / BATCH 5 NEXT**
+- plan state: **ACTIVE — BATCHES 1–5 GREEN / BATCH 6 NEXT**
 
 Batch progress:
 
@@ -20,7 +20,7 @@ Batch progress:
 - [x] Batch 2 — gRPC security and host boundary
 - [x] Batch 3 — email runtime and sendmail process hardening
 - [x] Batch 4 — native protocol composition builders
-- [ ] Batch 5 — webhook replay acceptance
+- [x] Batch 5 — webhook replay acceptance
 - [ ] Batch 6 — HTTP rolling multi scheduler
 - [ ] Batch 7 — gRPC generated adapter determinism
 - [ ] Batch 8 — observability and data minimization
@@ -420,18 +420,18 @@ Replay protection remains protocol-owned and storage-provider-neutral.
 
 ### Tasks
 
-- [ ] Keep WebhookReplayStore minimal.
-- [ ] Document that production claim must be atomic across competing processes.
-- [ ] Document backend errors as fail-closed.
-- [ ] Add a contention contract test where only one contender wins.
-- [ ] Add a throwing-store test proving replay protection is not bypassed.
-- [ ] Preserve strict positive TTL validation.
-- [ ] Preserve bounded namespace/delivery-ID validation.
-- [ ] Preserve signature/timestamp verification before replay claim.
-- [ ] Preserve replay claim before a verified event is returned.
-- [ ] Mark InMemoryWebhookReplayStore clearly as single-process/test/local-use unless its guarantees are sufficient for the documented deployment.
-- [ ] Ensure replay observability never exposes raw secret/signature/body.
-- [ ] Do not add CacheLayer.
+- [x] Keep WebhookReplayStore minimal.
+- [x] Document that production claim must be atomic across competing processes.
+- [x] Document backend errors as fail-closed.
+- [x] Add a contention contract test where only one contender wins.
+- [x] Add a throwing-store test proving replay protection is not bypassed.
+- [x] Preserve strict positive TTL validation.
+- [x] Preserve bounded namespace/delivery-ID validation.
+- [x] Preserve signature/timestamp verification before replay claim.
+- [x] Preserve replay claim before a verified event is returned.
+- [x] Mark InMemoryWebhookReplayStore clearly as single-process/test/local-use unless its guarantees are sufficient for the documented deployment.
+- [x] Ensure replay observability never exposes raw secret/signature/body.
+- [x] Do not add CacheLayer.
 
 ### Foundation handoff
 
@@ -917,13 +917,13 @@ This is a planning map, not a requirement to modify every file.
 - webhook resolved-policy composition;
 - tests proving Foundation no longer needs to recreate protocol mechanics.
 
-### Batch 5 — Webhook replay acceptance ⏳
+### Batch 5 — Webhook replay acceptance ✅
 
 - atomic/fail-closed contract;
 - contention/error tests;
 - preserve provider neutrality.
 
-### Batch 6 — HTTP rolling multi scheduler
+### Batch 6 — HTTP rolling multi scheduler ⏳
 
 - rolling window;
 - stop-scheduling behavior;
