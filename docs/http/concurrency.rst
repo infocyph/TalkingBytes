@@ -32,7 +32,20 @@ Behavior
 --------
 
 - user-defined keys are preserved
-- max concurrency is enforced
+- max concurrency is enforced with a rolling window rather than fixed chunks
+- when one active handle completes, the next pending request is admitted immediately
 - per-request configuration is respected
-- fail-fast mode is supported via request-pool options
-- cleanup runs for active handles on early stop/error paths
+- ``stopSchedulingOnFailure()`` stops only new admissions after a failure is observed; already-active requests are allowed to finish
+- active requests are not described as fail-fast unless explicit cancellation is supplied
+- cleanup runs for active handles on completion, cancellation, scheduler error, and early stop paths
+- pool duration uses the monotonic clock
+
+Cancellation
+------------
+
+Pass a ``CancellationSignal`` to ``HttpClient::multi(..., cancellation: $signal)``
+or use ``RequestPool::withCancellation()``.
+
+When cancellation is observed, the pool stops admitting requests, removes active
+cURL handles, aborts partial streamed-download temp files, and returns
+deterministic cancelled results for active and not-yet-started requests.

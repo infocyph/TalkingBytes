@@ -102,9 +102,16 @@ final readonly class HttpClient
         return new HttpClientFactory($events, $cancellation)->fromArray($config, $transport);
     }
 
-    public static function multi(int $maxConcurrency = 10, ?EventDispatcher $events = null): Concurrent\RequestPool
-    {
-        return new Concurrent\RequestPool(new Concurrent\CurlMultiTransport(events: $events), $maxConcurrency);
+    public static function multi(
+        int $maxConcurrency = 10,
+        ?EventDispatcher $events = null,
+        ?CancellationSignal $cancellation = null,
+    ): Concurrent\RequestPool {
+        return new Concurrent\RequestPool(
+            new Concurrent\CurlMultiTransport(events: $events),
+            $maxConcurrency,
+            cancellation: $cancellation,
+        );
     }
 
     public static function multipart(): MultipartBody

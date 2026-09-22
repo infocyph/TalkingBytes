@@ -33,6 +33,21 @@ final class ResponseBodyCollector
         $this->tempPath = null;
     }
 
+    public function abort(): void
+    {
+        if ($this->finalized) {
+            return;
+        }
+
+        $this->finalized = true;
+        if (is_resource($this->stream)) {
+            fclose($this->stream);
+        }
+
+        $this->stream = null;
+        $this->cleanupTempFile();
+    }
+
     public function collect(string $chunk): int
     {
         if ($this->finalized) {

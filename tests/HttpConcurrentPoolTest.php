@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
+use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
 use Infocyph\TalkingBytes\Http\Concurrent\CurlMultiTransport;
 use Infocyph\TalkingBytes\Http\Concurrent\PoolResult;
 use Infocyph\TalkingBytes\Http\HttpClient;
@@ -71,4 +72,40 @@ it('uses the same request configuration path in single and multi transports', fu
     expect($multiResult?->successful)->toBeFalse();
     expect($singleResult->error)->toContain('cannot combine uploadFromFile/uploadFromStream');
     expect($multiResult?->error)->toContain('cannot combine uploadFromFile/uploadFromStream');
+});
+
+
+it('stops admitting new requests immediately after a preparation failure', function (): void {
+    $pool = HttpClient::multi(maxConcurrency: 3)->stopSchedulingOnFailure();
+
+    $result = $pool->sendMany([
+        'first' => HttpRequest::get('https://example.com/first')->blockHosts(['example.com']),
+        'second' => HttpRequest::get('https://example.com/second')->blockHosts(['example.com']),
+        'third' => HttpRequest::get('https://example.com/third')->blockHosts(['example.com']),
+    ]);
+
+    expect(array_keys($result->all()))->toBe(['first']);
+    expect($result->metadata['stopped_scheduling'] ?? null)->toBeTrue();
+    expect($result->metadata['cancelled'] ?? null)->toBeFalse();
+});
+
+it('returns deterministic cancelled results before pool scheduling starts', function (): void {
+    $pool = HttpClient::multi(maxConcurrency: 2)
+        ->withCancellation(CancellationSignal::fromCallable(static fn(): bool => true));
+
+    $result = $pool->sendMany([
+        'first' => HttpRequest::get('https://example.com/first'),
+        'second' => HttpRequest::get('https://example.com/second'),
+        'third' => HttpRequest::get('https://example.com/third'),
+    ]);
+
+    expect(array_keys($result->all()))->toBe(['first', 'second', 'third']);
+    expect($result->metadata['stopped_scheduling'] ?? null)->toBeTrue();
+    expect($result->metadata['cancelled'] ?? null)->toBeTrue();
+
+    foreach ($result->all() as $cancelled) {
+        expect($cancelled->successful)->toBeFalse();
+        expect($cancelled->metadata['cancelled'] ?? null)->toBeTrue();
+        expect($cancelled->metadata['started'] ?? null)->toBeFalse();
+    }
 });
