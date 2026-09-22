@@ -10,9 +10,9 @@ Baseline:
 - implementation baseline branch: main
 - released baseline: 2.0.0
 - baseline commit: 86d0e9dde8124ddeacea8ba7f81911af584b879b
-- current implementation head through Batch 6: 79db70c184243fe1547bb207d3bfbe81f0788afe
+- current implementation head through Batch 7: d61b0286a8a8661d4896d81eb3cfc0c553758440
 - primary consumer: Foundation 3 runtime plan point 26.9
-- plan state: **ACTIVE — BATCHES 1–6 GREEN / BATCH 7 NEXT**
+- plan state: **ACTIVE — BATCHES 1–7 GREEN / BATCH 8 NEXT**
 
 Batch progress:
 
@@ -22,7 +22,7 @@ Batch progress:
 - [x] Batch 4 — native protocol composition builders
 - [x] Batch 5 — webhook replay acceptance
 - [x] Batch 6 — HTTP rolling multi scheduler
-- [ ] Batch 7 — gRPC generated adapter determinism
+- [x] Batch 7 — gRPC generated adapter determinism
 - [ ] Batch 8 — observability and data minimization
 - [ ] Batch 9 — optional cold graphs, docs and benchmarks
 - [ ] Batch 10 — exact-head release gate
@@ -364,7 +364,7 @@ Do not create a general task framework.
 - [x] Allow HTTP retry and gRPC retry to stop before sleeping/retrying when cancelled.
 - [ ] Allow WebhookSender retry to stop cooperatively.
 - [x] Allow mailbox watch loops to consume the same cancellation abstraction while retaining callable compatibility where practical.
-- [ ] Allow generated/native gRPC streaming loops to check cancellation between messages/writes/reads where the native API permits.
+- [x] Allow generated/native gRPC streaming loops to check cancellation between messages/writes/reads where the native API permits.
 - [x] Allow the inbound gRPC accepted-call bridge to stop before accepting the next exchange.
 - [x] Allow CurlMultiTransport to stop scheduling and terminate/close active work safely when host cancellation is requested, if libcurl semantics permit deterministic cleanup.
 - [ ] Add deterministic fake-clock/fake-sleeper/cancellation tests.
@@ -633,17 +633,17 @@ Do not add pcntl_fork, pthreads, parallel, ReactPHP or Amp merely for this sched
 
 ### Tasks
 
-- [ ] Remove exception-driven TypeError probing for generated streaming call shape.
-- [ ] Resolve the supported generated-stub call shape before executing the real call.
-- [ ] Prefer explicit adapter metadata/callable strategy or bounded reflection cached at adapter construction.
-- [ ] Never retry an invocation merely because a TypeError was thrown from inside the invoked method.
-- [ ] Validate method maps early.
-- [ ] Keep generated/native package capability checks cold.
-- [ ] Add cancellation checks between outbound stream writes and inbound reads where possible.
-- [ ] Preserve incremental streaming; never accumulate full streams.
-- [ ] Ensure callback exceptions close/finalize native call resources deterministically.
-- [ ] Add tests proving no duplicate side effect occurs during call-shape resolution.
-- [ ] Add tests for cancellation, callback failure and final status/trailer handling.
+- [x] Remove exception-driven TypeError probing for generated streaming call shape.
+- [x] Resolve the supported generated-stub call shape before executing the real call.
+- [x] Prefer explicit adapter metadata/callable strategy or bounded reflection cached at adapter construction.
+- [x] Never retry an invocation merely because a TypeError was thrown from inside the invoked method.
+- [x] Validate method maps early.
+- [x] Keep generated/native package capability checks cold.
+- [x] Add cancellation checks between outbound stream writes and inbound reads where possible.
+- [x] Preserve incremental streaming; never accumulate full streams.
+- [x] Ensure callback exceptions close/finalize native call resources deterministically.
+- [x] Add tests proving no duplicate side effect occurs during call-shape resolution.
+- [x] Add tests for cancellation, callback failure and final status/trailer handling.
 
 ---
 
@@ -759,7 +759,7 @@ Foundation owns bridge attribution.
 - [x] Update HTTP concurrency docs for rolling scheduling and cancellation semantics.
 - [ ] Update webhook replay docs with atomic/fail-closed requirements.
 - [x] Update gRPC inbound docs for the host-runtime bridge and wire-error data minimization.
-- [ ] Update gRPC generated/native docs for deterministic adapter behavior.
+- [x] Update gRPC generated/native docs for deterministic adapter behavior.
 - [x] Update email docs for persistent-worker connection ownership.
 - [x] Update sendmail docs for timeout/cancellation/POSIX optional behavior.
 - [ ] Update security docs with secret/PII redaction guarantees.
@@ -930,7 +930,7 @@ This is a planning map, not a requirement to modify every file.
 - cancellation/cleanup;
 - throughput benchmark.
 
-### Batch 7 — gRPC generated adapter determinism ⏳
+### Batch 7 — gRPC generated adapter determinism ✅
 
 - remove TypeError execution probing;
 - deterministic call-shape resolution;
