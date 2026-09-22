@@ -2,8 +2,8 @@
 
 declare(strict_types=1);
 
+use Infocyph\TalkingBytes\Core\Event\CallableEventDispatcher;
 use Infocyph\TalkingBytes\Email\Enum\BounceType;
-use Infocyph\TalkingBytes\Core\Event\CommunicationEventBus as EmailEventBus;
 use Infocyph\TalkingBytes\Email\Parser\BounceParser;
 use Infocyph\TalkingBytes\Email\Parser\DeliveryStatusParser;
 use Infocyph\TalkingBytes\Email\Parser\RawEmailParser;
@@ -82,10 +82,6 @@ it('returns null for non-bounce emails', function (): void {
 
 it('dispatches bounce.detected event when bounce is parsed', function (): void {
     $events = [];
-    EmailEventBus::listen(static function (string $event, array $payload) use (&$events): void {
-        $events[] = ['event' => $event, 'payload' => $payload];
-    });
-
     $raw = implode("\r\n", [
         'From: postmaster@example.com',
         'To: sender@example.com',
@@ -96,7 +92,10 @@ it('dispatches bounce.detected event when bounce is parsed', function (): void {
     ]);
 
     $email = (new RawEmailParser)->parse($raw);
-    $report = (new BounceParser)->parse($email);
+    $dispatcher = new CallableEventDispatcher(static function (string $event, array $payload) use (&$events): void {
+        $events[] = ['event' => $event, 'payload' => $payload];
+    });
+    $report = (new BounceParser(events: $dispatcher))->parse($email);
 
     expect($report)->not->toBeNull();
     expect($events)->not->toBeEmpty();

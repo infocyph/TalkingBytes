@@ -4,6 +4,11 @@ declare(strict_types=1);
 
 namespace Infocyph\TalkingBytes\Email\Mailbox;
 
+use Infocyph\TalkingBytes\Core\Event\BestEffortEventDispatcher;
+use Infocyph\TalkingBytes\Core\Event\EventDispatcher;
+use Infocyph\TalkingBytes\Core\Event\NullEventDispatcher;
+use Infocyph\TalkingBytes\Core\Support\Clock;
+use Infocyph\TalkingBytes\Core\Support\Sleeper;
 use Infocyph\TalkingBytes\Email\Config\Pop3Config;
 use Infocyph\TalkingBytes\Email\Enum\Pop3Security;
 use Infocyph\TalkingBytes\Email\Exception\MailboxAuthenticationException;
@@ -12,6 +17,12 @@ use Infocyph\TalkingBytes\Email\Exception\MailboxProtocolException;
 
 final class Pop3SocketTransport implements Pop3Transport
 {
+    private readonly Clock $clock;
+
+    private readonly EventDispatcher $events;
+
+    private readonly Sleeper $sleeper;
+
     /**
      * @var list<string>
      */
@@ -22,7 +33,16 @@ final class Pop3SocketTransport implements Pop3Transport
      */
     private mixed $connection = null;
 
-    public function __construct(private readonly Pop3Config $config) {}
+    public function __construct(
+        private readonly Pop3Config $config,
+        ?EventDispatcher $events = null,
+        ?Clock $clock = null,
+        ?Sleeper $sleeper = null,
+    ) {
+        $this->events = new BestEffortEventDispatcher($events ?? new NullEventDispatcher());
+        $this->clock = $clock ?? Clock::system();
+        $this->sleeper = $sleeper ?? Sleeper::system();
+    }
 
     public function __destruct()
     {
@@ -52,14 +72,20 @@ final class Pop3SocketTransport implements Pop3Transport
             $this->config->security === Pop3Security::Ssl,
         );
 
-        $greeting = $this->readLine();
-        if (!$this->isOkResponse($greeting)) {
-            throw new MailboxProtocolException(sprintf('Unexpected POP3 greeting: %s', trim($greeting)));
-        }
+        try {
+            $greeting = $this->readLine();
+            if (!$this->isOkResponse($greeting)) {
+                throw new MailboxProtocolException(sprintf('Unexpected POP3 greeting: %s', trim($greeting)));
+            }
 
-        $this->refreshCapabilities();
-        $this->negotiateStartTls();
-        $this->login();
+            $this->refreshCapabilities();
+            $this->negotiateStartTls();
+            $this->login();
+        } catch (\Throwable $exception) {
+            $this->closeConnection();
+
+            throw $exception;
+        }
     }
 
     public function delete(int $messageNumber): void
@@ -211,12 +237,12 @@ final class Pop3SocketTransport implements Pop3Transport
     public function watch(callable $onEvent, int $timeoutSeconds = 30, ?callable $shouldStop = null): void
     {
         $stop = $shouldStop ?? static fn(): bool => false;
-        $deadline = time() + max(1, $timeoutSeconds);
+        $deadline = $this->clock->monotonic() + max(1, $timeoutSeconds);
 
-        while (time() < $deadline && !$stop()) {
+        while ($this->clock->monotonic() < $deadline && !$stop()) {
             $status = $this->status();
             $onEvent(sprintf('+OK %d messages', $status->messages));
-            usleep(250000);
+            $this->sleeper->milliseconds(250);
         }
     }
 
@@ -300,10 +326,10 @@ final class Pop3SocketTransport implements Pop3Transport
     {
         $lines = [];
         $bytes = 0;
-        $deadline = microtime(true) + $this->config->timeoutSeconds;
+        $deadline = $this->clock->monotonic() + $this->config->timeoutSeconds;
 
         while (true) {
-            if (microtime(true) >= $deadline) {
+            if ($this->clock->monotonic() >= $deadline) {
                 throw new MailboxConnectionException('POP3 command deadline exceeded.');
             }
             $line = $this->readLine();
@@ -372,7 +398,7 @@ final class Pop3SocketTransport implements Pop3Transport
         $start = SocketMailboxRuntime::dispatchStart('pop3', $command, [
             'host' => $this->config->host,
             'port' => $this->config->port,
-        ]);
+        ], $this->events, $this->clock);
         $this->write($command . "\r\n");
         $response = $this->readLine();
         SocketMailboxRuntime::dispatchFinish(
@@ -381,6 +407,8 @@ final class Pop3SocketTransport implements Pop3Transport
             trim($response),
             $start['duration_ms'],
             ['host' => $this->config->host, 'port' => $this->config->port],
+            $this->events,
+            $this->clock,
         );
 
         return $response;

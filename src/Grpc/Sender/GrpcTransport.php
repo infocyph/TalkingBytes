@@ -9,6 +9,8 @@ use Infocyph\TalkingBytes\Core\Event\BestEffortEventDispatcher;
 use Infocyph\TalkingBytes\Core\Event\EventDispatcher;
 use Infocyph\TalkingBytes\Core\Event\NullEventDispatcher;
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
+use Infocyph\TalkingBytes\Core\Support\Clock;
+use Infocyph\TalkingBytes\Core\Support\ObservabilitySanitizer;
 use Infocyph\TalkingBytes\Grpc\GrpcStatus;
 use Throwable;
 
@@ -19,20 +21,23 @@ final readonly class GrpcTransport
      */
     private Closure $caller;
 
+    private Clock $clock;
+
     private EventDispatcher $events;
 
     /**
      * @param callable(GrpcRequest): GrpcResponse $caller
      */
-    public function __construct(callable $caller, ?EventDispatcher $events = null)
+    public function __construct(callable $caller, ?EventDispatcher $events = null, ?Clock $clock = null)
     {
         $this->caller = Closure::fromCallable($caller);
         $this->events = new BestEffortEventDispatcher($events ?? new NullEventDispatcher());
+        $this->clock = $clock ?? Clock::system();
     }
 
     public function send(GrpcRequest $grpcRequest): CommunicationResult
     {
-        $startedAt = microtime(true);
+        $startedAt = $this->clock->monotonic();
         $this->events->dispatch('grpc.request.start', [
             'transport' => 'grpc',
             'method' => $grpcRequest->method,
@@ -43,12 +48,12 @@ final readonly class GrpcTransport
         try {
             $response = ($this->caller)($grpcRequest);
         } catch (Throwable $exception) {
-            $durationMs = (int) ((microtime(true) - $startedAt) * 1000);
+            $durationMs = (int) (($this->clock->monotonic() - $startedAt) * 1000);
             $this->events->dispatch('grpc.request.failed', [
                 'transport' => 'grpc',
                 'method' => $grpcRequest->method,
                 'duration_ms' => $durationMs,
-                'error' => $exception->getMessage(),
+                ...ObservabilitySanitizer::throwableContext($exception),
             ]);
 
             $error = new GrpcCallError(
@@ -75,7 +80,7 @@ final readonly class GrpcTransport
             );
         }
 
-        $durationMs = (int) ((microtime(true) - $startedAt) * 1000);
+        $durationMs = (int) (($this->clock->monotonic() - $startedAt) * 1000);
         if (!$response->isOk()) {
             $this->events->dispatch('grpc.request.failed', [
                 'transport' => 'grpc',

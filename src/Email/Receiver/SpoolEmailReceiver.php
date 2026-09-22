@@ -5,7 +5,10 @@ declare(strict_types=1);
 namespace Infocyph\TalkingBytes\Email\Receiver;
 
 use FilesystemIterator;
-use Infocyph\TalkingBytes\Core\Event\CommunicationEventBus;
+use Infocyph\TalkingBytes\Core\Event\BestEffortEventDispatcher;
+use Infocyph\TalkingBytes\Core\Event\EventDispatcher;
+use Infocyph\TalkingBytes\Core\Event\NullEventDispatcher;
+use Infocyph\TalkingBytes\Core\Support\Clock;
 use Infocyph\TalkingBytes\Email\Config\SpoolConfig;
 use Infocyph\TalkingBytes\Email\Parser\EmailParser;
 use Infocyph\TalkingBytes\Email\Parser\RawEmailParser;
@@ -15,13 +18,21 @@ use SplFileInfo;
 
 final readonly class SpoolEmailReceiver implements EmailReceiver
 {
+    private Clock $clock;
+
+    private EventDispatcher $events;
+
     public function __construct(
         private SpoolConfig $config,
         private EmailParser $parser = new RawEmailParser(),
         private bool $deleteAfterRead = false,
         private ?string $moveAfterRead = null,
         private ?string $failedDirectory = null,
+        ?EventDispatcher $events = null,
+        ?Clock $clock = null,
     ) {
+        $this->events = new BestEffortEventDispatcher($events ?? new NullEventDispatcher());
+        $this->clock = $clock ?? Clock::system();
         $directories = array_filter([
             $this->config->directory,
             $this->config->processingDirectory,
@@ -96,7 +107,7 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
             'path' => $originalPath,
             'original_path' => $originalPath,
             'processing_path' => $processingPath,
-            'consumed_at' => $consume ? gmdate(DATE_ATOM) : null,
+            'consumed_at' => $consume ? gmdate(DATE_ATOM, (int) floor($this->clock->timestamp())) : null,
             'size_bytes' => filesize($processingPath) ?: 0,
         ];
     }
@@ -140,7 +151,7 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
         }
 
         $extension = ltrim($this->config->extension, '.');
-        $now = time();
+        $now = (int) floor($this->clock->timestamp());
         $candidate = null;
         foreach (new FilesystemIterator($directory, FilesystemIterator::SKIP_DOTS) as $entry) {
             if (!$entry instanceof SplFileInfo) {
@@ -255,10 +266,9 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
         }
 
         $processingFile = $sourceFile;
-        $startedAt = microtime(true);
-        CommunicationEventBus::dispatch('email.receive.start', [
+        $startedAt = $this->clock->monotonic();
+        $this->events->dispatch('email.receive.start', [
             'source' => 'spool',
-            'path' => $sourceFile,
             'consume' => $consume,
         ]);
 
@@ -267,12 +277,11 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
             $raw = $this->readFile($processingFile, $consume);
             if ($raw === false) {
                 $this->markFailed($processingFile, 'Unable to read spool file.');
-                CommunicationEventBus::dispatch('email.receive.finish', [
+                $this->events->dispatch('email.receive.finish', [
                     'source' => 'spool',
                     'successful' => false,
-                    'path' => $processingFile,
-                    'error' => 'Unable to read spool file.',
-                    'duration_ms' => (int) round((microtime(true) - $startedAt) * 1000),
+                    'failure_category' => 'read_failure',
+                    'duration_ms' => (int) round(($this->clock->monotonic() - $startedAt) * 1000),
                 ]);
 
                 return null;
@@ -281,17 +290,17 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
             $parsed = $this->parseFile($raw, $this->buildMetadata($sourceFile, $processingFile, $consume));
         } catch (\Throwable $exception) {
             $this->markFailed($processingFile, $exception->getMessage());
-            CommunicationEventBus::dispatch('email.parse.failed', [
+            $this->events->dispatch('email.parse.failed', [
                 'source' => 'spool',
-                'path' => $processingFile,
-                'error' => $exception->getMessage(),
+                'failure_category' => 'parse_failure',
+                'exception_class' => $exception::class,
             ]);
-            CommunicationEventBus::dispatch('email.receive.finish', [
+            $this->events->dispatch('email.receive.finish', [
                 'source' => 'spool',
                 'successful' => false,
-                'path' => $processingFile,
-                'error' => $exception->getMessage(),
-                'duration_ms' => (int) round((microtime(true) - $startedAt) * 1000),
+                'failure_category' => 'parse_failure',
+                'exception_class' => $exception::class,
+                'duration_ms' => (int) round(($this->clock->monotonic() - $startedAt) * 1000),
             ]);
 
             return null;
@@ -301,12 +310,10 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
             $this->finalizeRead($processingFile);
         }
 
-        CommunicationEventBus::dispatch('email.receive.finish', [
+        $this->events->dispatch('email.receive.finish', [
             'source' => 'spool',
             'successful' => true,
-            'path' => $processingFile,
-            'subject' => $parsed->subject,
-            'duration_ms' => (int) round((microtime(true) - $startedAt) * 1000),
+            'duration_ms' => (int) round(($this->clock->monotonic() - $startedAt) * 1000),
         ]);
 
         return $parsed;

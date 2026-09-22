@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
 use Infocyph\TalkingBytes\Email\Config\SendmailConfig;
 use Infocyph\TalkingBytes\Email\Config\SpoolConfig;
 use Infocyph\TalkingBytes\Email\EmailMessage;
@@ -19,6 +20,25 @@ it('captures sendmail stderr on non-zero exit', function (): void {
     expect($result->successful)->toBeFalse();
     expect($result->error)->toContain('Sendmail exited with code 7');
     expect($result->error)->toContain('simulated failure');
+});
+
+it('cancels a running sendmail process cooperatively', function (): void {
+    $script = createSendmailTestScript();
+    $checks = 0;
+    $cancellation = CancellationSignal::fromCallable(static function () use (&$checks): bool {
+        $checks++;
+
+        return $checks > 1;
+    });
+    $transport = new SendmailTransport(
+        new SendmailConfig($script, ['sleep', '5'], 10),
+        cancellation: $cancellation,
+    );
+
+    $result = $transport->send(testMessage());
+
+    expect($result->successful)->toBeFalse();
+    expect($result->error)->toContain('cancelled');
 });
 
 it('fails sendmail transport on timeout', function (): void {

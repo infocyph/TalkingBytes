@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace Infocyph\TalkingBytes\Email\Mailbox;
 
-use Infocyph\TalkingBytes\Core\Event\CommunicationEventBus;
+use Infocyph\TalkingBytes\Core\Event\EventDispatcher;
+use Infocyph\TalkingBytes\Core\Support\Clock;
 use Infocyph\TalkingBytes\Email\Exception\MailboxConnectionException;
+use Throwable;
 
 final class SocketMailboxRuntime
 {
@@ -60,14 +62,17 @@ final class SocketMailboxRuntime
         string $status,
         int $startedAtMs,
         array $endpoint,
+        ?EventDispatcher $events = null,
+        ?Clock $clock = null,
     ): void {
-        CommunicationEventBus::dispatch('mailbox.command.finish', [
+        $runtimeClock = $clock ?? Clock::system();
+        self::dispatch($events, 'mailbox.command.finish', [
             'protocol' => $protocol,
             'host' => $endpoint['host'],
             'port' => $endpoint['port'],
             'command' => $command,
             'status' => $status,
-            'duration_ms' => (int) round((microtime(true) * 1000) - $startedAtMs),
+            'duration_ms' => (int) round(($runtimeClock->monotonic() * 1000) - $startedAtMs),
         ]);
     }
 
@@ -75,10 +80,16 @@ final class SocketMailboxRuntime
      * @param array{host:string,port:int} $endpoint
      * @return array{command:string,duration_ms:int}
      */
-    public static function dispatchStart(string $protocol, string $command, array $endpoint): array
-    {
+    public static function dispatchStart(
+        string $protocol,
+        string $command,
+        array $endpoint,
+        ?EventDispatcher $events = null,
+        ?Clock $clock = null,
+    ): array {
         $redactedCommand = MailboxCommandRedactor::redact($protocol, $command);
-        CommunicationEventBus::dispatch('mailbox.command.start', [
+        $runtimeClock = $clock ?? Clock::system();
+        self::dispatch($events, 'mailbox.command.start', [
             'protocol' => $protocol,
             'host' => $endpoint['host'],
             'port' => $endpoint['port'],
@@ -87,7 +98,7 @@ final class SocketMailboxRuntime
 
         return [
             'command' => $redactedCommand,
-            'duration_ms' => (int) round(microtime(true) * 1000),
+            'duration_ms' => (int) round($runtimeClock->monotonic() * 1000),
         ];
     }
 
@@ -178,6 +189,20 @@ final class SocketMailboxRuntime
             }
 
             $remaining = substr($remaining, $written);
+        }
+    }
+
+    /** @param array<string, mixed> $payload */
+    private static function dispatch(?EventDispatcher $events, string $event, array $payload): void
+    {
+        if ($events === null) {
+            return;
+        }
+
+        try {
+            $events->dispatch($event, $payload);
+        } catch (Throwable) {
+            // Observability must never affect mailbox protocol outcomes.
         }
     }
 }

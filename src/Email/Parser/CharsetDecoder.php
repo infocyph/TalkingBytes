@@ -68,16 +68,12 @@ final readonly class CharsetDecoder
             return null;
         }
 
-        $previous = set_error_handler(static fn(): bool => true);
+        set_error_handler(static fn(): bool => true);
 
         try {
             $converted = iconv($charset, 'UTF-8//IGNORE', $value);
         } finally {
-            if ($previous !== null) {
-                set_error_handler($previous);
-            } else {
-                restore_error_handler();
-            }
+            restore_error_handler();
         }
 
         return is_string($converted) ? $converted : null;

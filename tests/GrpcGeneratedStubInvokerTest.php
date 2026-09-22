@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
 use Infocyph\TalkingBytes\Grpc\GrpcClient;
 use Infocyph\TalkingBytes\Grpc\GrpcMetadata;
 use Infocyph\TalkingBytes\Grpc\Sender\GrpcRequest;
@@ -177,6 +178,7 @@ it('adapts generated grpc stub unary and stream calls', function (): void {
     expect($unary->successful)->toBeTrue()
         ->and($unary->response)->toBeInstanceOf(GrpcResponse::class)
         ->and($unary->response->message['id'])->toBe(1001)
+        ->and($unary->response->trailers->first('x-trailer'))->toBe('create-end')
         ->and($server->successful)->toBeTrue()
         ->and($serverChunks)->toHaveCount(2)
         ->and($clientOnly->successful)->toBeTrue()
@@ -217,4 +219,195 @@ it('uses method map when grpc method path differs from stub method name', functi
 
     expect($result->successful)->toBeTrue()
         ->and($result->response->message['ok'])->toBeTrue();
+});
+
+
+it('does not reinvoke a stream method when the stub throws an internal type error', function (): void {
+    $stub = new class {
+        public int $calls = 0;
+
+        public function Upload(array $metadata = [], array $options = []): object
+        {
+            unset($metadata, $options);
+            $this->calls++;
+
+            throw new TypeError('internal generated stub type error');
+        }
+    };
+
+    $client = GrpcClient::usingGeneratedStub($stub);
+    $result = $client->clientStream(
+        method: 'Orders/Upload',
+        messages: [['id' => 1]],
+    );
+
+    expect($result->successful)->toBeFalse();
+    expect($stub->calls)->toBe(1);
+    expect($result->error)->toContain('internal generated stub type error');
+});
+
+it('resolves three argument stream open shape before invocation', function (): void {
+    $stub = new class {
+        /** @var list<array<string, mixed>> */
+        public array $captures = [];
+
+        public function Upload(mixed $message = null, array $metadata = [], array $options = []): object
+        {
+            $this->captures[] = [
+                'message' => $message,
+                'metadata' => $metadata,
+                'options' => $options,
+            ];
+
+            return new class {
+                public function wait(): array
+                {
+                    return [['ok' => true], ['code' => 0]];
+                }
+
+                public function writesDone(): void {}
+
+                public function write(mixed $message): void
+                {
+                    unset($message);
+                }
+            };
+        }
+    };
+
+    $result = GrpcClient::usingGeneratedStub($stub)->clientStream(
+        method: 'Orders/Upload',
+        messages: [['id' => 1]],
+        headers: (new GrpcMetadata())->withValue('x-upload', 'yes'),
+        deadlineSeconds: 1.0,
+    );
+
+    expect($result->successful)->toBeTrue();
+    expect($stub->captures)->toHaveCount(1);
+    expect($stub->captures[0]['message'])->toBeNull();
+    expect($stub->captures[0]['metadata']['x-upload'][0] ?? null)->toBe('yes');
+    expect($stub->captures[0]['options']['timeout'] ?? null)->toBe(1_000_000);
+});
+
+it('validates explicit generated method maps at adapter construction', function (): void {
+    $stub = new class {
+        public function Create(mixed $message, array $metadata = [], array $options = []): object
+        {
+            unset($message, $metadata, $options);
+
+            return new class {
+                public function wait(): array
+                {
+                    return [['ok' => true], ['code' => 0]];
+                }
+            };
+        }
+    };
+
+    expect(fn() => new GeneratedStubGrpcInvoker($stub, [
+        '/orders.v1.OrderService/Create' => 'Missing',
+    ]))->toThrow(InvalidArgumentException::class, 'was not found');
+
+    expect(fn() => new GeneratedStubGrpcInvoker($stub, [
+        ' orders.v1.OrderService/Create' => 'Create',
+    ]))->toThrow(InvalidArgumentException::class, 'surrounding whitespace');
+});
+
+it('cancels generated client streams between outbound writes', function (): void {
+    $state = (object) ['requested' => false];
+
+    $stub = new class($state) {
+        public ?object $call = null;
+
+        public function __construct(private object $state) {}
+
+        public function Upload(array $metadata = [], array $options = []): object
+        {
+            unset($metadata, $options);
+            $state = $this->state;
+
+            return $this->call = new class($state) {
+                public bool $cancelled = false;
+
+                public int $writes = 0;
+
+                public function __construct(private object $state) {}
+
+                public function cancel(): void
+                {
+                    $this->cancelled = true;
+                }
+
+                public function wait(): array
+                {
+                    return [['ok' => true], ['code' => 0]];
+                }
+
+                public function writesDone(): void {}
+
+                public function write(mixed $message): void
+                {
+                    unset($message);
+                    $this->writes++;
+                    $this->state->requested = true;
+                }
+            };
+        }
+    };
+
+    $signal = CancellationSignal::fromCallable(static fn(): bool => $state->requested);
+    $result = GrpcClient::usingGeneratedStub($stub, cancellation: $signal)->clientStream(
+        method: 'Orders/Upload',
+        messages: [['id' => 1], ['id' => 2]],
+    );
+
+    expect($result->successful)->toBeFalse();
+    expect($stub->call)->not->toBeNull();
+    expect($stub->call?->writes)->toBe(1);
+    expect($stub->call?->cancelled)->toBeTrue();
+    expect($result->error)->toContain('cancelled');
+});
+
+it('cancels the native stream when a response callback fails', function (): void {
+    $stub = new class {
+        public ?object $call = null;
+
+        public function List(mixed $message, array $metadata = [], array $options = []): object
+        {
+            unset($message, $metadata, $options);
+
+            return $this->call = new class {
+                public bool $cancelled = false;
+
+                public function cancel(): void
+                {
+                    $this->cancelled = true;
+                }
+
+                public function responses(): iterable
+                {
+                    yield ['row' => 1];
+                    yield ['row' => 2];
+                }
+
+                public function wait(): array
+                {
+                    return [null, ['code' => 0]];
+                }
+            };
+        }
+    };
+
+    $result = GrpcClient::usingGeneratedStub($stub)->serverStream(
+        new GrpcRequest('Orders/List', ['page' => 1]),
+        static function (mixed $message): void {
+            unset($message);
+
+            throw new RuntimeException('consumer callback failed');
+        },
+    );
+
+    expect($result->successful)->toBeFalse();
+    expect($stub->call?->cancelled)->toBeTrue();
+    expect($result->error)->toContain('consumer callback failed');
 });

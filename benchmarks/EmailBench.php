@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Infocyph\TalkingBytes\Benchmarks;
 
+use Infocyph\TalkingBytes\Email\Emailer;
 use Infocyph\TalkingBytes\Email\EmailMessage;
+use Infocyph\TalkingBytes\Email\Mailbox\FakeMailboxTransport;
 use Infocyph\TalkingBytes\Email\Parser\RawEmailParser;
 use Infocyph\TalkingBytes\Email\System\RawEmailBuilder;
 use PhpBench\Attributes\BeforeMethods;
@@ -16,7 +18,13 @@ final class EmailBench
 {
     private RawEmailBuilder $builder;
 
+    private Emailer $fakeEmailer;
+
+    private FakeMailboxTransport $mailbox;
+
     private EmailMessage $message;
+
+    private Emailer $nullEmailer;
 
     private RawEmailParser $parser;
 
@@ -26,6 +34,8 @@ final class EmailBench
     {
         $this->builder = new RawEmailBuilder();
         $this->parser = new RawEmailParser();
+        $this->nullEmailer = Emailer::usingNull();
+        $this->fakeEmailer = Emailer::fake();
         $this->message = EmailMessage::new()
             ->from('sender@example.com', 'Sender Name')
             ->to('alice@example.com', 'bob@example.com')
@@ -37,6 +47,7 @@ final class EmailBench
             ->attachData(str_repeat('PDF-DATA-', 64), 'report.pdf', 'application/pdf')
             ->attachInlineData('<svg><rect width="8" height="8"/></svg>', 'logo.svg', 'logo-inline', 'image/svg+xml');
         $this->rawMultipartEmail = $this->createRawMultipartEmail();
+        $this->mailbox = (new FakeMailboxTransport())->withMessage('INBOX', 1, $this->rawMultipartEmail);
     }
 
     #[Iterations(5)]
@@ -56,6 +67,29 @@ final class EmailBench
                 unset($chunk);
             },
         );
+    }
+
+    #[Iterations(5)]
+    #[Revs(100)]
+    public function benchFakeMailboxAdapter(): void
+    {
+        $this->mailbox->rawMessage('INBOX', 1);
+        $this->mailbox->rawHeaders('INBOX', 1);
+        $this->mailbox->status('INBOX');
+    }
+
+    #[Iterations(5)]
+    #[Revs(100)]
+    public function benchFakeSend(): void
+    {
+        $this->fakeEmailer->send($this->message);
+    }
+
+    #[Iterations(5)]
+    #[Revs(500)]
+    public function benchNullSend(): void
+    {
+        $this->nullEmailer->send($this->message);
     }
 
     #[Iterations(5)]

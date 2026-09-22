@@ -11,38 +11,47 @@ on:
 jobs:
   phpforge:
     uses: infocyph/phpforge/.github/workflows/security-standards.yml@main
+    with:
+      integration_services: '[]'
+      service_topologies: '{}'
+      php_extensions: "curl, fileinfo, openssl"
     permissions:
       security-events: write
       actions: read
       contents: read
-    with:
-      php_versions: '["8.4","8.5"]'
-      dependency_versions: '["prefer-lowest","prefer-stable"]'
-      php_extensions: "curl, fileinfo, openssl"
-      composer_flags: ""
-      phpstan_memory_limit: "1G"
-      psalm_threads: "1"
-      run_analysis: true
-      run_svg_report: true
-      run_clean_install: true
-      benchmark_composer_script: ""
-      benchmark_result_file: ""
-      benchmark_baseline_file: ""
-      benchmark_max_regression_percent: 2
-      benchmark_stable_environment: false
-      fail_on_skipped_tests: true
-      enable_redis_service: false
-      enable_valkey_service: false
-      enable_memcached_service: false
-      enable_postgres_service: false
-      enable_mysql_service: false
-      enable_scylladb_service: false
-      enable_elasticsearch_service: false
-      enable_mongodb_service: false
-      service_db_name: "phpforge"
-      service_db_user: "phpforge"
-      service_db_password: "phpforge"
-      artifact_retention_days: 61
+
+  optional-capability-coldness:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup minimal PHP runtime
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.5"
+          extensions: "curl, fileinfo, openssl, :grpc, :imap, :posix"
+          coverage: none
+
+      - name: Verify unloadable optional extensions are absent
+        run: |
+          php -r '
+          foreach (["grpc", "imap", "posix"] as $extension) {
+              if (extension_loaded($extension)) {
+                  fwrite(STDERR, "Optional extension unexpectedly loaded: {$extension}\n");
+                  exit(1);
+              }
+          }
+          '
+
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Run optional capability coldness gate
+        env:
+          TALKINGBYTES_OPTIONAL_COLDNESS: "1"
+        run: vendor/bin/pest --configuration=vendor/infocyph/phpforge/resources/pest.xml --bootstrap=vendor/autoload.php tests/OptionalCapabilityColdnessTest.php
 
   mailpit-integration:
     runs-on: ubuntu-latest
@@ -55,21 +64,43 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.5'
+          php-version: "8.5"
           extensions: curl, fileinfo, openssl
+          coverage: none
 
       - name: Install dependencies
-        run: composer install --no-interaction --prefer-dist
+        run: composer install --no-interaction --prefer-dist --no-progress
 
       - name: Run Mailpit integration test
         env:
-          RUN_MAILPIT_INTEGRATION: '1'
+          RUN_MAILPIT_INTEGRATION: "1"
           SMTP_HOST: 127.0.0.1
           SMTP_PORT: 1025
           MAILPIT_API_BASE: http://127.0.0.1:8025
         run: vendor/bin/pest --configuration=vendor/infocyph/phpforge/resources/pest.xml --bootstrap=vendor/autoload.php --fail-on-skipped tests/MailpitIntegrationTest.php
+
+  docs-warning-free:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: docs/requirements.txt
+
+      - name: Install documentation dependencies
+        run: python -m pip install --disable-pip-version-check -r docs/requirements.txt
+
+      - name: Build documentation with warnings as errors
+        run: sphinx-build -W --keep-going -b html docs build/docs
+

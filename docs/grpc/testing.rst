@@ -6,6 +6,8 @@ Utilities
 
 - ``FakeGrpcCaller``
 - ``AssertableGrpcCaller``
+- ``FakeGrpcInboundSource``
+- ``FakeGrpcInboundExchange``
 
 Example
 -------
@@ -24,3 +26,12 @@ Example
    $fake->assert()->assertCallCount(1);
 
 Assertions cover method, payload, metadata, and call count behavior.
+
+
+Inbound runtime testing
+-----------------------
+
+Queue a normalized inbound request with ``FakeGrpcInboundSource::enqueue()``,
+run one host cycle through ``GrpcInboundDispatcher::serveOne()``, then inspect
+the returned fake exchange for completion and response status/message. This keeps
+worker-loop tests deterministic without starting a socket server.

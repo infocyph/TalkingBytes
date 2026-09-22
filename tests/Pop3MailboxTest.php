@@ -2,8 +2,8 @@
 
 declare(strict_types=1);
 
+use Infocyph\TalkingBytes\Core\Event\CallableEventDispatcher;
 use Infocyph\TalkingBytes\Email\Config\Pop3Config;
-use Infocyph\TalkingBytes\Email\Email;
 use Infocyph\TalkingBytes\Email\Enum\Pop3Security;
 use Infocyph\TalkingBytes\Email\Exception\MailboxAuthenticationException;
 use Infocyph\TalkingBytes\Email\Exception\MailboxConnectionException;
@@ -384,13 +384,12 @@ it('supports pop3 rset to clear pending deletions before quit', function (): voi
     expect($transcript['mismatches'])->toBe([]);
 });
 
-it('fails pop3 authentication when server rejects password', function (): void {
+it('fails pop3 authentication and drops the poisoned connection', function (): void {
     $server = FakePop3ServerProcess::start([
         'expect' => [
             ['regex' => '/^CAPA$/', 'multiline' => ['UIDL']],
             ['regex' => '/^USER user$/'],
             ['regex' => '/^PASS wrong$/', 'status' => '-ERR', 'text' => 'invalid login'],
-            ['regex' => '/^QUIT$/'],
         ],
     ]);
 
@@ -404,8 +403,12 @@ it('fails pop3 authentication when server rejects password', function (): void {
 
     expect(fn() => $mailbox->status())->toThrow(MailboxAuthenticationException::class);
 
+    $transcript = $server->transcript();
     $mailbox->logout();
     $server->stop();
+
+    expect($transcript['mismatches'])->toBe([]);
+    expect($transcript['commands'])->toBe(['CAPA', 'USER user', 'PASS wrong']);
 });
 
 it('rejects unsupported pop3 folder operations and non-all searches', function (): void {
@@ -525,7 +528,7 @@ it('supports pop3 empty message body retrieval', function (): void {
 
 it('redacts POP3 PASS value in mailbox command events', function (): void {
     $events = [];
-    Email::events(static function (string $event, array $payload) use (&$events): void {
+    $dispatcher = new CallableEventDispatcher(static function (string $event, array $payload) use (&$events): void {
         if (str_starts_with($event, 'mailbox.command.')) {
             $events[] = $payload;
         }
@@ -541,18 +544,20 @@ it('redacts POP3 PASS value in mailbox command events', function (): void {
         ],
     ]);
 
-    $mailbox = Pop3Mailbox::usingConfig(new Pop3Config(
-        host: '127.0.0.1',
-        port: $server->port,
-        security: Pop3Security::None,
-        username: 'user',
-        password: 'pass',
-    ));
+    $mailbox = Pop3Mailbox::usingConfig(
+        new Pop3Config(
+            host: '127.0.0.1',
+            port: $server->port,
+            security: Pop3Security::None,
+            username: 'user',
+            password: 'pass',
+        ),
+        events: $dispatcher,
+    );
 
     $mailbox->status();
     $mailbox->logout();
     $server->stop();
-    Email::events(null);
 
     expect(array_any(
         $events,

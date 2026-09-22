@@ -57,7 +57,7 @@ Replay protection
 Security behavior
 -----------------
 
-- signature format: ``t=<timestamp>,v1=<hmac>``
+- signature format: ``t=<timestamp>,v2=<hmac>`` (binds event and delivery ID)
 - timestamp window enforced (default 300s)
 - secret/signature/raw body are not emitted in event payloads
 - reserved headers are sender-controlled:

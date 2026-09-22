@@ -20,6 +20,16 @@ final readonly class GrpcInboundResponse
         public array $metadata = [],
     ) {}
 
+    public static function cancelled(string $message = 'Inbound gRPC call cancelled.'): self
+    {
+        return new self(GrpcStatus::Cancelled, $message);
+    }
+
+    public static function internal(string $message = 'Inbound gRPC handler failed.'): self
+    {
+        return new self(GrpcStatus::Internal, $message);
+    }
+
     public static function ok(
         mixed $message = null,
         GrpcMetadata $headers = new GrpcMetadata(),

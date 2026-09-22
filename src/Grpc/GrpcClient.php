@@ -8,8 +8,12 @@ use Infocyph\TalkingBytes\Core\Event\BestEffortEventDispatcher;
 use Infocyph\TalkingBytes\Core\Event\EventDispatcher;
 use Infocyph\TalkingBytes\Core\Event\NullEventDispatcher;
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
+use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
+use Infocyph\TalkingBytes\Core\Support\Clock;
+use Infocyph\TalkingBytes\Core\Support\ObservabilitySanitizer;
 use Infocyph\TalkingBytes\Grpc\Contract\GrpcMiddleware;
 use Infocyph\TalkingBytes\Grpc\Middleware\RetryMiddleware;
+use Infocyph\TalkingBytes\Grpc\Native\GeneratedStubGrpcInvoker;
 use Infocyph\TalkingBytes\Grpc\Native\NativeGrpcInvoker;
 use Infocyph\TalkingBytes\Grpc\Native\NativeGrpcResult;
 use Infocyph\TalkingBytes\Grpc\Native\NativeGrpcStreamingInvoker;
@@ -24,6 +28,8 @@ use Throwable;
 
 final readonly class GrpcClient
 {
+    private Clock $clock;
+
     private EventDispatcher $events;
 
     private GrpcPipeline $pipeline;
@@ -36,21 +42,41 @@ final readonly class GrpcClient
         private array $middlewares = [],
         private ?NativeGrpcStreamingInvoker $streamingInvoker = null,
         ?EventDispatcher $events = null,
+        ?Clock $clock = null,
     ) {
         $this->pipeline = new GrpcPipeline($transport, $middlewares);
         $this->events = new BestEffortEventDispatcher($events ?? new NullEventDispatcher());
+        $this->clock = $clock ?? Clock::system();
     }
 
     /**
      * @param callable(GrpcRequest): GrpcResponse $caller
      */
-    public static function using(callable $caller, ?EventDispatcher $events = null): self
+    public static function using(callable $caller, ?EventDispatcher $events = null, ?Clock $clock = null): self
     {
-        return new self(new GrpcTransport($caller, $events), events: $events);
+        return new self(new GrpcTransport($caller, $events, $clock), events: $events, clock: $clock);
     }
 
-    public static function usingNative(NativeGrpcInvoker $invoker): self
-    {
+    /**
+     * @param array<string, string> $methodMap
+     */
+    public static function usingGeneratedStub(
+        object $stubClient,
+        array $methodMap = [],
+        ?EventDispatcher $events = null,
+        ?CancellationSignal $cancellation = null,
+        ?Clock $clock = null,
+    ): self {
+        $invoker = new GeneratedStubGrpcInvoker($stubClient, $methodMap, $cancellation);
+
+        return self::usingNativeStreaming($invoker, $invoker, $events, $clock);
+    }
+
+    public static function usingNative(
+        NativeGrpcInvoker $invoker,
+        ?EventDispatcher $events = null,
+        ?Clock $clock = null,
+    ): self {
         return self::using(
             static function (GrpcRequest $request) use ($invoker): GrpcResponse {
                 $native = $invoker->invoke(
@@ -68,14 +94,23 @@ final readonly class GrpcClient
                     metadata: $native->metadata,
                 );
             },
+            $events,
+            $clock,
         );
     }
 
     public static function usingNativeStreaming(
         NativeGrpcInvoker $invoker,
         NativeGrpcStreamingInvoker $streamingInvoker,
+        ?EventDispatcher $events = null,
+        ?Clock $clock = null,
     ): self {
-        return new self(self::usingNative($invoker)->transport, streamingInvoker: $streamingInvoker);
+        return new self(
+            self::usingNative($invoker, $events, $clock)->transport,
+            streamingInvoker: $streamingInvoker,
+            events: $events,
+            clock: $clock,
+        );
     }
 
     /**
@@ -135,9 +170,11 @@ final readonly class GrpcClient
         return $this->streamingInvoker !== null;
     }
 
-    public function withGrpcRetry(?GrpcRetryPolicy $policy = null): self
-    {
-        return $this->withRetryPolicy($policy ?? GrpcRetryPolicy::standard());
+    public function withGrpcRetry(
+        ?GrpcRetryPolicy $policy = null,
+        ?CancellationSignal $cancellation = null,
+    ): self {
+        return $this->withRetryPolicy($policy ?? GrpcRetryPolicy::standard(), $cancellation);
     }
 
     public function withMiddleware(GrpcMiddleware $middleware): self
@@ -145,7 +182,7 @@ final readonly class GrpcClient
         $middlewares = $this->middlewares;
         $middlewares[] = $middleware;
 
-        return new self($this->transport, $middlewares, $this->streamingInvoker, $this->events);
+        return new self($this->transport, $middlewares, $this->streamingInvoker, $this->events, $this->clock);
     }
 
     /**
@@ -153,12 +190,12 @@ final readonly class GrpcClient
      */
     public function withMiddlewares(array $middlewares): self
     {
-        return new self($this->transport, $middlewares, $this->streamingInvoker, $this->events);
+        return new self($this->transport, $middlewares, $this->streamingInvoker, $this->events, $this->clock);
     }
 
-    public function withRetryPolicy(RetryPolicy $policy): self
+    public function withRetryPolicy(RetryPolicy $policy, ?CancellationSignal $cancellation = null): self
     {
-        return $this->withMiddleware(new RetryMiddleware($policy));
+        return $this->withMiddleware(new RetryMiddleware($policy, $cancellation));
     }
 
     /**
@@ -210,7 +247,7 @@ final readonly class GrpcClient
             );
         }
 
-        $startedAt = microtime(true);
+        $startedAt = $this->clock->monotonic();
         $this->events->dispatch('grpc.stream.start', [
             'transport' => 'grpc',
             'type' => $streamType,
@@ -220,13 +257,13 @@ final readonly class GrpcClient
         try {
             $native = $execute($this->streamingInvoker);
         } catch (Throwable $exception) {
-            $durationMs = (int) ((microtime(true) - $startedAt) * 1000);
+            $durationMs = (int) (($this->clock->monotonic() - $startedAt) * 1000);
             $this->events->dispatch('grpc.stream.failed', [
                 'transport' => 'grpc',
                 'type' => $streamType,
                 'method' => $method,
                 'duration_ms' => $durationMs,
-                'error' => $exception->getMessage(),
+                ...ObservabilitySanitizer::throwableContext($exception),
             ]);
 
             $error = new GrpcCallError(
@@ -254,7 +291,7 @@ final readonly class GrpcClient
             );
         }
 
-        $durationMs = (int) ((microtime(true) - $startedAt) * 1000);
+        $durationMs = (int) (($this->clock->monotonic() - $startedAt) * 1000);
         $response = new GrpcResponse(
             status: GrpcStatus::fromCode($native->statusCode),
             message: $native->message,

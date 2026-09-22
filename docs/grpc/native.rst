@@ -32,19 +32,25 @@ Generated stub adapter
 ``GeneratedStubGrpcInvoker`` adapts generated ``grpc/grpc`` stub clients using
 duck-typed call objects (``wait()``, ``responses()``/``read()``, ``write()``).
 
+Stream call shape is resolved once from public method reflection when the
+adapter is constructed. TalkingBytes never invokes a stream method merely to
+probe its signature, and a ``TypeError`` raised inside a generated/user stub is
+therefore never treated as a reason to invoke the method a second time.
+
+Explicit method maps are normalized and validated when the adapter is
+constructed. Missing, non-public, or invalid mapped methods fail before the
+first protocol call.
+
 .. code-block:: php
 
    use Infocyph\TalkingBytes\Grpc\GrpcClient;
-   use Infocyph\TalkingBytes\Grpc\Native\GeneratedStubGrpcInvoker;
 
    $stub = new \Orders\OrderServiceClient('orders.internal:443', [
        'credentials' => \Grpc\ChannelCredentials::createSsl(),
    ]);
 
-   $adapter = new GeneratedStubGrpcInvoker($stub, [
+   $client = GrpcClient::usingGeneratedStub($stub, [
        '/orders.v1.OrderService/Create' => 'Create',
    ]);
-
-   $client = GrpcClient::usingNativeStreaming($adapter, $adapter);
 
 Method map keys are gRPC method paths; values are PHP stub method names.

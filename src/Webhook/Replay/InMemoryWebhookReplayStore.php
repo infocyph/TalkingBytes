@@ -10,6 +10,11 @@ use Infocyph\TalkingBytes\Webhook\Support\WebhookNameGuard;
 use InvalidArgumentException;
 use RuntimeException;
 
+/**
+ * Single-process replay store for tests and local development.
+ *
+ * It does not provide cross-process contention guarantees.
+ */
 final class InMemoryWebhookReplayStore implements WebhookReplayStore
 {
     private readonly Clock $clock;

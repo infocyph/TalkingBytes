@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Infocyph\TalkingBytes\Email\Transport;
 
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
+use Infocyph\TalkingBytes\Core\Support\Clock;
 use Infocyph\TalkingBytes\Email\Config\SmtpConfig;
 use Infocyph\TalkingBytes\Email\EmailMessage;
 use Infocyph\TalkingBytes\Email\Enum\SmtpAuthMechanism;
@@ -22,13 +23,18 @@ use RuntimeException;
 
 final readonly class SmtpTransport implements EmailTransport
 {
+    private Clock $clock;
+
     public function __construct(
         private SmtpConfig $config,
         private RawEmailBuilder $rawEmailBuilder = new RawEmailBuilder(),
         private SmtpCapabilityParser $capabilityParser = new SmtpCapabilityParser(),
         private ?SmtpEnvelopePlanner $envelopePlanner = null,
         private SmtpTlsContext $tlsContext = new SmtpTlsContext(),
-    ) {}
+        ?Clock $clock = null,
+    ) {
+        $this->clock = $clock ?? Clock::system();
+    }
 
     public function send(EmailMessage $message): CommunicationResult
     {
@@ -37,7 +43,7 @@ final readonly class SmtpTransport implements EmailTransport
         $connection = null;
         $messageStream = null;
         $capabilities = new SmtpCapabilities();
-        $start = microtime(true);
+        $start = $this->clock->monotonic();
         $serverGreeting = null;
         $authMechanism = null;
         $sessionStarted = false;
@@ -194,7 +200,7 @@ final readonly class SmtpTransport implements EmailTransport
             'smtp_port' => $this->config->port,
             'security' => $this->config->security->value,
             'ehlo_capabilities' => array_keys($capabilities->values),
-            'duration_ms' => (int) round((microtime(true) - $startedAt) * 1000),
+            'duration_ms' => (int) round(($this->clock->monotonic() - $startedAt) * 1000),
             'message_id' => $messageId,
             'auth_mechanism' => $authMechanism,
             'server_greeting' => $serverGreeting !== null ? trim($serverGreeting) : null,
@@ -339,10 +345,10 @@ final readonly class SmtpTransport implements EmailTransport
         $response = '';
         $lines = [];
         $code = 0;
-        $deadline = microtime(true) + $this->config->timeoutSeconds;
+        $deadline = $this->clock->monotonic() + $this->config->timeoutSeconds;
 
         while (true) {
-            if (microtime(true) >= $deadline) {
+            if ($this->clock->monotonic() >= $deadline) {
                 throw new RuntimeException('SMTP command deadline exceeded.');
             }
 

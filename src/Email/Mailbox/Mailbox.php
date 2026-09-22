@@ -4,6 +4,10 @@ declare(strict_types=1);
 
 namespace Infocyph\TalkingBytes\Email\Mailbox;
 
+use Infocyph\TalkingBytes\Core\Event\EventDispatcher;
+use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
+use Infocyph\TalkingBytes\Core\Support\Clock;
+use Infocyph\TalkingBytes\Core\Support\Sleeper;
 use Infocyph\TalkingBytes\Email\Config\ImapConfig;
 use Infocyph\TalkingBytes\Email\Parser\EmailParser;
 use Infocyph\TalkingBytes\Email\Parser\RawEmailParser;
@@ -15,9 +19,13 @@ final readonly class Mailbox
         private EmailParser $parser = new RawEmailParser(),
     ) {}
 
-    public static function usingImap(ImapConfig $config): self
-    {
-        return new self(new ImapSocketTransport($config));
+    public static function usingImap(
+        ImapConfig $config,
+        ?EventDispatcher $events = null,
+        ?Clock $clock = null,
+        ?Sleeper $sleeper = null,
+    ): self {
+        return new self(new ImapSocketTransport($config, events: $events, clock: $clock, sleeper: $sleeper));
     }
 
     public function archive(string $sourceFolder, int $uid, ?string $archiveFolder = null): void
@@ -53,6 +61,11 @@ final readonly class Mailbox
         $strategy ??= [];
         $target = $strategy['archive'] ?? $strategy['all_mail'] ?? null;
         $this->archive($sourceFolder, $uid, $target);
+    }
+
+    public function connect(): void
+    {
+        $this->transport->connect();
     }
 
     public function createFolder(string $name): void
@@ -95,6 +108,11 @@ final readonly class Mailbox
     public function folders(): array
     {
         return $this->transport->folders();
+    }
+
+    public function logout(): void
+    {
+        $this->transport->logout();
     }
 
     public function noop(): void
@@ -141,5 +159,19 @@ final readonly class Mailbox
     {
         MailboxFolderNameGuard::assertValid($folder);
         $this->folder($folder)->watch($onEvent, $timeoutSeconds, $shouldStop);
+    }
+
+    public function watchUntilCancelled(
+        string $folder,
+        callable $onEvent,
+        CancellationSignal $cancellation,
+        int $timeoutSeconds = 30,
+    ): void {
+        $this->watch(
+            $folder,
+            $onEvent,
+            $timeoutSeconds,
+            $cancellation->isRequested(...),
+        );
     }
 }

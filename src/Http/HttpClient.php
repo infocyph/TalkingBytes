@@ -12,6 +12,8 @@ use Infocyph\TalkingBytes\Auth\BearerTokenAuth;
 use Infocyph\TalkingBytes\Auth\SignedRequestAuth;
 use Infocyph\TalkingBytes\Core\Event\EventDispatcher;
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
+use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
+use Infocyph\TalkingBytes\Core\Support\Clock;
 use Infocyph\TalkingBytes\Http\Body\MultipartBody;
 use Infocyph\TalkingBytes\Http\Contract\HttpMiddleware;
 use Infocyph\TalkingBytes\Http\Contract\HttpTransport;
@@ -53,9 +55,9 @@ final readonly class HttpClient
         $this->pipeline = new HttpPipeline($transport, $middlewares);
     }
 
-    public static function curl(?EventDispatcher $events = null): self
+    public static function curl(?EventDispatcher $events = null, ?Clock $clock = null): self
     {
-        return new self(new CurlTransport($events));
+        return new self(new CurlTransport($events, $clock));
     }
 
     public static function fake(?FakeHttpTransport $transport = null): self
@@ -63,10 +65,14 @@ final readonly class HttpClient
         return new self($transport ?? new FakeHttpTransport());
     }
 
-    public static function fromConfig(HttpClientConfig $config): self
-    {
+    public static function fromConfig(
+        HttpClientConfig $config,
+        ?EventDispatcher $events = null,
+        ?HttpTransport $transport = null,
+        ?Clock $clock = null,
+    ): self {
         return new self(
-            transport: new CurlTransport(),
+            transport: $transport ?? new CurlTransport($events, $clock),
             defaultOptions: new CurlOptions(
                 timeoutSeconds: $config->timeoutSeconds,
                 connectTimeoutSeconds: $config->connectTimeoutSeconds,
@@ -86,9 +92,29 @@ final readonly class HttpClient
         );
     }
 
-    public static function multi(int $maxConcurrency = 10, ?EventDispatcher $events = null): Concurrent\RequestPool
-    {
-        return new Concurrent\RequestPool(new Concurrent\CurlMultiTransport(events: $events), $maxConcurrency);
+    /**
+     * @param array<string, mixed> $config
+     */
+    public static function fromResolvedConfig(
+        array $config,
+        ?EventDispatcher $events = null,
+        ?CancellationSignal $cancellation = null,
+        ?HttpTransport $transport = null,
+        ?Clock $clock = null,
+    ): self {
+        return new HttpClientFactory($events, $cancellation, $clock)->fromArray($config, $transport);
+    }
+
+    public static function multi(
+        int $maxConcurrency = 10,
+        ?EventDispatcher $events = null,
+        ?CancellationSignal $cancellation = null,
+    ): Concurrent\RequestPool {
+        return new Concurrent\RequestPool(
+            new Concurrent\CurlMultiTransport(events: $events),
+            $maxConcurrency,
+            cancellation: $cancellation,
+        );
     }
 
     public static function multipart(): MultipartBody
@@ -296,9 +322,11 @@ final readonly class HttpClient
         return new self($this->transport, $this->middlewares, $this->defaultOptions, $headers, $this->authenticators, $this->cookieJar);
     }
 
-    public function withHttpRetry(?HttpRetryPolicy $policy = null): self
-    {
-        return $this->withRetry($policy ?? HttpRetryPolicy::standard());
+    public function withHttpRetry(
+        ?HttpRetryPolicy $policy = null,
+        ?CancellationSignal $cancellation = null,
+    ): self {
+        return $this->withRetry($policy ?? HttpRetryPolicy::standard(), $cancellation);
     }
 
     public function withIdempotency(string $headerName = 'Idempotency-Key'): self
@@ -332,9 +360,9 @@ final readonly class HttpClient
         return $this->withMiddleware(new RateLimitMiddleware($rateLimiter));
     }
 
-    public function withRetry(RetryPolicy $policy): self
+    public function withRetry(RetryPolicy $policy, ?CancellationSignal $cancellation = null): self
     {
-        return $this->withMiddleware(new RetryMiddleware($policy));
+        return $this->withMiddleware(new RetryMiddleware($policy, $cancellation));
     }
 
     public function withSigner(RequestSigner $signer): self

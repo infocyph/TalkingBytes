@@ -18,11 +18,16 @@ final class RetryExecutor
         RetryPolicy $policy,
         callable $attempt,
         ?Sleeper $sleeper = null,
+        ?CancellationSignal $cancellation = null,
     ): CommunicationResult {
         $sleeper ??= Sleeper::system();
         $count = 1;
 
         while (true) {
+            if ($cancellation?->isRequested() === true) {
+                return self::cancelled($count - 1);
+            }
+
             try {
                 $result = $attempt();
             } catch (Throwable $throwable) {
@@ -31,7 +36,9 @@ final class RetryExecutor
                     throw $throwable;
                 }
 
-                $sleeper->milliseconds($decision->delayMs);
+                if (!self::wait($sleeper, $decision->delayMs, $cancellation)) {
+                    return self::cancelled($count);
+                }
                 $count++;
 
                 continue;
@@ -42,8 +49,32 @@ final class RetryExecutor
                 return $result;
             }
 
-            $sleeper->milliseconds($decision->delayMs);
+            if (!self::wait($sleeper, $decision->delayMs, $cancellation)) {
+                return self::cancelled($count);
+            }
             $count++;
         }
+    }
+
+    private static function cancelled(int $attempts): CommunicationResult
+    {
+        return CommunicationResult::failure(
+            'Operation cancelled.',
+            metadata: ['cancelled' => true, 'attempts' => max(0, $attempts)],
+        );
+    }
+
+    private static function wait(
+        Sleeper $sleeper,
+        int $delayMs,
+        ?CancellationSignal $cancellation,
+    ): bool {
+        if ($cancellation === null) {
+            $sleeper->milliseconds($delayMs);
+
+            return true;
+        }
+
+        return $sleeper->millisecondsInterruptibly($delayMs, $cancellation);
     }
 }

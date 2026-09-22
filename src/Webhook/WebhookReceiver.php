@@ -43,10 +43,23 @@ final readonly class WebhookReceiver
             throw new InvalidArgumentException(sprintf('Webhook payload exceeded %d bytes.', $this->maxPayloadBytes));
         }
 
+        $event = $this->header($headers, WebhookHeaders::EVENT);
+        $deliveryId = $this->header($headers, WebhookHeaders::DELIVERY);
+        if ($event === null) {
+            throw new InvalidArgumentException('Webhook event header is missing.');
+        }
+
+        if ($deliveryId === null) {
+            throw new InvalidArgumentException('Webhook delivery header is missing.');
+        }
+
+        WebhookNameGuard::assertEvent($event);
+        WebhookNameGuard::assertDeliveryId($deliveryId);
+
         $signatureHeader = $this->header($headers, WebhookHeaders::SIGNATURE) ?? '';
         $timestampHeader = $this->header($headers, WebhookHeaders::TIMESTAMP);
 
-        $verification = $this->verifier->verifyResult($rawBody, $signatureHeader, $timestampHeader);
+        $verification = $this->verifier->verifyResult($rawBody, $signatureHeader, $timestampHeader, event: $event, deliveryId: $deliveryId);
         if (!$verification->valid) {
             throw new RuntimeException(sprintf('Webhook verification failed: %s', (string) $verification->reason));
         }
@@ -60,19 +73,6 @@ final readonly class WebhookReceiver
         if (!is_array($decoded)) {
             throw new InvalidArgumentException('Webhook payload must decode to an object/array JSON value.');
         }
-
-        $event = $this->header($headers, WebhookHeaders::EVENT);
-        $deliveryId = $this->header($headers, WebhookHeaders::DELIVERY);
-        if ($event === null) {
-            throw new InvalidArgumentException('Webhook event header is missing.');
-        }
-
-        if ($deliveryId === null) {
-            throw new InvalidArgumentException('Webhook delivery header is missing.');
-        }
-
-        WebhookNameGuard::assertEvent($event);
-        WebhookNameGuard::assertDeliveryId($deliveryId);
 
         if ($this->replayStore !== null) {
             if (!$this->replayStore->claim($this->replayNamespace, $deliveryId, $this->replayTtlSeconds)) {

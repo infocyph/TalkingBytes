@@ -7,7 +7,7 @@ use Infocyph\TalkingBytes\Email\Mailbox\MailboxCommandRedactor;
 
 it('redacts sensitive imap login and authenticate commands', function (): void {
     expect(MailboxCommandRedactor::redact('imap', 'LOGIN "user" "secret"'))
-        ->toBe('LOGIN "user" [REDACTED]');
+        ->toBe('LOGIN [REDACTED] [REDACTED]');
 
     expect(MailboxCommandRedactor::redact('imap', 'AUTHENTICATE PLAIN dXNlcgB1c2VyAHNlY3JldA=='))
         ->toBe('AUTHENTICATE [REDACTED]');
@@ -21,13 +21,13 @@ it('redacts sensitive pop3 pass command', function (): void {
         ->toBe('PASS [REDACTED]');
 
     expect(MailboxCommandRedactor::redact('pop3', 'APOP user deadbeef123'))
-        ->toBe('APOP user [REDACTED]');
+        ->toBe('APOP [REDACTED] [REDACTED]');
 
     expect(MailboxCommandRedactor::redact('pop3', 'AUTH PLAIN dGVzdA=='))
         ->toBe('AUTH [REDACTED]');
 
     expect(MailboxCommandRedactor::redact('pop3', 'USER test'))
-        ->toBe('USER test');
+        ->toBe('USER [REDACTED]');
 });
 
 it('dispatches redacted IMAP command payloads in start and finish events', function (): void {
@@ -44,8 +44,8 @@ it('dispatches redacted IMAP command payloads in start and finish events', funct
 
     expect($events[0]['event'] ?? null)->toBe('mailbox.command.start');
     expect($events[1]['event'] ?? null)->toBe('mailbox.command.finish');
-    expect($events[0]['command'] ?? '')->toBe('LOGIN "user" [REDACTED]');
-    expect($events[1]['command'] ?? '')->toBe('LOGIN "user" [REDACTED]');
+    expect($events[0]['command'] ?? '')->toBe('LOGIN [REDACTED] [REDACTED]');
+    expect($events[1]['command'] ?? '')->toBe('LOGIN [REDACTED] [REDACTED]');
 });
 
 it('dispatches redacted IMAP AUTHENTICATE payloads in mailbox events', function (): void {
@@ -88,8 +88,8 @@ it('dispatches redacted POP3 command payloads in start and finish events', funct
     expect($events[1]['event'] ?? null)->toBe('mailbox.command.finish');
     expect($events[0]['command'] ?? '')->toBe('PASS [REDACTED]');
     expect($events[1]['command'] ?? '')->toBe('PASS [REDACTED]');
-    expect($events[2]['command'] ?? '')->toBe('APOP user [REDACTED]');
-    expect($events[3]['command'] ?? '')->toBe('APOP user [REDACTED]');
+    expect($events[2]['command'] ?? '')->toBe('APOP [REDACTED] [REDACTED]');
+    expect($events[3]['command'] ?? '')->toBe('APOP [REDACTED] [REDACTED]');
     expect($events[4]['command'] ?? '')->toBe('AUTH [REDACTED]');
     expect($events[5]['command'] ?? '')->toBe('AUTH [REDACTED]');
 });

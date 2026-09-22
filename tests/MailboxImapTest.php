@@ -2,8 +2,9 @@
 
 declare(strict_types=1);
 
+use Infocyph\TalkingBytes\Core\Event\CallableEventDispatcher;
+use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
 use Infocyph\TalkingBytes\Email\Config\ImapConfig;
-use Infocyph\TalkingBytes\Email\Email;
 use Infocyph\TalkingBytes\Email\Enum\ImapSecurity;
 use Infocyph\TalkingBytes\Email\Exception\MailboxConnectionException;
 use Infocyph\TalkingBytes\Email\Exception\MailboxProtocolException;
@@ -394,6 +395,23 @@ it('attempts STARTTLS before LOGIN when server advertises capability', function 
     ))->toBeFalse();
 });
 
+it('exposes explicit mailbox session lifecycle and cancellation helpers', function (): void {
+    $fake = FakeMailbox::new();
+    $events = 0;
+
+    $fake->mailbox->connect();
+    $fake->mailbox->watchUntilCancelled(
+        'INBOX',
+        static function () use (&$events): void {
+            $events++;
+        },
+        CancellationSignal::fromCallable(static fn(): bool => true),
+    );
+    $fake->mailbox->logout();
+
+    expect($events)->toBe(0);
+});
+
 it('supports fake mailbox operations and parsing workflow', function (): void {
     $fake = FakeMailbox::new();
 
@@ -677,7 +695,7 @@ it('fetches summary over IMAP ENVELOPE command path', function (): void {
 
 it('redacts IMAP LOGIN password in mailbox command events', function (): void {
     $events = [];
-    Email::events(static function (string $event, array $payload) use (&$events): void {
+    $dispatcher = new CallableEventDispatcher(static function (string $event, array $payload) use (&$events): void {
         if (str_starts_with($event, 'mailbox.command.')) {
             $events[] = $payload;
         }
@@ -692,26 +710,29 @@ it('redacts IMAP LOGIN password in mailbox command events', function (): void {
         ],
     ]);
 
-    $mailbox = Mailbox::usingImap(new ImapConfig(
-        host: '127.0.0.1',
-        port: $server->port,
-        security: ImapSecurity::None,
-        username: 'user',
-        password: 'pass',
-    ));
+    $mailbox = Mailbox::usingImap(
+        new ImapConfig(
+            host: '127.0.0.1',
+            port: $server->port,
+            security: ImapSecurity::None,
+            username: 'user',
+            password: 'pass',
+        ),
+        events: $dispatcher,
+    );
 
     $mailbox->folders();
     $mailbox->transport()->logout();
     $server->stop();
-    Email::events(null);
 
     expect(array_any(
         $events,
-        static fn (array $payload): bool => ($payload['command'] ?? null) === 'LOGIN "user" [REDACTED]',
+        static fn (array $payload): bool => ($payload['command'] ?? null) === 'LOGIN [REDACTED] [REDACTED]',
     ))->toBeTrue();
     expect(array_any(
         $events,
-        static fn (array $payload): bool => is_string($payload['command'] ?? null) && str_contains($payload['command'], 'LOGIN "user" "pass"'),
+        static fn (array $payload): bool => is_string($payload['command'] ?? null)
+            && (str_contains($payload['command'], '"user"') || str_contains($payload['command'], '"pass"')),
     ))->toBeFalse();
 });
 

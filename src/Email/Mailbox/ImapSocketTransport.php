@@ -4,6 +4,11 @@ declare(strict_types=1);
 
 namespace Infocyph\TalkingBytes\Email\Mailbox;
 
+use Infocyph\TalkingBytes\Core\Event\BestEffortEventDispatcher;
+use Infocyph\TalkingBytes\Core\Event\EventDispatcher;
+use Infocyph\TalkingBytes\Core\Event\NullEventDispatcher;
+use Infocyph\TalkingBytes\Core\Support\Clock;
+use Infocyph\TalkingBytes\Core\Support\Sleeper;
 use Infocyph\TalkingBytes\Email\Config\ImapConfig;
 use Infocyph\TalkingBytes\Email\Enum\ImapSecurity;
 use Infocyph\TalkingBytes\Email\Exception\MailboxAuthenticationException;
@@ -12,6 +17,12 @@ use Infocyph\TalkingBytes\Email\Exception\MailboxProtocolException;
 
 final class ImapSocketTransport implements BodyStructureMailboxTransport, EnvelopeSummaryMailboxTransport, MailboxTransport, RawHeadersMailboxTransport, RawPartMailboxTransport, WatchableMailboxTransport
 {
+    private readonly Clock $clock;
+
+    private readonly EventDispatcher $events;
+
+    private readonly Sleeper $sleeper;
+
     /**
      * @var list<string>
      */
@@ -29,7 +40,14 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
     public function __construct(
         private readonly ImapConfig $config,
         private readonly ImapResponseParser $responseParser = new ImapResponseParser(),
-    ) {}
+        ?EventDispatcher $events = null,
+        ?Clock $clock = null,
+        ?Sleeper $sleeper = null,
+    ) {
+        $this->events = new BestEffortEventDispatcher($events ?? new NullEventDispatcher());
+        $this->clock = $clock ?? Clock::system();
+        $this->sleeper = $sleeper ?? Sleeper::system();
+    }
 
     public function __destruct()
     {
@@ -69,14 +87,20 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
         );
         $this->selectedFolder = null;
 
-        $greeting = $this->readLine();
-        if (!str_starts_with(strtoupper($greeting), '* OK')) {
-            throw new MailboxProtocolException(sprintf('Unexpected IMAP greeting: %s', trim($greeting)));
-        }
+        try {
+            $greeting = $this->readLine();
+            if (!str_starts_with(strtoupper($greeting), '* OK')) {
+                throw new MailboxProtocolException(sprintf('Unexpected IMAP greeting: %s', trim($greeting)));
+            }
 
-        $this->refreshCapabilities();
-        $this->negotiateStartTls();
-        $this->login();
+            $this->refreshCapabilities();
+            $this->negotiateStartTls();
+            $this->login();
+        } catch (\Throwable $exception) {
+            $this->closeConnection();
+
+            throw $exception;
+        }
     }
 
     public function copy(string $folder, int $uid, string $targetFolder): void
@@ -152,10 +176,7 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
             // Best effort for shutdown.
         }
 
-        fclose($this->connection);
-        $this->connection = null;
-        $this->capabilities = [];
-        $this->selectedFolder = null;
+        $this->closeConnection();
     }
 
     public function markSeen(string $folder, int $uid): void
@@ -340,6 +361,17 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
         throw new MailboxAuthenticationException(implode("\n", $response->lines));
     }
 
+    private function closeConnection(): void
+    {
+        if (is_resource($this->connection)) {
+            fclose($this->connection);
+        }
+
+        $this->connection = null;
+        $this->capabilities = [];
+        $this->selectedFolder = null;
+    }
+
     private function expectOk(ImapResponse $response, string $stage): ImapResponse
     {
         if ($response->isOk()) {
@@ -461,10 +493,10 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
         $literals = [];
         $status = 'NO';
         $totalBytes = 0;
-        $deadline = microtime(true) + $this->config->timeoutSeconds;
+        $deadline = $this->clock->monotonic() + $this->config->timeoutSeconds;
 
         while (true) {
-            if (microtime(true) >= $deadline) {
+            if ($this->clock->monotonic() >= $deadline) {
                 throw new MailboxConnectionException('IMAP command deadline exceeded.');
             }
             $line = $this->readLine();
@@ -523,7 +555,7 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
         $start = SocketMailboxRuntime::dispatchStart('imap', $command, [
             'host' => $this->config->host,
             'port' => $this->config->port,
-        ]);
+        ], $this->events, $this->clock);
 
         $imapCommand = new ImapCommand($this->nextTag(), $command);
         $this->write($imapCommand->line() . "\r\n");
@@ -535,6 +567,8 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
             $response->status,
             $start['duration_ms'],
             ['host' => $this->config->host, 'port' => $this->config->port],
+            $this->events,
+            $this->clock,
         );
 
         return $response;
@@ -599,10 +633,10 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
             throw new MailboxProtocolException(sprintf('IMAP IDLE was not accepted: %s', trim($continuation)));
         }
 
-        $deadline = time() + max(1, $timeoutSeconds);
+        $deadline = $this->clock->monotonic() + max(1, $timeoutSeconds);
         $socket = $this->requireConnection();
 
-        while (time() < $deadline) {
+        while ($this->clock->monotonic() < $deadline) {
             if ($stop()) {
                 break;
             }
@@ -638,9 +672,9 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
      */
     private function watchWithNoopFallback(callable $onEvent, int $timeoutSeconds, callable $stop): void
     {
-        $deadline = time() + max(1, $timeoutSeconds);
+        $deadline = $this->clock->monotonic() + max(1, $timeoutSeconds);
 
-        while (time() < $deadline) {
+        while ($this->clock->monotonic() < $deadline) {
             if ($stop()) {
                 return;
             }
@@ -652,7 +686,7 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
                 }
             }
 
-            usleep(250000);
+            $this->sleeper->milliseconds(250);
         }
     }
 

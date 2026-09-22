@@ -7,14 +7,19 @@ namespace Infocyph\TalkingBytes\Grpc;
 use Closure;
 use Infocyph\TalkingBytes\Core\Event\BestEffortEventDispatcher;
 use Infocyph\TalkingBytes\Core\Event\EventDispatcher;
-use Infocyph\TalkingBytes\Core\Event\NullEventDispatcher;
+use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
+use Infocyph\TalkingBytes\Core\Support\Clock;
+use Infocyph\TalkingBytes\Grpc\Receiver\GrpcInboundExchange;
 use Infocyph\TalkingBytes\Grpc\Receiver\GrpcInboundHandlerInterface;
 use Infocyph\TalkingBytes\Grpc\Receiver\GrpcInboundRequest;
 use Infocyph\TalkingBytes\Grpc\Receiver\GrpcInboundResponse;
+use Infocyph\TalkingBytes\Grpc\Receiver\GrpcInboundSource;
 use Throwable;
 
 final class GrpcInboundDispatcher
 {
+    private readonly Clock $clock;
+
     private readonly EventDispatcher $events;
 
     /**
@@ -25,15 +30,19 @@ final class GrpcInboundDispatcher
     /**
      * @param array<string, callable(GrpcInboundRequest):GrpcInboundResponse> $handlers
      */
-    public function __construct(array $handlers = [], ?EventDispatcher $events = null)
-    {
+    public function __construct(
+        array $handlers = [],
+        ?EventDispatcher $events = null,
+        ?Clock $clock = null,
+    ) {
         $normalized = [];
         foreach ($handlers as $method => $handler) {
             $normalized[GrpcMethodGuard::normalize($method)] = Closure::fromCallable($handler);
         }
 
         $this->handlers = $normalized;
-        $this->events = new BestEffortEventDispatcher($events ?? new NullEventDispatcher());
+        $this->clock = $clock ?? Clock::system();
+        $this->events = BestEffortEventDispatcher::wrap($events);
     }
 
     public static function new(): self
@@ -43,7 +52,7 @@ final class GrpcInboundDispatcher
 
     public function handle(GrpcInboundRequest $request): GrpcInboundResponse
     {
-        $startedAt = microtime(true);
+        $startedAt = $this->clock->monotonic();
         $this->events->dispatch('grpc.inbound.start', [
             'method' => $request->method,
             'deadline_seconds' => $request->deadlineSeconds,
@@ -58,7 +67,7 @@ final class GrpcInboundDispatcher
                 'method' => $request->method,
                 'status_code' => $response->status->value,
                 'status_name' => $response->status->name,
-                'duration_ms' => (int) ((microtime(true) - $startedAt) * 1000),
+                'duration_ms' => (int) (($this->clock->monotonic() - $startedAt) * 1000),
             ]);
 
             return $response;
@@ -67,27 +76,21 @@ final class GrpcInboundDispatcher
         try {
             $response = $handler($request);
         } catch (Throwable $exception) {
-            $durationMs = (int) ((microtime(true) - $startedAt) * 1000);
+            $durationMs = (int) (($this->clock->monotonic() - $startedAt) * 1000);
             $this->events->dispatch('grpc.inbound.failed', [
                 'method' => $request->method,
                 'duration_ms' => $durationMs,
                 'exception' => $exception::class,
             ]);
 
-            return new GrpcInboundResponse(
-                status: GrpcStatus::Internal,
-                message: 'Inbound gRPC handler failed.',
-                metadata: [
-                    'exception' => $exception::class,
-                ],
-            );
+            return GrpcInboundResponse::internal();
         }
 
         $this->events->dispatch('grpc.inbound.finish', [
             'method' => $request->method,
             'status_code' => $response->status->value,
             'status_name' => $response->status->name,
-            'duration_ms' => (int) ((microtime(true) - $startedAt) * 1000),
+            'duration_ms' => (int) (($this->clock->monotonic() - $startedAt) * 1000),
         ]);
 
         return $response;
@@ -102,6 +105,22 @@ final class GrpcInboundDispatcher
         return $this->handle(new GrpcInboundRequest($method, $message, $headers, $deadlineSeconds));
     }
 
+    public function serveOne(
+        GrpcInboundSource $source,
+        ?CancellationSignal $cancellation = null,
+    ): bool {
+        if ($cancellation?->isRequested() === true) {
+            return false;
+        }
+
+        $exchange = $source->accept($cancellation);
+        if ($exchange === null) {
+            return false;
+        }
+
+        return $this->completeAcceptedExchange($exchange, $cancellation);
+    }
+
     /**
      * @param callable(GrpcInboundRequest):GrpcInboundResponse|GrpcInboundHandlerInterface $handler
      */
@@ -114,6 +133,21 @@ final class GrpcInboundDispatcher
             ? $handler->handle(...)
             : Closure::fromCallable($handler);
 
-        return new self($handlers, $this->events);
+        return new self($handlers, $this->events, $this->clock);
+    }
+
+    private function completeAcceptedExchange(
+        GrpcInboundExchange $exchange,
+        ?CancellationSignal $cancellation,
+    ): bool {
+        if ($cancellation?->isRequested() === true) {
+            $exchange->complete(GrpcInboundResponse::cancelled());
+
+            return true;
+        }
+
+        $exchange->complete($this->handle($exchange->request()));
+
+        return true;
     }
 }

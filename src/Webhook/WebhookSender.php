@@ -7,7 +7,10 @@ namespace Infocyph\TalkingBytes\Webhook;
 use Infocyph\TalkingBytes\Core\Event\BestEffortEventDispatcher;
 use Infocyph\TalkingBytes\Core\Event\EventDispatcher;
 use Infocyph\TalkingBytes\Core\Event\NullEventDispatcher;
+use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
+use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
 use Infocyph\TalkingBytes\Core\Support\Clock;
+use Infocyph\TalkingBytes\Core\Support\ObservabilitySanitizer;
 use Infocyph\TalkingBytes\Core\Support\Sleeper;
 use Infocyph\TalkingBytes\Http\HttpClient;
 use Infocyph\TalkingBytes\Http\HttpRequest;
@@ -15,6 +18,7 @@ use Infocyph\TalkingBytes\Http\Support\HttpRedactor;
 use Infocyph\TalkingBytes\Retry\RetryContext;
 use Infocyph\TalkingBytes\Webhook\Model\WebhookDelivery;
 use Infocyph\TalkingBytes\Webhook\Model\WebhookDeliveryResult;
+use Infocyph\TalkingBytes\Webhook\Model\WebhookSignature;
 use Infocyph\TalkingBytes\Webhook\Retry\WebhookRetryProfile;
 use Infocyph\TalkingBytes\Webhook\Signing\HmacWebhookSigner;
 use Infocyph\TalkingBytes\Webhook\Signing\WebhookSigner;
@@ -42,6 +46,7 @@ final readonly class WebhookSender
         ?EventDispatcher $events = null,
         ?Clock $clock = null,
         ?Sleeper $sleeper = null,
+        private ?CancellationSignal $cancellation = null,
     ) {
         if ($this->maxPayloadBytes < 1) {
             throw new InvalidArgumentException('Webhook max payload bytes must be greater than zero.');
@@ -69,10 +74,20 @@ final readonly class WebhookSender
         ?EventDispatcher $events = null,
         ?Clock $clock = null,
         ?Sleeper $sleeper = null,
+        ?CancellationSignal $cancellation = null,
     ): self {
         $profile = WebhookRetryProfile::standard($attempts, $baseDelayMs, $maxRetryAfterSeconds);
 
-        return new self($httpClient, null, null, $profile, events: $events, clock: $clock, sleeper: $sleeper);
+        return new self(
+            $httpClient,
+            null,
+            null,
+            $profile,
+            events: $events,
+            clock: $clock,
+            sleeper: $sleeper,
+            cancellation: $cancellation,
+        );
     }
 
     public function send(WebhookMessage $webhook): WebhookDelivery
@@ -87,11 +102,21 @@ final readonly class WebhookSender
             'url' => $redactedUrl,
             'attempt' => 1,
         ]);
-        $startedAt = microtime(true);
+        $startedAt = $this->clock->monotonic();
         $attempt = 1;
+        $completedAttempts = 0;
+        $cancelled = false;
         $retryPolicy = $this->retryProfile?->toHttpRetryPolicy();
+        $result = null;
 
         while (true) {
+            if ($this->cancellation?->isRequested() === true) {
+                $cancelled = true;
+                $result = $this->cancelledResult($result, $completedAttempts);
+
+                break;
+            }
+
             $timestamp = (int) floor($this->clock->timestamp());
             $request = HttpRequest::post($url)
                 ->raw($payload, 'application/json')
@@ -103,11 +128,12 @@ final readonly class WebhookSender
                 ->header(WebhookHeaders::CONTENT_TYPE, 'application/json');
 
             if ($this->signingSecret !== null) {
-                $signature = $this->signature($payload, $timestamp);
-                $request = $request->header(WebhookHeaders::SIGNATURE, sprintf('t=%d,v1=%s', $timestamp, $signature));
+                $signature = $this->signature(WebhookSignature::deliveryPayload($payload, $webhook->event, $webhook->deliveryId), $timestamp);
+                $request = $request->header(WebhookHeaders::SIGNATURE, sprintf('t=%d,v2=%s', $timestamp, $signature));
             }
 
             $result = $this->httpClient->send($request);
+            $completedAttempts = $attempt;
 
             $decision = $retryPolicy?->decide(new RetryContext($attempt, $result));
             if ($decision === null || !$decision->retry) {
@@ -120,12 +146,19 @@ final readonly class WebhookSender
                 'url' => $redactedUrl,
                 'attempt' => $attempt + 1,
                 'status_code' => $result->statusCode,
-                'error' => $result->error,
+                'failure_category' => ObservabilitySanitizer::resultContext($result)['failure_category'] ?? 'transport_error',
             ]);
 
             $delayMs = $decision->delayMs;
             if ($delayMs > 0) {
-                $this->sleeper->milliseconds($delayMs);
+                if ($this->cancellation === null) {
+                    $this->sleeper->milliseconds($delayMs);
+                } elseif (!$this->sleeper->millisecondsInterruptibly($delayMs, $this->cancellation)) {
+                    $cancelled = true;
+                    $result = $this->cancelledResult($result, $completedAttempts);
+
+                    break;
+                }
             }
 
             $attempt++;
@@ -134,13 +167,14 @@ final readonly class WebhookSender
             deliveryId: $webhook->deliveryId,
             event: $webhook->event,
             url: $url,
-            attempts: $attempt,
+            attempts: $completedAttempts,
             delivered: $result->successful,
             statusCode: $result->statusCode,
             error: $result->error,
             metadata: [
-                'duration_ms' => (int) ((microtime(true) - $startedAt) * 1000),
+                'duration_ms' => (int) (($this->clock->monotonic() - $startedAt) * 1000),
                 'has_signature' => $this->signingSecret !== null,
+                'cancelled' => $cancelled,
             ],
         );
 
@@ -151,9 +185,12 @@ final readonly class WebhookSender
                 'delivery_id' => $webhook->deliveryId,
                 'url' => $redactedUrl,
                 'status_code' => $result->statusCode,
-                'error' => $result->error,
+                'failure_category' => $result->successful
+                    ? null
+                    : (ObservabilitySanitizer::resultContext($result)['failure_category'] ?? 'transport_error'),
                 'duration_ms' => $delivery->metadata['duration_ms'] ?? null,
-                'attempt' => $attempt,
+                'attempt' => $completedAttempts,
+                'cancelled' => $cancelled,
             ],
         );
 
@@ -166,7 +203,22 @@ final readonly class WebhookSender
             throw new InvalidArgumentException('Webhook signing secret must not be empty.');
         }
 
-        return new self($this->httpClient, $secret, $this->signer, $this->retryProfile, $this->maxPayloadBytes, $this->events, $this->clock, $this->sleeper);
+        return new self($this->httpClient, $secret, $this->signer, $this->retryProfile, $this->maxPayloadBytes, $this->events, $this->clock, $this->sleeper, $this->cancellation);
+    }
+
+    public function withCancellation(?CancellationSignal $cancellation): self
+    {
+        return new self(
+            $this->httpClient,
+            $this->signingSecret,
+            $this->signer,
+            $this->retryProfile,
+            $this->maxPayloadBytes,
+            $this->events,
+            $this->clock,
+            $this->sleeper,
+            $cancellation,
+        );
     }
 
     public function withRetryProfile(
@@ -176,7 +228,7 @@ final readonly class WebhookSender
     ): self {
         $profile = WebhookRetryProfile::standard($attempts, $baseDelayMs, $maxRetryAfterSeconds);
 
-        return new self($this->httpClient, $this->signingSecret, $this->signer, $profile, $this->maxPayloadBytes, $this->events, $this->clock, $this->sleeper);
+        return new self($this->httpClient, $this->signingSecret, $this->signer, $profile, $this->maxPayloadBytes, $this->events, $this->clock, $this->sleeper, $this->cancellation);
     }
 
     public function withSecret(#[\SensitiveParameter] string $secret): self
@@ -186,7 +238,23 @@ final readonly class WebhookSender
 
     public function withSigner(WebhookSigner $signer): self
     {
-        return new self($this->httpClient, $this->signingSecret, $signer, $this->retryProfile, $this->maxPayloadBytes, $this->events, $this->clock, $this->sleeper);
+        return new self($this->httpClient, $this->signingSecret, $signer, $this->retryProfile, $this->maxPayloadBytes, $this->events, $this->clock, $this->sleeper, $this->cancellation);
+    }
+
+    private function cancelledResult(?CommunicationResult $previous, int $attempts): CommunicationResult
+    {
+        $metadata = $previous === null ? [] : $previous->metadata;
+
+        return CommunicationResult::failure(
+            'Webhook delivery cancelled.',
+            $previous?->statusCode,
+            $previous?->response,
+            [
+                ...$metadata,
+                'cancelled' => true,
+                'attempts' => $attempts,
+            ],
+        );
     }
 
     private function signature(string $payload, int $timestamp): string

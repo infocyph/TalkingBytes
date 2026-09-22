@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Infocyph\TalkingBytes\Email\Transport;
 
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
+use Infocyph\TalkingBytes\Core\Support\ObservabilitySanitizer;
 use Infocyph\TalkingBytes\Email\EmailMessage;
 use Throwable;
 
@@ -24,7 +25,6 @@ final readonly class LoggingEmailTransport implements EmailTransport
             'to_count' => count($message->envelope()->to),
             'cc_count' => count($message->envelope()->cc),
             'bcc_count' => count($message->envelope()->bcc),
-            'subject' => $message->headersData()->subject,
         ]);
 
         try {
@@ -32,18 +32,13 @@ final readonly class LoggingEmailTransport implements EmailTransport
         } catch (Throwable $throwable) {
             ($this->logger)('email.send.finish', [
                 'successful' => false,
-                'error' => $throwable->getMessage(),
-                'metadata' => [],
+                ...ObservabilitySanitizer::throwableContext($throwable),
             ]);
 
             throw $throwable;
         }
 
-        ($this->logger)('email.send.finish', [
-            'successful' => $result->successful,
-            'error' => $result->error,
-            'metadata' => $result->metadata,
-        ]);
+        ($this->logger)('email.send.finish', ObservabilitySanitizer::resultContext($result));
 
         return $result;
     }

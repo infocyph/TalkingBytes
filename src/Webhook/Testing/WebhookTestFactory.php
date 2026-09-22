@@ -26,7 +26,7 @@ final class WebhookTestFactory
         $issuedAt = $timestamp ?? time();
         $delivery = $deliveryId ?? bin2hex(random_bytes(16));
         WebhookNameGuard::assertDeliveryId($delivery);
-        $signature = new WebhookSignature($secret)->buildHeader($rawPayload, $issuedAt);
+        $signature = new WebhookSignature($secret)->buildHeader($rawPayload, $issuedAt, $event, $delivery);
 
         return [
             $rawPayload,

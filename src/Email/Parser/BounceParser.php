@@ -4,14 +4,23 @@ declare(strict_types=1);
 
 namespace Infocyph\TalkingBytes\Email\Parser;
 
-use Infocyph\TalkingBytes\Core\Event\CommunicationEventBus;
+use Infocyph\TalkingBytes\Core\Event\BestEffortEventDispatcher;
+use Infocyph\TalkingBytes\Core\Event\EventDispatcher;
+use Infocyph\TalkingBytes\Core\Event\NullEventDispatcher;
 use Infocyph\TalkingBytes\Email\Enum\BounceType;
 use Infocyph\TalkingBytes\Email\ValueObject\BounceReport;
 use Infocyph\TalkingBytes\Email\ValueObject\ParsedEmail;
 
 final readonly class BounceParser
 {
-    public function __construct(private DeliveryStatusParser $deliveryStatusParser = new DeliveryStatusParser()) {}
+    private EventDispatcher $events;
+
+    public function __construct(
+        private DeliveryStatusParser $deliveryStatusParser = new DeliveryStatusParser(),
+        ?EventDispatcher $events = null,
+    ) {
+        $this->events = new BestEffortEventDispatcher($events ?? new NullEventDispatcher());
+    }
 
     public function parse(ParsedEmail $email): ?BounceReport
     {
@@ -190,7 +199,7 @@ final readonly class BounceParser
 
     private function dispatchDetectedEvent(BounceReport $report): void
     {
-        CommunicationEventBus::dispatch('bounce.detected', [
+        $this->events->dispatch('bounce.detected', [
             'type' => $report->type->value,
             'recipient' => $report->recipient,
             'status' => $report->status,

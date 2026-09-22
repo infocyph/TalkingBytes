@@ -4,11 +4,17 @@ declare(strict_types=1);
 
 namespace Infocyph\TalkingBytes\Email\Mailbox;
 
+use Infocyph\TalkingBytes\Core\Support\Clock;
+use Infocyph\TalkingBytes\Core\Support\Sleeper;
 use Infocyph\TalkingBytes\Email\Exception\MailboxProtocolException;
 use Infocyph\TalkingBytes\Email\Parser\HeaderParser;
 
 final class FakeMailboxTransport implements BodyStructureMailboxTransport, EnvelopeSummaryMailboxTransport, MailboxTransport, RawHeadersMailboxTransport, WatchableMailboxTransport
 {
+    private readonly Clock $clock;
+
+    private readonly Sleeper $sleeper;
+
     /**
      * @var array<string, array<int, list<string>>>
      */
@@ -23,6 +29,12 @@ final class FakeMailboxTransport implements BodyStructureMailboxTransport, Envel
      * @var array<string, array<int, bool>>
      */
     private array $seen = ['INBOX' => []];
+
+    public function __construct(?Clock $clock = null, ?Sleeper $sleeper = null)
+    {
+        $this->clock = $clock ?? Clock::system();
+        $this->sleeper = $sleeper ?? Sleeper::system();
+    }
 
     public function addFlag(string $folder, int $uid, string $flag): void
     {
@@ -302,11 +314,11 @@ final class FakeMailboxTransport implements BodyStructureMailboxTransport, Envel
         }
 
         $stop = $shouldStop ?? static fn(): bool => false;
-        $deadline = time() + max(1, $timeoutSeconds);
+        $deadline = $this->clock->monotonic() + max(1, $timeoutSeconds);
 
-        while (time() < $deadline && !$stop()) {
+        while ($this->clock->monotonic() < $deadline && !$stop()) {
             $onEvent(sprintf('* %d EXISTS', count($this->messages[$folder])));
-            usleep(250000);
+            $this->sleeper->milliseconds(250);
         }
     }
 

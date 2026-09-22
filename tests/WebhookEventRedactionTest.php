@@ -37,7 +37,13 @@ it('does not leak webhook secret, raw payload, or signature in event payloads', 
     $signatureHeader = (string) $sent[0]->headers->get(WebhookHeaders::SIGNATURE);
 
     // Trigger verifier events as well.
-    Webhook::verifier($secret, events: $dispatcher)->verifyResult($rawPayload, $signatureHeader);
+    $verified = Webhook::verifier($secret, events: $dispatcher)->verifyResult(
+        $rawPayload,
+        $signatureHeader,
+        event: (string) $sent[0]->headers->get(WebhookHeaders::EVENT),
+        deliveryId: (string) $sent[0]->headers->get(WebhookHeaders::DELIVERY),
+    );
+    expect($verified->valid)->toBeTrue();
     Webhook::verifier($secret, events: $dispatcher)->verifyResult($rawPayload, 't=1,v1=not-a-real-signature');
 
     expect($delivery->result->successful)->toBeTrue()
