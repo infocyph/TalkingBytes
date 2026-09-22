@@ -138,6 +138,7 @@ it('confines compiled-in optional capabilities to their selected feature boundar
         'Email/Config/DkimConfig.php',
         'Email/Dkim/DkimSigner.php',
         'Email/Dkim/DkimVerifier.php',
+        'Email/Dkim/DkimPublicKeyParser.php',
     ];
 
     foreach ($iterator as $file) {
