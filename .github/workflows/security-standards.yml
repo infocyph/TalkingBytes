@@ -31,19 +31,74 @@ jobs:
         uses: shivammathur/setup-php@v2
         with:
           php-version: "8.5"
-          extensions: "curl, fileinfo, openssl, :grpc, :imap, :posix, :pcntl, :sodium"
+          extensions: "curl, fileinfo, openssl, :grpc, :imap, :posix"
           coverage: none
 
-      - name: Verify optional extensions are absent
+      - name: Verify unloadable optional extensions are absent
         run: |
           php -r '
-          foreach (["grpc", "imap", "posix", "pcntl", "sodium"] as $extension) {
+          foreach (["grpc", "imap", "posix"] as $extension) {
               if (extension_loaded($extension)) {
                   fwrite(STDERR, "Optional extension unexpectedly loaded: {$extension}\n");
                   exit(1);
               }
           }
           '
+
+      - name: Verify compiled-in capability isolation
+        run: |
+          if grep -RInE --include='*.php' '\bpcntl_' src; then
+            echo "TalkingBytes runtime must not depend on PCNTL." >&2
+            exit 1
+          fi
+
+          unexpected_sodium="$(
+            grep -RIlE --include='*.php' '\bsodium_' src               | grep -Ev '^src/Email/(Config/DkimConfig|Dkim/DkimSigner|Dkim/DkimVerifier)\.php
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Run optional capability coldness gate
+        env:
+          TALKINGBYTES_OPTIONAL_COLDNESS: "1"
+        run: vendor/bin/pest --configuration=vendor/infocyph/phpforge/resources/pest.xml --bootstrap=vendor/autoload.php tests/OptionalCapabilityColdnessTest.php
+
+  mailpit-integration:
+    runs-on: ubuntu-latest
+    services:
+      mailpit:
+        image: axllent/mailpit:latest
+        ports:
+          - 1025:1025
+          - 8025:8025
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.5"
+          extensions: curl, fileinfo, openssl
+          coverage: none
+
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Run Mailpit integration test
+        env:
+          RUN_MAILPIT_INTEGRATION: "1"
+          SMTP_HOST: 127.0.0.1
+          SMTP_PORT: 1025
+          MAILPIT_API_BASE: http://127.0.0.1:8025
+        run: vendor/bin/pest --configuration=vendor/infocyph/phpforge/resources/pest.xml --bootstrap=vendor/autoload.php --fail-on-skipped tests/MailpitIntegrationTest.php
+               || true
+          )"
+          if [ -n "$unexpected_sodium" ]; then
+            echo "Sodium usage escaped the Ed25519 DKIM boundary:" >&2
+            echo "$unexpected_sodium" >&2
+            exit 1
+          fi
 
       - name: Install dependencies
         run: composer install --no-interaction --prefer-dist --no-progress

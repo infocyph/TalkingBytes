@@ -28,10 +28,10 @@ final class HttpBench
 
     private HttpClient $fakeClient;
 
+    private HttpRequest $request;
+
     /** @var array<string, mixed> */
     private array $resolvedConfig;
-
-    private HttpRequest $request;
 
     public function setUp(): void
     {

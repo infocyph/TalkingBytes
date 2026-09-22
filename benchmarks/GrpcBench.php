@@ -47,6 +47,8 @@ final class GrpcBench
         $stub = new class {
             public function GetOrder(mixed $message, array $metadata = [], array $options = []): object
             {
+                unset($metadata, $options);
+
                 return new class($message) {
                     public function __construct(private readonly mixed $message) {}
 
@@ -74,8 +76,9 @@ final class GrpcBench
         );
 
         $this->dispatcher = new GrpcInboundDispatcher([
-            '/orders.v1.OrderService/GetOrder' => static fn(GrpcInboundRequest $request): GrpcInboundResponse =>
-                GrpcInboundResponse::ok($request->message),
+            '/orders.v1.OrderService/GetOrder' => static function (GrpcInboundRequest $request): GrpcInboundResponse {
+                return GrpcInboundResponse::ok($request->message);
+            },
         ]);
         $this->request = new GrpcRequest(
             '/orders.v1.OrderService/GetOrder',

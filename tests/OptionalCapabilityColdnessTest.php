@@ -49,7 +49,7 @@ it('keeps unrelated protocol graphs usable without optional runtime extensions',
         return;
     }
 
-    foreach (['grpc', 'imap', 'posix', 'pcntl', 'sodium'] as $extension) {
+    foreach (['grpc', 'imap', 'posix'] as $extension) {
         expect(extension_loaded($extension))->toBeFalse();
     }
 
@@ -96,8 +96,6 @@ it('keeps RSA DKIM independent from Sodium', function (): void {
         return;
     }
 
-    expect(extension_loaded('sodium'))->toBeFalse();
-
     $config = DkimConfig::fromPrivateKeyString(
         'example.test',
         'selector',
@@ -114,12 +112,18 @@ it('fails Ed25519 DKIM clearly only when the capability is selected', function (
         return;
     }
 
-    expect(extension_loaded('sodium'))->toBeFalse();
-
-    expect(static fn() => DkimConfig::fromPrivateKeyString(
+    $build = static fn(): DkimConfig => DkimConfig::fromPrivateKeyString(
         'example.test',
         'selector',
         base64_encode(random_bytes(32)),
         algorithm: DkimAlgorithm::Ed25519Sha256,
-    ))->toThrow(RuntimeException::class, 'Sodium extension is required for Ed25519 DKIM signing.');
+    );
+
+    if (!function_exists('sodium_crypto_sign_detached')) {
+        expect($build)->toThrow(RuntimeException::class, 'Sodium extension is required for Ed25519 DKIM signing.');
+
+        return;
+    }
+
+    expect($build()->algorithm)->toBe(DkimAlgorithm::Ed25519Sha256);
 });

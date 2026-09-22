@@ -77,7 +77,7 @@ it('preserves the injected monotonic clock across gRPC immutable streaming graph
         static fn(): float => 1_700_000_000.0,
         static function () use (&$now): float {
             $current = $now;
-            $now += 0.2;
+            $now += 0.25;
 
             return $current;
         },
@@ -96,6 +96,8 @@ it('preserves the injected monotonic clock across gRPC immutable streaming graph
             GrpcMetadata $headers,
             ?float $deadlineSeconds = null,
         ): NativeGrpcResult {
+            unset($method, $headers, $deadlineSeconds);
+
             return new NativeGrpcResult(GrpcStatus::Ok->value, $message);
         }
 
@@ -106,6 +108,8 @@ it('preserves the injected monotonic clock across gRPC immutable streaming graph
             callable $onMessage,
             ?float $deadlineSeconds = null,
         ): NativeGrpcResult {
+            unset($method, $headers, $deadlineSeconds);
+
             foreach ($messages as $message) {
                 $onMessage($message);
             }
@@ -119,7 +123,10 @@ it('preserves the injected monotonic clock across gRPC immutable streaming graph
             GrpcMetadata $headers,
             ?float $deadlineSeconds = null,
         ): NativeGrpcResult {
-            foreach ($messages as $_) {
+            unset($method, $headers, $deadlineSeconds);
+
+            foreach ($messages as $message) {
+                unset($message);
             }
 
             return new NativeGrpcResult(GrpcStatus::Ok->value);
@@ -132,6 +139,8 @@ it('preserves the injected monotonic clock across gRPC immutable streaming graph
             callable $onMessage,
             ?float $deadlineSeconds = null,
         ): NativeGrpcResult {
+            unset($method, $headers, $deadlineSeconds);
+
             $onMessage($message);
 
             return new NativeGrpcResult(GrpcStatus::Ok->value);
@@ -144,5 +153,5 @@ it('preserves the injected monotonic clock across gRPC immutable streaming graph
     $result = $client->clientStream('/runtime.v1.Health/Stream', [['ok' => true]]);
 
     expect($result->successful)->toBeTrue()
-        ->and($events['grpc.stream.finish']['duration_ms'] ?? null)->toBe(200);
+        ->and($events['grpc.stream.finish']['duration_ms'] ?? null)->toBe(250);
 });
