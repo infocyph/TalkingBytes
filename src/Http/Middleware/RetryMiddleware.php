@@ -6,6 +6,7 @@ namespace Infocyph\TalkingBytes\Http\Middleware;
 
 use Closure;
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
+use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
 use Infocyph\TalkingBytes\Core\Support\RetryExecutor;
 use Infocyph\TalkingBytes\Http\Contract\HttpMiddleware;
 use Infocyph\TalkingBytes\Http\Enum\HttpMethod;
@@ -15,7 +16,10 @@ use InvalidArgumentException;
 
 final readonly class RetryMiddleware implements HttpMiddleware
 {
-    public function __construct(private RetryPolicy $policy) {}
+    public function __construct(
+        private RetryPolicy $policy,
+        private ?CancellationSignal $cancellation = null,
+    ) {}
 
     public function handle(HttpRequest $request, Closure $next): CommunicationResult
     {
@@ -27,7 +31,11 @@ final readonly class RetryMiddleware implements HttpMiddleware
             throw new InvalidArgumentException('Automatic retry requires a repeatable HTTP upload source.');
         }
 
-        return RetryExecutor::run($this->policy, static fn(): CommunicationResult => $next($request));
+        return RetryExecutor::run(
+            $this->policy,
+            static fn(): CommunicationResult => $next($request),
+            cancellation: $this->cancellation,
+        );
     }
 
     private function isRetrySafe(HttpRequest $request): bool

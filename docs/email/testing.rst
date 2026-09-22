@@ -56,6 +56,10 @@ Spool tests include:
 Event assertions
 ----------------
 
-Attach a listener via ``Email::events($listener)`` and assert event payload
-shape for ``email.send.*``, ``email.receive.*``, ``email.parse.failed``,
-``mailbox.command.*``, and ``bounce.detected``.
+Inject a ``CallableEventDispatcher`` into the sender/receiver/mailbox factory
+or parser under test and assert payload shape for ``email.send.*``,
+``email.receive.*``, ``email.parse.failed``, ``mailbox.command.*``, and
+``bounce.detected``.
+
+``Email::events()`` remains an explicit compatibility facade; normal runtime
+graphs do not read process-global listener state.

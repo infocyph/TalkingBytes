@@ -8,6 +8,8 @@ use Infocyph\TalkingBytes\Core\Event\BestEffortEventDispatcher;
 use Infocyph\TalkingBytes\Core\Event\EventDispatcher;
 use Infocyph\TalkingBytes\Core\Event\NullEventDispatcher;
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
+use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
+use Infocyph\TalkingBytes\Core\Support\Clock;
 use Infocyph\TalkingBytes\Email\Config\DkimConfig;
 use Infocyph\TalkingBytes\Email\Config\LogEmailConfig;
 use Infocyph\TalkingBytes\Email\Config\SendmailConfig;
@@ -33,46 +35,55 @@ use Infocyph\TalkingBytes\Retry\RetryPolicy;
 
 final readonly class Emailer
 {
+    private Clock $clock;
+
     private EventDispatcher $events;
 
-    public function __construct(private EmailTransport $transport, ?EventDispatcher $events = null)
-    {
+    public function __construct(
+        private EmailTransport $transport,
+        ?EventDispatcher $events = null,
+        ?Clock $clock = null,
+    ) {
         $this->events = new BestEffortEventDispatcher($events ?? new NullEventDispatcher());
+        $this->clock = $clock ?? Clock::system();
     }
 
-    public static function fake(): self
+    public static function fake(?EventDispatcher $events = null, ?Clock $clock = null): self
     {
-        return new self(new FakeEmailTransport());
+        return new self(new FakeEmailTransport(), $events, $clock);
     }
 
-    public static function usingLog(LogEmailConfig $config): self
+    public static function usingLog(LogEmailConfig $config, ?EventDispatcher $events = null, ?Clock $clock = null): self
     {
-        return new self(new LogEmailTransport($config));
+        return new self(new LogEmailTransport($config), $events, $clock);
     }
 
-    public static function usingMailFunction(): self
+    public static function usingMailFunction(?EventDispatcher $events = null, ?Clock $clock = null): self
     {
-        return new self(new MailFunctionTransport());
+        return new self(new MailFunctionTransport(), $events, $clock);
     }
 
-    public static function usingNull(): self
+    public static function usingNull(?EventDispatcher $events = null, ?Clock $clock = null): self
     {
-        return new self(new NullEmailTransport());
+        return new self(new NullEmailTransport(), $events, $clock);
     }
 
-    public static function usingSendmail(SendmailConfig $config = new SendmailConfig()): self
-    {
-        return new self(new SendmailTransport($config));
+    public static function usingSendmail(
+        SendmailConfig $config = new SendmailConfig(),
+        ?EventDispatcher $events = null,
+        ?Clock $clock = null,
+    ): self {
+        return new self(new SendmailTransport($config), $events, $clock);
     }
 
-    public static function usingSmtp(SmtpConfig $config): self
+    public static function usingSmtp(SmtpConfig $config, ?EventDispatcher $events = null, ?Clock $clock = null): self
     {
-        return new self(new SmtpTransport($config));
+        return new self(new SmtpTransport($config), $events, $clock);
     }
 
-    public static function usingSpool(SpoolConfig $config): self
+    public static function usingSpool(SpoolConfig $config, ?EventDispatcher $events = null, ?Clock $clock = null): self
     {
-        return new self(new SpoolEmailTransport($config));
+        return new self(new SpoolEmailTransport($config), $events, $clock);
     }
 
     public function assertable(): AssertableEmailTransport
@@ -93,13 +104,13 @@ final readonly class Emailer
             'bcc_count' => count($message->envelope()->bcc),
         ]);
 
-        $startedAt = microtime(true);
+        $startedAt = $this->clock->monotonic();
         $result = $this->transport->send($message->prepare());
 
         $this->events->dispatch('email.send.finish', [
             'successful' => $result->successful,
             'error' => $result->error,
-            'duration_ms' => (int) round((microtime(true) - $startedAt) * 1000),
+            'duration_ms' => (int) round(($this->clock->monotonic() - $startedAt) * 1000),
             'transport' => is_string($result->metadata['transport'] ?? null)
                 ? $result->metadata['transport']
                 : null,
@@ -116,7 +127,7 @@ final readonly class Emailer
 
     public function withDkim(DkimConfig $config): self
     {
-        return new self(new DkimSigningTransport($this->transport, $config), $this->events);
+        return new self(new DkimSigningTransport($this->transport, $config), $this->events, $this->clock);
     }
 
     /**
@@ -124,7 +135,7 @@ final readonly class Emailer
      */
     public function withFallback(array $fallbackTransports): self
     {
-        return new self(new FallbackEmailTransport($this->transport, $fallbackTransports), $this->events);
+        return new self(new FallbackEmailTransport($this->transport, $fallbackTransports), $this->events, $this->clock);
     }
 
     /**
@@ -132,7 +143,7 @@ final readonly class Emailer
      */
     public function withLogging(callable $logger): self
     {
-        return new self(new LoggingEmailTransport($this->transport, $logger), $this->events);
+        return new self(new LoggingEmailTransport($this->transport, $logger), $this->events, $this->clock);
     }
 
     public function withPsrLogger(object $logger, string $level = 'info'): self
@@ -142,16 +153,20 @@ final readonly class Emailer
 
     public function withRateLimit(RateLimiter $rateLimiter): self
     {
-        return new self(new RateLimitedEmailTransport($this->transport, $rateLimiter), $this->events);
+        return new self(new RateLimitedEmailTransport($this->transport, $rateLimiter), $this->events, $this->clock);
     }
 
-    public function withRetry(RetryPolicy $retryPolicy): self
+    public function withRetry(RetryPolicy $retryPolicy, ?CancellationSignal $cancellation = null): self
     {
-        return new self(new RetryEmailTransport($this->transport, $retryPolicy), $this->events);
+        return new self(
+            new RetryEmailTransport($this->transport, $retryPolicy, $cancellation),
+            $this->events,
+            $this->clock,
+        );
     }
 
     public function withTransport(EmailTransport $transport): self
     {
-        return new self($transport, $this->events);
+        return new self($transport, $this->events, $this->clock);
     }
 }

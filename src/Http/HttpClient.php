@@ -12,6 +12,7 @@ use Infocyph\TalkingBytes\Auth\BearerTokenAuth;
 use Infocyph\TalkingBytes\Auth\SignedRequestAuth;
 use Infocyph\TalkingBytes\Core\Event\EventDispatcher;
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
+use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
 use Infocyph\TalkingBytes\Http\Body\MultipartBody;
 use Infocyph\TalkingBytes\Http\Contract\HttpMiddleware;
 use Infocyph\TalkingBytes\Http\Contract\HttpTransport;
@@ -296,9 +297,11 @@ final readonly class HttpClient
         return new self($this->transport, $this->middlewares, $this->defaultOptions, $headers, $this->authenticators, $this->cookieJar);
     }
 
-    public function withHttpRetry(?HttpRetryPolicy $policy = null): self
-    {
-        return $this->withRetry($policy ?? HttpRetryPolicy::standard());
+    public function withHttpRetry(
+        ?HttpRetryPolicy $policy = null,
+        ?CancellationSignal $cancellation = null,
+    ): self {
+        return $this->withRetry($policy ?? HttpRetryPolicy::standard(), $cancellation);
     }
 
     public function withIdempotency(string $headerName = 'Idempotency-Key'): self
@@ -332,9 +335,9 @@ final readonly class HttpClient
         return $this->withMiddleware(new RateLimitMiddleware($rateLimiter));
     }
 
-    public function withRetry(RetryPolicy $policy): self
+    public function withRetry(RetryPolicy $policy, ?CancellationSignal $cancellation = null): self
     {
-        return $this->withMiddleware(new RetryMiddleware($policy));
+        return $this->withMiddleware(new RetryMiddleware($policy, $cancellation));
     }
 
     public function withSigner(RequestSigner $signer): self

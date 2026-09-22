@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace Infocyph\TalkingBytes\Email\Mailbox;
 
+use Infocyph\TalkingBytes\Core\Event\EventDispatcher;
+use Infocyph\TalkingBytes\Core\Support\Clock;
+use Infocyph\TalkingBytes\Core\Support\Sleeper;
 use Infocyph\TalkingBytes\Email\Config\ImapConfig;
 use Infocyph\TalkingBytes\Email\Parser\EmailParser;
 use Infocyph\TalkingBytes\Email\Parser\RawEmailParser;
@@ -15,9 +18,13 @@ final readonly class Mailbox
         private EmailParser $parser = new RawEmailParser(),
     ) {}
 
-    public static function usingImap(ImapConfig $config): self
-    {
-        return new self(new ImapSocketTransport($config));
+    public static function usingImap(
+        ImapConfig $config,
+        ?EventDispatcher $events = null,
+        ?Clock $clock = null,
+        ?Sleeper $sleeper = null,
+    ): self {
+        return new self(new ImapSocketTransport($config, events: $events, clock: $clock, sleeper: $sleeper));
     }
 
     public function archive(string $sourceFolder, int $uid, ?string $archiveFolder = null): void

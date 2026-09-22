@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace Infocyph\TalkingBytes\Email\Mailbox;
 
+use Infocyph\TalkingBytes\Core\Event\EventDispatcher;
+use Infocyph\TalkingBytes\Core\Support\Clock;
+use Infocyph\TalkingBytes\Core\Support\Sleeper;
 use Infocyph\TalkingBytes\Email\Config\Pop3Config;
 use Infocyph\TalkingBytes\Email\Parser\EmailParser;
 use Infocyph\TalkingBytes\Email\Parser\RawEmailParser;
@@ -16,9 +19,13 @@ final readonly class Pop3Mailbox
         private EmailParser $parser = new RawEmailParser(),
     ) {}
 
-    public static function usingConfig(Pop3Config $config): self
-    {
-        return new self(new Pop3SocketTransport($config));
+    public static function usingConfig(
+        Pop3Config $config,
+        ?EventDispatcher $events = null,
+        ?Clock $clock = null,
+        ?Sleeper $sleeper = null,
+    ): self {
+        return new self(new Pop3SocketTransport($config, $events, $clock, $sleeper));
     }
 
     public function delete(int $messageNumber): void

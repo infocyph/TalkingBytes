@@ -24,6 +24,16 @@ Inject a dispatcher
 
    $client = HttpClient::curl($events);
 
+Email factories accept the same injected dispatcher:
+
+.. code-block:: php
+
+   use Infocyph\TalkingBytes\Email\Email;
+
+   $sender = Email::sender($events)->usingNull();
+   $receiver = Email::receiver($events);
+   $mailbox = Email::mailbox($events);
+
 Compatibility adapter
 ---------------------
 
@@ -31,8 +41,9 @@ Compatibility adapter
 
    \Infocyph\TalkingBytes\Core\Event\CommunicationEventBus::listen($listener);
 
-The static bus is retained for compatibility. Prefer constructor/factory
-injection in long-running workers and tests to avoid global state leakage.
+The static bus is retained only as an explicit compatibility facade. Normal
+protocol graphs do not consult it. Prefer constructor/factory injection in all
+new code, especially long-running workers and Fiber-based runtimes.
 
 Event families
 --------------

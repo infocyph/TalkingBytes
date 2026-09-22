@@ -6,6 +6,7 @@ namespace Infocyph\TalkingBytes\Grpc\Middleware;
 
 use Closure;
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
+use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
 use Infocyph\TalkingBytes\Core\Support\Clock;
 use Infocyph\TalkingBytes\Core\Support\Sleeper;
 use Infocyph\TalkingBytes\Grpc\Contract\GrpcMiddleware;
@@ -21,6 +22,7 @@ final readonly class RetryMiddleware implements GrpcMiddleware
 
     public function __construct(
         private RetryPolicy $policy,
+        private ?CancellationSignal $cancellation = null,
         ?Clock $clock = null,
         ?Sleeper $sleeper = null,
     ) {
@@ -37,6 +39,10 @@ final readonly class RetryMiddleware implements GrpcMiddleware
         $startedAt = $this->clock->monotonic();
         $attempt = 1;
         while (true) {
+            if ($this->cancellation?->isRequested() === true) {
+                return $this->cancelled($attempt - 1);
+            }
+
             $attemptRequest = $this->withRemainingDeadline($request, $startedAt);
             $result = $next($attemptRequest);
             $decision = $this->policy->decide(new RetryContext($attempt, $result));
@@ -44,9 +50,25 @@ final readonly class RetryMiddleware implements GrpcMiddleware
                 return $result;
             }
 
-            $this->sleeper->milliseconds($decision->delayMs);
+            if ($this->cancellation === null) {
+                $this->sleeper->milliseconds($decision->delayMs);
+            } elseif (!$this->sleeper->millisecondsInterruptibly($decision->delayMs, $this->cancellation)) {
+                return $this->cancelled($attempt);
+            }
             $attempt++;
         }
+    }
+
+    private function cancelled(int $attempts): CommunicationResult
+    {
+        return CommunicationResult::failure(
+            'gRPC operation cancelled.',
+            metadata: [
+                'cancelled' => true,
+                'attempts' => max(0, $attempts),
+                'transport' => 'grpc',
+            ],
+        );
     }
 
     private function delayFitsDeadline(GrpcRequest $request, float $startedAt, int $delayMs): bool
