@@ -42,7 +42,12 @@ final readonly class GrpcClientFactory
         array $config = [],
     ): GrpcClient {
         return $this->applyResolvedConfig(
-            GrpcClient::usingGeneratedStub($stubClient, $methodMap, $this->events),
+            GrpcClient::usingGeneratedStub(
+                $stubClient,
+                $methodMap,
+                $this->events,
+                $this->cancellation,
+            ),
             $config,
         );
     }

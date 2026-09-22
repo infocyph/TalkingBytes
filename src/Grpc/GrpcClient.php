@@ -58,8 +58,9 @@ final readonly class GrpcClient
         object $stubClient,
         array $methodMap = [],
         ?EventDispatcher $events = null,
+        ?CancellationSignal $cancellation = null,
     ): self {
-        $invoker = new GeneratedStubGrpcInvoker($stubClient, $methodMap);
+        $invoker = new GeneratedStubGrpcInvoker($stubClient, $methodMap, $cancellation);
 
         return self::usingNativeStreaming($invoker, $invoker, $events);
     }

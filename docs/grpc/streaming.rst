@@ -67,3 +67,16 @@ Use explicit binary metadata APIs:
 - ``firstBinary('trace-bin')``
 
 Non-binary metadata continues to use ``withValue()``, ``with()``, and ``values()``.
+
+Generated-stream cancellation
+-----------------------------
+
+``GeneratedStubGrpcInvoker`` accepts an optional ``CancellationSignal``.
+``GrpcClient::usingGeneratedStub()`` exposes the same optional cancellation
+argument.
+
+Cancellation is checked between outbound writes and inbound response
+deliveries. When cancellation or a consumer callback failure is observed,
+TalkingBytes invokes the native call object's ``cancel()`` method when
+available before propagating the failure. Streaming remains incremental; the
+adapter does not buffer a complete stream in memory.
