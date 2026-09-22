@@ -422,7 +422,7 @@ final readonly class GeneratedStubGrpcInvoker implements NativeGrpcInvoker, Nati
     }
 
     /**
-     * @param array<string, string> $methodMap
+     * @param array<array-key, mixed> $methodMap
      * @return array<string, string>
      */
     private function normalizeMethodMap(ReflectionObject $reflection, array $methodMap): array
