@@ -283,7 +283,7 @@ final readonly class CurlMultiTransport
             ];
         }
 
-        return ['error' => null, 'running' => (int) $running];
+        return ['error' => null, 'running' => is_int($running) ? $running : 0];
     }
 
     /**
@@ -322,36 +322,6 @@ final readonly class CurlMultiTransport
                 ]);
             }
         }
-    }
-
-    /**
-     * @param array<int|string, HttpRequest> $requests
-     * @param array<int|string, CommunicationResult> $results
-     */
-    private function finishPool(
-        array $requests,
-        array $results,
-        float $startedAt,
-        bool $stoppedScheduling,
-        bool $cancelled,
-    ): PoolResult {
-        $pool = new PoolResult($results, [
-            'duration_ms' => (int) (($this->clock->monotonic() - $startedAt) * 1000),
-            'stopped_scheduling' => $stoppedScheduling,
-            'cancelled' => $cancelled,
-        ]);
-
-        $this->events->dispatch('http.pool.finish', [
-            'request_count' => count($requests),
-            'successful_count' => $pool->successfulCount(),
-            'failed_count' => $pool->failedCount(),
-            'duration_ms' => $pool->metadata['duration_ms'],
-            'stopped_scheduling' => $stoppedScheduling,
-            'cancelled' => $cancelled,
-            'transport' => 'curl-multi',
-        ]);
-
-        return $pool;
     }
 
     /**
@@ -398,6 +368,36 @@ final readonly class CurlMultiTransport
         }
 
         return $result;
+    }
+
+    /**
+     * @param array<int|string, HttpRequest> $requests
+     * @param array<int|string, CommunicationResult> $results
+     */
+    private function finishPool(
+        array $requests,
+        array $results,
+        float $startedAt,
+        bool $stoppedScheduling,
+        bool $cancelled,
+    ): PoolResult {
+        $pool = new PoolResult($results, [
+            'duration_ms' => (int) (($this->clock->monotonic() - $startedAt) * 1000),
+            'stopped_scheduling' => $stoppedScheduling,
+            'cancelled' => $cancelled,
+        ]);
+
+        $this->events->dispatch('http.pool.finish', [
+            'request_count' => count($requests),
+            'successful_count' => $pool->successfulCount(),
+            'failed_count' => $pool->failedCount(),
+            'duration_ms' => $pool->metadata['duration_ms'],
+            'stopped_scheduling' => $stoppedScheduling,
+            'cancelled' => $cancelled,
+            'transport' => 'curl-multi',
+        ]);
+
+        return $pool;
     }
 
     /**
