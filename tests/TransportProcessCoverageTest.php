@@ -229,5 +229,5 @@ it('passes all envelope recipients to sendmail without exposing bcc headers', fu
 
     $rawBuilder = new \Infocyph\TalkingBytes\Email\System\RawEmailBuilder();
     $raw = $rawBuilder->build($message->prepare());
-    expect($raw)->not->toContain('Bcc:');
+    expect($raw->headers)->not->toContain('Bcc:');
 });
