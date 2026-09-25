@@ -315,3 +315,46 @@ it('uses monotonic retention for in-memory replay claims across wall-clock jumps
     $mono += 1.0;
     expect($store->claim('tenant-a', 'evt_clock_jump', 60))->toBeTrue();
 });
+
+
+it('keeps an accepted delivery claimed across bounded backward wall-clock correction', function (): void {
+    $wall = 3_000_000.0;
+    $mono = 10_000.0;
+    $clock = new Clock(
+        static function () use (&$wall): float {
+            return $wall;
+        },
+        static function () use (&$mono): float {
+            return $mono;
+        },
+    );
+    $verifier = new \Infocyph\TalkingBytes\Webhook\WebhookVerifier(
+        'secret',
+        maxAgeSeconds: 300,
+        clock: $clock,
+    );
+    $store = new InMemoryWebhookReplayStore(clock: $clock);
+    $receiver = (new WebhookReceiver($verifier))->withReplayStore($store, 1);
+
+    [$payload, $headers] = WebhookTestFactory::signedJson(
+        'secret',
+        'order.created',
+        ['id' => 12],
+        'evt_clock_correction',
+        (int) $wall,
+    );
+
+    expect($receiver->receive($payload, $headers)->deliveryId)->toBe('evt_clock_correction');
+
+    $mono += 302.0;
+    $wall += 299.0;
+
+    expect(fn() => $receiver->receive($payload, $headers))
+        ->toThrow(RuntimeException::class, 'already been processed');
+
+    $mono += 2.0;
+    $wall += 2.0;
+
+    expect(fn() => $receiver->receive($payload, $headers))
+        ->toThrow(RuntimeException::class, 'expired_timestamp');
+});
