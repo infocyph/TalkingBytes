@@ -362,6 +362,10 @@ final readonly class GeneratedStubGrpcInvoker implements NativeGrpcInvoker, Nati
 
     private function finishClientWrites(mixed $call): void
     {
+        if (!is_object($call)) {
+            throw new RuntimeException('Unsupported client stream call result.');
+        }
+
         if (method_exists($call, 'writesDone')) {
             $call->writesDone();
 
