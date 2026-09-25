@@ -128,7 +128,7 @@ the host keeps worker heartbeat, restart, release-generation and process policy.
 Inbound streaming scope in 2.2
 ------------------------------
 
-The host-controlled inbound boundary in 2.1 is deliberately request/response:
+The host-controlled inbound boundary in 2.2 is deliberately request/response:
 one accepted ``GrpcInboundExchange`` exposes one normalized
 ``GrpcInboundRequest`` and is completed with exactly one
 ``GrpcInboundResponse``.
