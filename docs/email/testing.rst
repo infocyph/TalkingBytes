@@ -24,8 +24,8 @@ Available assertion helpers include:
 - ``assertSentSubject()``
 - ``assertHasAttachment()``
 - ``assertHasInlineAttachment()``
-- ``assertHeader()``
-- ``assertBodyContains()``
+- ``assertSentWhere()`` for custom predicates
+- ``lastMessage()`` for direct message inspection
 
 Mailbox testing
 ---------------
@@ -50,8 +50,9 @@ Spool tests include:
 
 - peek/receive/receiveMany
 - delete/move/failed quarantine behavior
-- lock and processing directory paths
-- concurrent-safe file handling assumptions
+- non-destructive peek failures
+- atomic claim contention and processing-directory ownership
+- crash/restore, collision, symlink, and same-filesystem claim boundaries
 
 Event assertions
 ----------------
