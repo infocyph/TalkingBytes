@@ -120,6 +120,10 @@ final class RequestSecurityGuard
 
     private static function isPrivateOrReservedIp(string $ip): bool
     {
+        if (preg_match('/^::ffff:(\d+\.\d+\.\d+\.\d+)$/i', $ip, $mapped) === 1) {
+            return self::isPrivateOrReservedIp($mapped[1]);
+        }
+
         if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) === false) {
             return true;
         }
