@@ -104,3 +104,50 @@ jobs:
       - name: Build documentation with warnings as errors
         run: sphinx-build -W --keep-going -b html docs build/docs
 
+
+
+  native-grpc-integration:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup PHP with pinned gRPC extension
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.5"
+          extensions: "curl, fileinfo, openssl, grpc-1.82.0"
+          coverage: none
+
+      - name: Setup Python peer runtime
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install project dependencies
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Install pinned native gRPC integration dependencies
+        run: |
+          composer require --dev             grpc/grpc:1.82.0             google/protobuf:5.36.2             --no-interaction             --prefer-dist             --no-progress             --with-all-dependencies
+          python -m pip install --disable-pip-version-check grpcio==1.82.0
+
+      - name: Verify native prerequisites
+        run: |
+          php -r '
+          if (!extension_loaded("grpc")) {
+              fwrite(STDERR, "ext-grpc is not loaded\n");
+              exit(1);
+          }
+          if (!class_exists(Grpc\\BaseStub::class) || !class_exists(Google\\Protobuf\\GPBEmpty::class)) {
+              fwrite(STDERR, "grpc/grpc or google/protobuf is unavailable\n");
+              exit(1);
+          }
+          '
+
+      - name: Run native gRPC interoperability tests
+        env:
+          RUN_GRPC_NATIVE_INTEGRATION: "1"
+          GRPC_PYTHON_BINARY: python
+        run: vendor/bin/pest --configuration=vendor/infocyph/phpforge/resources/pest.xml --bootstrap=vendor/autoload.php --fail-on-skipped tests/GrpcNativeIntegrationTest.php
