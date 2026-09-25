@@ -2,7 +2,7 @@
 
 ## Status and decision
 
-**Audit date:** 2026-09-25. **State:** release hold after independent cross-check; F01, F03, F04, F08, F11 and F12 reopened for verified edge-case gaps. PR #14 remains draft and unmerged.
+**Audit date:** 2026-09-25. **State:** implementation complete after independent cross-check remediation; F01, F03, F04, F08, F11 and F12 edge-case gaps are fixed and verified on corrected source candidate `eb0bb983`. PR #14 remains draft and unmerged for release-owner approval.
 
 - Audited working revision: `bd2d198680e86cbac49425e898e591ed6194cbdb`.
 - Latest version tag: `2.1`, resolving to commit `29fe13043225bfcf477adfa1f4dd1dc11fa4723f`.
@@ -63,11 +63,11 @@ Owners: `src/Http/HttpRequest.php:433`, `src/Auth/ApiKeyAuth.php`, `src/Auth/Sig
 
 **Reproduction:** prepare a request with `ApiKeyAuth('X-API-Key', 'audit-secret')`, redirect to another origin with authentication preservation disabled, then inspect the prepared headers. The API key remains. A real localhost redirect from host `127.0.0.1` to host `localhost` delivered that key to both origins. Preparing `ApiKeyAuth('X-Vendor-Credential', 'audit-secret')` and passing its headers through the event redactor also retains the secret. Current code removes/redacts fixed header names, but built-in authenticators support arbitrary names.
 
-- [ ] Track the credential-bearing header/query fields supplied by native authenticators in the request's existing ownership flow; bound any added metadata.
-- [ ] Strip all native authentication outputs on an origin change and apply credential policy consistently before each hop. Account for custom signature-header names and explicit sensitive headers.
-- [ ] Use the same sensitivity information in request-start events, logging middleware, URL redaction and webhook HTTP events. Redact nested query credentials when the auth API can create them.
-- [ ] Add a documented extension route for caller-provided authenticators; do not guess that every custom header is harmless or remove every application header indiscriminately.
-- [ ] Test host/port/scheme changes, same-origin retention, API-key headers and queries, custom signature fields, failed requests, callbacks, and sentinel secrets in every emitted payload.
+- [x] Track the credential-bearing header/query fields supplied by native authenticators in the request's existing ownership flow; bound any added metadata.
+- [x] Strip all native authentication outputs on an origin change and apply credential policy consistently before each hop. Account for custom signature-header names and explicit sensitive headers.
+- [x] Use the same sensitivity information in request-start events, logging middleware, URL redaction and webhook HTTP events. Redact nested query credentials when the auth API can create them.
+- [x] Add a documented extension route for caller-provided authenticators; do not guess that every custom header is harmless or remove every application header indiscriminately.
+- [x] Test host/port/scheme changes, same-origin retention, API-key headers and queries, custom signature fields, failed requests, callbacks, and sentinel secrets in every emitted payload.
 
 **Acceptance:** the redirect target and observers never receive credentials outside their intended scope. Redirects remain disabled by default. No secret values appear in exceptions introduced by validation.
 
@@ -95,11 +95,11 @@ Owners: `src/Http/HttpClient.php:243`, `src/Http/Transport/CurlTransport.php`, `
 
 **Reproduction B:** with `allowDomainCookies:true`, a response from `attacker.co.uk` setting `Domain=co.uk` installs `session=injected`; the jar sends it to `victim.co.uk`. Default host-only mode avoids this second case.
 
-- [ ] Attribute each response's cookies to its actual origin. Prefer per-hop cookie storage/application so intermediate cookies and path/security rules remain correct.
-- [ ] Do not trust an unrelated result field or arbitrary caller metadata as authoritative provenance without a clear transport contract.
-- [ ] Re-evaluate Cookie headers at each redirect; test path changes, HTTPS downgrade policy, return-to-origin chains and intermediate responses.
-- [ ] Keep domain cookies disabled by default. For opt-in domain cookies, require an effective public-suffix policy or explicit allowed parent-domain policy; fail closed where policy cannot establish the boundary. Do not ship a short hard-coded suffix list as complete coverage.
-- [ ] Test public suffixes, private suffixes, IP hosts, host-only cookies and legitimate subdomain sharing.
+- [x] Attribute each response's cookies to its actual origin. Prefer per-hop cookie storage/application so intermediate cookies and path/security rules remain correct.
+- [x] Do not trust an unrelated result field or arbitrary caller metadata as authoritative provenance without a clear transport contract.
+- [x] Re-evaluate Cookie headers at each redirect; test path changes, HTTPS downgrade policy, return-to-origin chains and intermediate responses.
+- [x] Keep domain cookies disabled by default. For opt-in domain cookies, require an effective public-suffix policy or explicit allowed parent-domain policy; fail closed where policy cannot establish the boundary. Do not ship a short hard-coded suffix list as complete coverage.
+- [x] Test public suffixes, private suffixes, IP hosts, host-only cookies and legitimate subdomain sharing.
 
 **Acceptance:** a redirect target cannot set cookies for the starting origin, and an unrelated registrant cannot set shared cookies through a public suffix. [Cookie storage rules](https://www.rfc-editor.org/rfc/rfc6265#section-5.3) provide the protocol reference.
 
@@ -111,11 +111,11 @@ Owners: `src/Http/Internal/ResponseBodyCollector.php:95`, `src/Http/Transport/Cu
 
 **Reproduction:** prefill a target with `KEEP-ORIGINAL`. A local server declares `Content-Length: 100` but sends `PART` and closes. Both single and multi streamed downloads report failure yet replace the target with `PART`. The collector promotes the temporary file before the transport decides success. Buffered download writes also precede the cURL error check by source inspection.
 
-- [ ] Separate close/flush from commit. Promote only after transport completion and the documented accepted-response policy are known.
-- [ ] Abort temporary output on cURL failure, cancellation, invalid redirects, callback failure and configured size violations.
-- [ ] Give buffered downloads the same atomic replacement guarantees and failure ordering.
-- [ ] Define whether HTTP error bodies are saved; prefer an explicit opt-in when saving an error response would overwrite a successful artifact. Preserve documented behavior where a separate artifact API is necessary.
-- [ ] Test truncated bodies, resets, connect failures, timeouts, zero-byte success, HTTP errors, disk failures and cleanup in single/multi modes.
+- [x] Separate close/flush from commit. Promote only after transport completion and the documented accepted-response policy are known.
+- [x] Abort temporary output on cURL failure, cancellation, invalid redirects, callback failure and configured size violations.
+- [x] Give buffered downloads the same atomic replacement guarantees and failure ordering.
+- [x] Define whether HTTP error bodies are saved; prefer an explicit opt-in when saving an error response would overwrite a successful artifact. Preserve documented behavior where a separate artifact API is necessary.
+- [x] Test truncated bodies, resets, connect failures, timeouts, zero-byte success, HTTP errors, disk failures and cleanup in single/multi modes.
 
 **Acceptance:** unsuccessful transfers preserve existing targets; new failed targets do not appear; temporary resources are released. Successful output is published atomically.
 
@@ -175,11 +175,11 @@ Independent RSA/Sodium probes and byte checks found:
 2. A correctly constructed `h=from:from` signature with one actual From header is rejected. An absent oversigned occurrence must contribute no bytes, not invalidate verification.
 3. Empty relaxed bodies canonicalize to hex `0d0a`; the required relaxed result is empty. Both signer and verifier repeat this error.
 
-- [ ] Preserve and enforce relevant key constraints at the verification boundary.
-- [ ] Implement absent-header and empty-body semantics without relaxing mandatory From coverage.
-- [ ] Reuse the existing canonicalization owner where appropriate; avoid two subtly different implementations.
-- [ ] Add independent vectors for all three cases and negative variants.
-- [ ] During the same focused review, cover `verifyAll()` retaining other signed DKIM fields, folded signature whitespace, optional key version tags, ambiguous DNS records and revoked keys. These additional cases are review targets, not all reproduced findings.
+- [x] Preserve and enforce relevant key constraints at the verification boundary.
+- [x] Implement absent-header and empty-body semantics without relaxing mandatory From coverage.
+- [x] Reuse the existing canonicalization owner where appropriate; avoid two subtly different implementations.
+- [x] Add independent vectors for all three cases and negative variants.
+- [x] During the same focused review, cover `verifyAll()` retaining other signed DKIM fields, folded signature whitespace, optional key version tags, ambiguous DNS records and revoked keys. These additional cases are review targets, not all reproduced findings.
 
 **Acceptance:** key policy is enforced and valid independent messages interoperate. Reference: [RFC 6376](https://www.rfc-editor.org/rfc/rfc6376), sections 3.4.4, 3.5 and 3.6.1.
 
@@ -219,10 +219,10 @@ Owner: `src/Email/Receiver/SpoolEmailReceiver.php:232`; `docs/email/spool-receiv
 
 **Reproduction:** configure `lockBeforeRead:true`, `deleteAfterRead:true`, no processing directory. A parser invokes a second receiver after the first has read the file but before finalization. Both return the same message. This deterministically models overlapping consumers: the lock is released before parse/finalize and cannot provide the documented worker safety by itself.
 
-- [ ] Define exclusive consume ownership separately from peek/read locks. Prefer an atomic claim before reading; retain ownership through success/failure handling.
-- [ ] Handle losing a claim as contention, not a malformed email; do not quarantine another worker's input.
-- [ ] Test independent processes, crash after claim, parse failure and cleanup. State delivery semantics explicitly; do not promise exactly-once application processing.
-- [ ] Audit symlink acceptance, canonical directory overlap, target collisions and rename across filesystems while touching this lifecycle. These are source-review concerns needing dedicated tests, not all proven exploits.
+- [x] Define exclusive consume ownership separately from peek/read locks. Prefer an atomic claim before reading; retain ownership through success/failure handling.
+- [x] Handle losing a claim as contention, not a malformed email; do not quarantine another worker's input.
+- [x] Test independent processes, crash after claim, parse failure and cleanup. State delivery semantics explicitly; do not promise exactly-once application processing.
+- [x] Audit symlink acceptance, canonical directory overlap, target collisions and rename across filesystems while touching this lifecycle. These are source-review concerns needing dedicated tests, not all proven exploits.
 
 **Acceptance:** concurrent receive operations cannot return the same claimed source; failures are recoverable under the documented policy. Peek must remain non-consuming.
 
@@ -234,10 +234,10 @@ Owners: `src/Webhook/WebhookReceiver.php`, `src/Webhook/WebhookVerifier.php`, `s
 
 **Reproduction:** inject the same clock into verifier and store; use verifier max age 300 seconds and replay TTL 1 second. Accept a signed delivery at time 1,000,000, advance two seconds, and replay unchanged headers/body. It is accepted again. Default TTL 86,400 with default tolerance avoids this specific configuration; constructor validation currently permits the unsafe pair.
 
-- [ ] Ensure claims cover the complete remaining signature-acceptance window, including accepted future timestamps and boundary precision. Derive effective retention or reject unsafe combinations through an additive policy API.
-- [ ] Keep protocol timestamp validation on wall time; use monotonic duration accounting for process-local retention where appropriate. Document distributed backend TTL semantics and limits.
-- [ ] Test future/old timestamp boundaries, short TTL, fractional timestamps, wall-clock jumps, backend failure and duplicate contention.
-- [ ] Preserve provider neutrality, strict v2 event/delivery binding and fail-closed store behavior.
+- [x] Ensure claims cover the complete remaining signature-acceptance window, including accepted future timestamps and boundary precision. Derive effective retention or reject unsafe combinations through an additive policy API.
+- [x] Keep protocol timestamp validation on wall time; use monotonic duration accounting for process-local retention where appropriate. Document distributed backend TTL semantics and limits.
+- [x] Test future/old timestamp boundaries, short TTL, fractional timestamps, wall-clock jumps, backend failure and duplicate contention.
+- [x] Preserve provider neutrality, strict v2 event/delivery binding and fail-closed store behavior.
 
 **Acceptance:** a delivery cannot become replayable while its signature is still accepted under the configured policy.
 
@@ -261,12 +261,12 @@ Each batch is reviewable independently; add a failing regression before changing
 
 | Batch | Scope | Status |
 | --- | --- | --- |
-| 1 | HTTP trust boundaries — F01-F03 | Reopened: F01/F03 cross-check gaps in progress |
-| 2 | HTTP transfer correctness — F04-F05 | Reopened: F04 redirect publication gap in progress |
-| 3 | Email data integrity — F09-F11 | Reopened: F11 peek ownership gap in progress |
-| 4 | Protocol interoperability — F06-F08 | Reopened: F08 DNS versionless-key gap in progress |
-| 5 | Replay policy — F12 | Reopened: wall/monotonic clock-correction gap in progress |
-| 6 | Measurement/docs/release | Release hold; exact-candidate verification must rerun after fixes |
+| 1 | HTTP trust boundaries — F01-F03 | Verified after cross-check remediation |
+| 2 | HTTP transfer correctness — F04-F05 | Verified after cross-check remediation |
+| 3 | Email data integrity — F09-F11 | Verified after cross-check remediation |
+| 4 | Protocol interoperability — F06-F08 | Verified after cross-check remediation, including native gRPC |
+| 5 | Replay policy — F12 | Verified after cross-check remediation |
+| 6 | Measurement/docs/release | Corrected source candidate verified; final tracker/docs commit requires exact-head rerun |
 
 1. **HTTP trust boundaries:** F01–F03. Establish provenance/sensitivity handling once in existing owners; verify redirect chains and environment isolation.
 2. **HTTP transfer correctness:** F04–F05. Shared commit/abort policy and single/multi response parity; include redirects and uploads in affected lifecycle tests.
@@ -303,17 +303,30 @@ Before changing hot paths, retain a baseline on the audited revision. Compare li
 
 ### Exact-candidate release gate
 
-- [ ] All F01–F12 fixes and negative regressions pass; remaining follow-ups have explicit scope/status.
+- [x] All F01–F12 fixes and negative regressions pass; remaining follow-ups have explicit scope/status.
 - [x] Public API/configuration/wire changes are classified: 2.2 uses additive minor APIs plus protocol/security corrections; the interactive generated-bidi coordination contract is explicitly deferred to a future major.
-- [ ] PHP 8.4 and 8.5, prefer-lowest/prefer-stable, static/security, benchmark, clean install and docs CI are green on the final corrected candidate.
-- [ ] Mailpit, minimal optional extensions and new native gRPC interoperability lanes pass with explicit prerequisites on the final corrected candidate.
+- [x] PHP 8.4 and 8.5, prefer-lowest/prefer-stable, static/security, benchmark, clean install and docs CI are green on corrected source candidate `eb0bb983` (Security & Standards run #150).
+- [x] Mailpit, minimal optional extensions and native gRPC interoperability lanes pass on corrected source candidate `eb0bb983` (Security & Standards run #150).
 - [x] Required process/filesystem/socket tests pass on the repository CI platform; Linux-native validation and portable fallback limits are documented without implying an untested Windows/macOS native-process matrix.
 - [x] Release notes document conditional risks, migrations, affected APIs and mitigations. No external notification or disclosure action is authorized by this plan.
 - [ ] **Release-owner action:** freeze/tag (and merge PR #14) only after approval, using the final green commit. Any later source/docs/CI change requires fresh candidate validation.
 
+### Cross-check remediation verification
+
+An independent read-only review of `19692db` reopened six edge cases. The corrected source candidate `eb0bb983` closes them with repository regressions:
+
+- **F01:** sensitivity tracking now rejects credential-header names longer than 256 bytes before native authentication adds the secret; the 256-byte boundary is covered through redirect stripping, redaction and cURL request events.
+- **F03:** cookie-jar context now survives supported transport decoration; native cURL marks cookie provenance as handled so the client does not re-attribute final redirect cookies to the starting origin. Direct and `SpyHttpTransport(CurlTransport)` return-to-origin chains are covered.
+- **F04:** buffered download publication is deferred until the entire redirect transaction succeeds. Intermediate 302 bodies, loops, blocked destinations, final HTTP errors and truncated final transfers preserve existing targets; failed missing targets stay absent and successful chains publish only the final body.
+- **F08:** DNS DKIM candidate selection now uses parsed tag semantics, accepts omitted `v=` while validating an explicit version, and retains revoked/ambiguous-key rejection. The RFC 8463 Ed25519 vector passes through an injected native DNS resolver without `v=DKIM1`.
+- **F11:** destructive spool failure handling is restricted to an owned consume claim. Failed `peek()` operations leave oversized, unreadable and parser-rejected source messages in place.
+- **F12:** replay retention includes the remaining signature window plus one max-age clock-correction budget. Process-local retention remains monotonic; distributed stores must honor TTL as an elapsed-duration lower bound. End-to-end independent wall/monotonic clocks cover the reported backward-correction replay case.
+
+Security & Standards run #150 passed on `eb0bb983`: PHP 8.4/8.5 analysis, prefer-lowest/prefer-stable QA, both benchmarks, production clean install, warning-free Sphinx docs, Mailpit, optional-capability coldness and native gRPC interoperability were green. The conditional Security Report job was skipped by workflow policy, while both analysis jobs passed.
+
 ### Final implementation verification
 
-The 2.2 implementation passed the complete Security & Standards candidate workflow on the implementation revision before this tracker-only update: PHP 8.4/8.5 analysis, prefer-lowest/prefer-stable QA, both benchmarks, production clean install, warning-free Sphinx docs, Mailpit, optional-capability coldness, and the real native gRPC interoperability lane. This final documentation commit must pass the same required workflow before release; PR checks are the authoritative exact-revision record.
+The implementation is complete on the corrected source candidate. This tracker/documentation update changes the commit hash, so the same required workflow must pass again on the final documentation head before release. PR checks remain the authoritative exact-revision record.
 
 ## Completion definition
 
