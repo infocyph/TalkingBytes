@@ -96,3 +96,12 @@ Common exceptions:
 - ``MailboxAuthenticationException``
 - ``MailboxProtocolException``
 - ``MailboxException`` base type
+
+Move safety
+-----------
+
+``move()`` prefers the server's native ``MOVE`` capability. If ``MOVE`` is
+unavailable, TalkingBytes requires ``UIDPLUS`` and uses ``UID COPY``, targeted
+``UID STORE ... \\Deleted`` and ``UID EXPUNGE <uid>``. Servers offering neither
+capability fail before message mutation; a move never falls back to bare
+``EXPUNGE``.
