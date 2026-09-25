@@ -36,10 +36,16 @@ Event payloads redact or omit:
 Replay retention policy
 -----------------------
 
-Replay claims are retained for at least the complete remaining signature
-acceptance window, even when a shorter custom replay TTL is configured. The
-receiver derives the effective TTL from the verified signature timestamp,
-verifier wall-clock instant, and configured max age. This includes valid
-future timestamps near the acceptance boundary. Distributed replay stores
-must interpret claim TTL as wall-clock retention and fail closed when a claim
-cannot be established.
+Replay claims are retained beyond the complete remaining signature acceptance
+window, even when a shorter custom replay TTL is configured. The receiver
+derives the effective TTL from the verified signature timestamp, verifier
+wall-clock instant, and configured max age, then reserves one additional
+max-age interval as a backward wall-clock correction budget. This includes
+valid future timestamps near the acceptance boundary.
+
+Process-local retention uses monotonic elapsed time. Distributed replay stores
+must honor the requested TTL as an elapsed-duration lower bound and must not
+expire a claim early because their wall clock moves. Deployments that permit
+backward corrections larger than the verifier max-age interval must configure
+a replay TTL large enough to cover that additional clock-discipline budget.
+Replay-store failures remain fail closed.
