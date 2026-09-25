@@ -33,6 +33,7 @@ final readonly class DkimVerifier
         if ($dkimField === null) {
             return new DkimVerificationResult(false, reason: 'DKIM-Signature header not found.');
         }
+
         return $this->verifyField($headers, $body, $dkimField);
     }
 
@@ -412,5 +413,4 @@ final readonly class DkimVerifier
 
         return openssl_verify($input, $decodedSignature, $key, OPENSSL_ALGO_SHA256) === 1;
     }
-
 }
