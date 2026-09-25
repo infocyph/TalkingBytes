@@ -221,10 +221,7 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
             return false;
         }
 
-        $sourceDevice = $source['dev'] ?? null;
-        $targetDevice = $target['dev'] ?? null;
-
-        return is_int($sourceDevice) && is_int($targetDevice) && $sourceDevice === $targetDevice;
+        return $source['dev'] === $target['dev'];
     }
 
     private function markFailed(string $file, string $reason, string $sourceFile): void
