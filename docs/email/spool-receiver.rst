@@ -62,3 +62,15 @@ Failure handling
 
 - read/parse failures trigger ``email.parse.failed`` and ``email.receive.finish`` with error metadata
 - quarantine is best-effort if filesystem operations fail
+
+Exclusive consumption
+---------------------
+
+``receive()`` / ``receiveParsed()`` atomically claim the selected source before
+parsing. A configured ``processingDirectory`` remains the preferred visible
+claim location; without one, TalkingBytes uses a hidden in-place claim whose
+name no longer matches the spool extension. Competing consumers that lose the
+claim treat it as contention and do not quarantine the message. ``peek()``
+remains non-consuming. A process crash can leave a claim file requiring
+operational recovery; this is at-least-once transport ownership, not an
+exactly-once application-processing guarantee.
