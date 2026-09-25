@@ -130,7 +130,13 @@ jobs:
 
       - name: Install pinned native gRPC integration dependencies
         run: |
-          composer require --dev             grpc/grpc:1.82.0             google/protobuf:5.36.2             --no-interaction             --prefer-dist             --no-progress             --with-all-dependencies
+          composer require --dev \
+            grpc/grpc:1.82.0 \
+            google/protobuf:4.33.6 \
+            --no-interaction \
+            --prefer-dist \
+            --no-progress \
+            --with-all-dependencies
           python -m pip install --disable-pip-version-check grpcio==1.82.0
 
       - name: Verify native prerequisites
