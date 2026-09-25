@@ -11,9 +11,9 @@ use Infocyph\TalkingBytes\Email\ValueObject\ParsedEmail;
 
 final readonly class DkimVerifier
 {
-    private Clock $clock;
-
     private DkimCanonicalizer $canonicalizer;
+
+    private Clock $clock;
 
     private DkimSignatureValidator $signatureValidator;
 
@@ -103,21 +103,9 @@ final readonly class DkimVerifier
         }
         [$signature, $h] = $signatureData;
 
-        $keyRecord = $this->resolver->resolve($domain, $selector);
-        if ($keyRecord === null) {
-            return new DkimVerificationResult(false, $domain, $selector, 'DKIM public key record not found.');
-        }
-
-        $publicKey = DkimPublicKeyParser::parse($keyRecord, $algorithm);
-        if ($publicKey === null) {
-            return new DkimVerificationResult(false, $domain, $selector, 'DKIM public key record is invalid.');
-        }
-
-        if (DkimPublicKeyParser::requiresStrictIdentity($keyRecord)
-            && isset($tags['i'])
-            && !$this->identityMatchesDomainExactly($tags['i'], $domain)
-        ) {
-            return new DkimVerificationResult(false, $domain, $selector, 'DKIM key requires strict identity domain matching.');
+        $publicKey = $this->publicKey($tags, $domain, $selector, $algorithm);
+        if ($publicKey instanceof DkimVerificationResult) {
+            return $publicKey;
         }
 
         $signingInput = $this->buildSigningInput(
@@ -296,6 +284,35 @@ final readonly class DkimVerifier
         }
 
         return $parsed;
+    }
+
+    /**
+     * @param array<string, string> $tags
+     */
+    private function publicKey(
+        array $tags,
+        string $domain,
+        string $selector,
+        string $algorithm,
+    ): string|DkimVerificationResult {
+        $keyRecord = $this->resolver->resolve($domain, $selector);
+        if ($keyRecord === null) {
+            return new DkimVerificationResult(false, $domain, $selector, 'DKIM public key record not found.');
+        }
+
+        $publicKey = DkimPublicKeyParser::parse($keyRecord, $algorithm);
+        if ($publicKey === null) {
+            return new DkimVerificationResult(false, $domain, $selector, 'DKIM public key record is invalid.');
+        }
+
+        if (DkimPublicKeyParser::requiresStrictIdentity($keyRecord)
+            && isset($tags['i'])
+            && !$this->identityMatchesDomainExactly($tags['i'], $domain)
+        ) {
+            return new DkimVerificationResult(false, $domain, $selector, 'DKIM key requires strict identity domain matching.');
+        }
+
+        return $publicKey;
     }
 
     /** @return list<string> */
