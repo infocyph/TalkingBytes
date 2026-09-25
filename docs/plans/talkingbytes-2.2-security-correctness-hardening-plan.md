@@ -2,7 +2,7 @@
 
 ## Status and decision
 
-**Audit date:** 2026-09-25. **State:** planned; fixes are not implemented by this audit.
+**Audit date:** 2026-09-25. **State:** implementation in progress; Batch 1 HTTP trust-boundary work started.
 
 - Audited working revision: `bd2d198680e86cbac49425e898e591ed6194cbdb`.
 - Latest version tag: `2.1`, resolving to commit `29fe13043225bfcf477adfa1f4dd1dc11fa4723f`.
