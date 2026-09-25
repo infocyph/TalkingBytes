@@ -10,13 +10,17 @@ Main fields:
 
 - ``maxMessageBytes``
 - ``maxAttachmentBytes``
+- ``maxAttachmentCount``
 - ``maxMimeDepth``
 - ``maxMimeParts``
 - ``maxHeaderBytes``
 - ``maxHeaderCount``
+- ``maxHeaderLineBytes``
 - ``maxDecodedBodyBytes``
 
-These are enforced in raw parse, spool receive, and mailbox fetch paths.
+``EmailLimits`` is enforced by ``RawEmailParser`` and parser-backed mailbox
+fetches. ``SpoolConfig::maxMessageBytes`` is a separate pre-parse spool read
+bound; the default spool parser then applies its own ``EmailLimits``.
 
 Header and command safety
 -------------------------
