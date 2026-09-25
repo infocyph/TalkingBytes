@@ -88,13 +88,22 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
         return $this->readNext(consume: true);
     }
 
-    private function beginProcessing(string $file, bool $consume): string
+    private function beginProcessing(string $file, bool $consume): ?string
     {
-        if (!$consume || $this->config->processingDirectory === null || $this->config->processingDirectory === '') {
+        if (!$consume) {
             return $file;
         }
 
-        return $this->moveFileToDirectory($file, $this->config->processingDirectory, ensureUnique: true);
+        if ($this->config->processingDirectory !== null && $this->config->processingDirectory !== '') {
+            return $this->moveFileToDirectory($file, $this->config->processingDirectory, ensureUnique: true);
+        }
+
+        $claim = dirname($file) . '/.' . basename($file) . '.' . bin2hex(random_bytes(8)) . '.processing';
+        if (!@rename($file, $claim)) {
+            return null;
+        }
+
+        return $claim;
     }
 
     /**
@@ -130,16 +139,27 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
         }
     }
 
-    private function finalizeRead(string $file): void
+    private function finalizeRead(string $file, string $sourceFile): void
     {
         if ($this->moveAfterRead !== null && $this->moveAfterRead !== '') {
-            $this->moveFileToDirectory($file, $this->moveAfterRead);
+            $this->moveFileToDirectory(
+                $file,
+                $this->moveAfterRead,
+                ensureUnique: true,
+                targetBasename: basename($sourceFile),
+            );
 
             return;
         }
 
         if ($this->deleteAfterRead) {
             $this->deleteFile($file, strict: true);
+
+            return;
+        }
+
+        if ($file !== $sourceFile && !@rename($file, $sourceFile)) {
+            throw new RuntimeException(sprintf('Unable to restore claimed spool file "%s".', $sourceFile));
         }
     }
 
@@ -184,11 +204,16 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
         return $candidate;
     }
 
-    private function markFailed(string $file, string $reason): void
+    private function markFailed(string $file, string $reason, string $sourceFile): void
     {
         if ($this->failedDirectory !== null && $this->failedDirectory !== '') {
             try {
-                $target = $this->moveFileToDirectory($file, $this->failedDirectory);
+                $target = $this->moveFileToDirectory(
+                    $file,
+                    $this->failedDirectory,
+                    ensureUnique: true,
+                    targetBasename: basename($sourceFile),
+                );
                 $errorPath = $target . '.error.txt';
                 $safeReason = preg_replace('/[\x00-\x1F\x7F]/', ' ', $reason) ?? 'Spool processing failed.';
                 file_put_contents($errorPath, substr($safeReason, 0, 4096), LOCK_EX);
@@ -202,16 +227,28 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
 
         if ($this->deleteAfterRead) {
             $this->deleteFile($file, strict: false);
+
+            return;
+        }
+
+        if ($file !== $sourceFile && file_exists($file) && !file_exists($sourceFile)) {
+            @rename($file, $sourceFile);
         }
     }
 
-    private function moveFileToDirectory(string $file, string $directory, bool $ensureUnique = false): string
+    private function moveFileToDirectory(
+        string $file,
+        string $directory,
+        bool $ensureUnique = false,
+        ?string $targetBasename = null,
+    ): string
     {
         $this->ensureDirectory($directory);
 
-        $target = rtrim($directory, '/\\') . '/' . basename($file);
+        $basename = $targetBasename ?? basename($file);
+        $target = rtrim($directory, '/\\') . '/' . $basename;
         if ($ensureUnique) {
-            $target = $this->uniqueTarget($directory, basename($file));
+            $target = $this->uniqueTarget($directory, $basename);
         }
 
         if (!rename($file, $target)) {
@@ -273,10 +310,22 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
         ]);
 
         try {
-            $processingFile = $this->beginProcessing($sourceFile, $consume);
+            $claimedFile = $this->beginProcessing($sourceFile, $consume);
+            if ($claimedFile === null) {
+                $this->events->dispatch('email.receive.finish', [
+                    'source' => 'spool',
+                    'successful' => false,
+                    'failure_category' => 'claim_contention',
+                    'duration_ms' => (int) round(($this->clock->monotonic() - $startedAt) * 1000),
+                ]);
+
+                return null;
+            }
+
+            $processingFile = $claimedFile;
             $raw = $this->readFile($processingFile, $consume);
             if ($raw === false) {
-                $this->markFailed($processingFile, 'Unable to read spool file.');
+                $this->markFailed($processingFile, 'Unable to read spool file.', $sourceFile);
                 $this->events->dispatch('email.receive.finish', [
                     'source' => 'spool',
                     'successful' => false,
@@ -289,7 +338,7 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
 
             $parsed = $this->parseFile($raw, $this->buildMetadata($sourceFile, $processingFile, $consume));
         } catch (\Throwable $exception) {
-            $this->markFailed($processingFile, $exception->getMessage());
+            $this->markFailed($processingFile, $exception->getMessage(), $sourceFile);
             $this->events->dispatch('email.parse.failed', [
                 'source' => 'spool',
                 'failure_category' => 'parse_failure',
@@ -307,7 +356,7 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
         }
 
         if ($consume) {
-            $this->finalizeRead($processingFile);
+            $this->finalizeRead($processingFile, $sourceFile);
         }
 
         $this->events->dispatch('email.receive.finish', [
