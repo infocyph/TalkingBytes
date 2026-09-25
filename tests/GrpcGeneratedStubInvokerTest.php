@@ -411,3 +411,120 @@ it('cancels the native stream when a response callback fails', function (): void
     expect($stub->call?->cancelled)->toBeTrue();
     expect($result->error)->toContain('consumer callback failed');
 });
+
+
+it('finalizes upstream-shaped server and bidi streams with getStatus', function (): void {
+    $stub = new class {
+        public function List(mixed $message, array $metadata = [], array $options = []): object
+        {
+            unset($message, $metadata, $options);
+
+            return new class {
+                public function getMetadata(): array
+                {
+                    return ['x-header' => ['list']];
+                }
+
+                public function getStatus(): object
+                {
+                    return (object) ['code' => 0, 'details' => 'ok'];
+                }
+
+                public function getTrailingMetadata(): array
+                {
+                    return ['x-trailer' => ['list-end']];
+                }
+
+                public function responses(): iterable
+                {
+                    yield ['row' => 1];
+                    yield ['row' => 2];
+                }
+            };
+        }
+
+        public function Chat(array $metadata = [], array $options = []): object
+        {
+            unset($metadata, $options);
+
+            return new class {
+                private int $read = 0;
+
+                public function closeWrite(): void {}
+
+                public function getStatus(): object
+                {
+                    return (object) ['code' => 0, 'details' => 'complete'];
+                }
+
+                public function read(): ?array
+                {
+                    $this->read++;
+
+                    return $this->read <= 2 ? ['reply' => $this->read] : null;
+                }
+
+                public function write(mixed $message): void
+                {
+                    unset($message);
+                }
+            };
+        }
+    };
+
+    $client = GrpcClient::usingGeneratedStub($stub);
+
+    $serverChunks = [];
+    $server = $client->serverStream(
+        new GrpcRequest('Orders/List', ['page' => 1]),
+        static function (mixed $message) use (&$serverChunks): void {
+            $serverChunks[] = $message;
+        },
+    );
+
+    $bidiChunks = [];
+    $bidi = $client->bidiStream(
+        method: 'Orders/Chat',
+        messages: [['id' => 1], ['id' => 2]],
+        onMessage: static function (mixed $message) use (&$bidiChunks): void {
+            $bidiChunks[] = $message;
+        },
+    );
+
+    expect($server->successful)->toBeTrue();
+    expect($serverChunks)->toHaveCount(2);
+    expect($server->response?->trailers->first('x-trailer'))->toBe('list-end');
+    expect($bidi->successful)->toBeTrue();
+    expect($bidiChunks)->toHaveCount(2);
+});
+
+it('preserves non-ok getStatus results for generated streams', function (): void {
+    $stub = new class {
+        public function List(mixed $message, array $metadata = [], array $options = []): object
+        {
+            unset($message, $metadata, $options);
+
+            return new class {
+                public function getStatus(): object
+                {
+                    return (object) ['code' => 13, 'details' => 'upstream failure'];
+                }
+
+                public function responses(): iterable
+                {
+                    yield ['row' => 1];
+                }
+            };
+        }
+    };
+
+    $result = GrpcClient::usingGeneratedStub($stub)->serverStream(
+        new GrpcRequest('Orders/List', []),
+        static function (mixed $message): void {
+            unset($message);
+        },
+    );
+
+    expect($result->successful)->toBeFalse();
+    expect($result->statusCode)->toBe(13);
+});
