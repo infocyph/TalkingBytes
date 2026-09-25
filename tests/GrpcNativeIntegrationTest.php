@@ -243,7 +243,9 @@ it('propagates real native grpc deadlines and cancellation cleanup', function ()
 
         $cancelled = false;
         $messages = 0;
-        $signal = CancellationSignal::fromCallable(static fn(): bool => $cancelled);
+        $signal = CancellationSignal::fromCallable(static function () use (&$cancelled): bool {
+            return $cancelled;
+        });
         $cancelResult = $server->client($signal)->serverStream(
             new GrpcRequest('Integration/Server', new GPBEmpty(), deadlineSeconds: 2.0),
             static function (mixed $message) use (&$cancelled, &$messages): void {
