@@ -35,7 +35,12 @@ final readonly class DnsDkimPublicKeyResolver implements DkimPublicKeyResolver
                 continue;
             }
 
-            if (!str_contains(strtolower($txt), 'v=dkim1')) {
+            $tags = DkimTagValueParser::parse($txt);
+            if (!array_key_exists('p', $tags)) {
+                continue;
+            }
+
+            if (isset($tags['v']) && strtoupper($tags['v']) !== 'DKIM1') {
                 continue;
             }
 
