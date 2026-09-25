@@ -82,7 +82,7 @@ available before propagating the failure. Streaming remains incremental; the
 adapter does not buffer a complete stream in memory.
 
 Generated bidirectional coordination
------------------------------------
+------------------------------------
 
 The generated-stub adapter currently performs outbound writes to completion,
 closes the client write side, and then drains inbound responses. This is
