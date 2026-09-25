@@ -2,7 +2,7 @@
 
 ## Status and decision
 
-**Audit date:** 2026-09-25. **State:** implementation complete after independent cross-check remediation; F01, F03, F04, F08, F11 and F12 edge-case gaps are fixed and verified on corrected source candidate `eb0bb983`. PR #14 remains draft and unmerged for release-owner approval.
+**Audit date:** 2026-09-25. **State:** implementation and documentation-parity remediation complete; F01, F03, F04, F08, F11 and F12 edge-case gaps plus the follow-up DKIM DNS whitespace gap are fixed. README/docs have been re-audited against the current codebase. PR #14 remains draft and unmerged; exact-head PR checks are authoritative before any tag.
 
 - Audited working revision: `bd2d198680e86cbac49425e898e591ed6194cbdb`.
 - Latest version tag: `2.1`, resolving to commit `29fe13043225bfcf477adfa1f4dd1dc11fa4723f`.
@@ -309,6 +309,7 @@ Before changing hot paths, retain a baseline on the audited revision. Compare li
 - [x] Mailpit, minimal optional extensions and native gRPC interoperability lanes pass on corrected source candidate `eb0bb983` (Security & Standards run #150).
 - [x] Required process/filesystem/socket tests pass on the repository CI platform; Linux-native validation and portable fallback limits are documented without implying an untested Windows/macOS native-process matrix.
 - [x] Release notes document conditional risks, migrations, affected APIs and mitigations. No external notification or disclosure action is authorized by this plan.
+- [x] README/docs parity was re-audited against current public APIs, config keys, security/lifetime semantics and the Read the Docs/Sphinx toolchain.
 - [ ] **Release-owner action:** freeze/tag (and merge PR #14) only after approval, using the final green commit. Any later source/docs/CI change requires fresh candidate validation.
 
 ### Cross-check remediation verification
@@ -322,11 +323,17 @@ An independent read-only review of `19692db` reopened six edge cases. The correc
 - **F11:** destructive spool failure handling is restricted to an owned consume claim. Failed `peek()` operations leave oversized, unreadable and parser-rejected source messages in place.
 - **F12:** replay retention includes the remaining signature window plus one max-age clock-correction budget. Process-local retention remains monotonic; distributed stores must honor TTL as an elapsed-duration lower bound. End-to-end independent wall/monotonic clocks cover the reported backward-correction replay case.
 
-Security & Standards run #150 passed on `eb0bb983`: PHP 8.4/8.5 analysis, prefer-lowest/prefer-stable QA, both benchmarks, production clean install, warning-free Sphinx docs, Mailpit, optional-capability coldness and native gRPC interoperability were green. A subsequent independent P2 review found the DNS `p = <key>` whitespace edge case; that correction is included after this recorded source candidate and requires a fresh exact-head workflow before tagging.
+Security & Standards run #150 passed on `eb0bb983`: PHP 8.4/8.5 analysis, prefer-lowest/prefer-stable QA, both benchmarks, production clean install, warning-free Sphinx docs, Mailpit, optional-capability coldness and native gRPC interoperability were green. A subsequent independent P2 review found the DNS `p = <key>` whitespace edge case; the resolver now reuses the shared parsed `p` tag and verifier-level regressions cover whitespace-bearing and revoked keys.
+
+### Documentation parity verification
+
+A final repository documentation sweep covered `README.md`, all files under `docs/`, `.readthedocs.yaml`, and the docs CI lane against the current 290 production PHP files and 60 test files. Corrections include public method names/signatures, immutable HTTP examples, HTTP/gRPC retry-safety gates, redirect-safe download publication, cookie provenance, spool peek/claim ownership, complete email limits, DKIM DNS tag semantics, native gRPC completion behavior, webhook replay timing, resolved-config keys, and cross-cutting security/testing guidance.
+
+The documentation toolchain is pinned to Python 3.14 with Sphinx 9.1.0, sphinx-book-theme 1.4.0, sphinxcontrib-phpdomain 0.15.2, sphinx-copybutton 0.5.2 and sphinx-design 0.7.0, and the docs CI lane uses the same Python version as Read the Docs.
 
 ### Final implementation verification
 
-The implementation is complete on the corrected source candidate. This tracker/documentation update changes the commit hash, so the same required workflow must pass again on the final documentation head before release. PR checks remain the authoritative exact-revision record.
+Implementation and documentation parity are complete. Because documentation and CI configuration changes create a new commit, the final PR workflow must be green on the exact branch head before release. PR checks remain the authoritative exact-revision record; this plan does not authorize merge/tag/release.
 
 ## Completion definition
 
