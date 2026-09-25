@@ -63,7 +63,7 @@ final readonly class GeneratedStubGrpcInvoker implements NativeGrpcInvoker, Nati
             $this->drainInboundStream($call, $onMessage);
             $this->assertNotCancelled();
 
-            return $this->finalizeCall($call);
+            return $this->finalizeStreamingCall($call);
         } catch (Throwable $exception) {
             $this->cancelCall($call);
 
@@ -133,7 +133,7 @@ final readonly class GeneratedStubGrpcInvoker implements NativeGrpcInvoker, Nati
             $this->drainInboundStream($call, $onMessage);
             $this->assertNotCancelled();
 
-            return $this->finalizeCall($call);
+            return $this->finalizeStreamingCall($call);
         } catch (Throwable $exception) {
             $this->cancelCall($call);
 
@@ -340,6 +340,27 @@ final readonly class GeneratedStubGrpcInvoker implements NativeGrpcInvoker, Nati
             headers: $this->extractHeaders($call),
             trailers: $this->extractTrailers($call),
             metadata: $metadata,
+        );
+    }
+
+    private function finalizeStreamingCall(mixed $call): NativeGrpcResult
+    {
+        if (!is_object($call)) {
+            throw new RuntimeException('Unsupported gRPC stream call result.');
+        }
+
+        if (!method_exists($call, 'getStatus')) {
+            return $this->finalizeCall($call);
+        }
+
+        $status = $call->getStatus();
+
+        return new NativeGrpcResult(
+            statusCode: $this->extractWaitStatusCode($status),
+            message: null,
+            headers: $this->extractHeaders($call),
+            trailers: $this->extractTrailers($call),
+            metadata: $this->extractWaitStatusMetadata($status),
         );
     }
 
