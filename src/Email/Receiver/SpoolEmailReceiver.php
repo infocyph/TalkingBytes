@@ -96,6 +96,11 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
 
         if ($this->config->processingDirectory !== null && $this->config->processingDirectory !== '') {
             try {
+                $this->ensureDirectory($this->config->processingDirectory);
+                if (!$this->isSameFilesystem($file, $this->config->processingDirectory)) {
+                    return null;
+                }
+
                 return $this->moveFileToDirectory($file, $this->config->processingDirectory, ensureUnique: true);
             } catch (RuntimeException) {
                 return null;
@@ -103,7 +108,7 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
         }
 
         $claim = dirname($file) . '/.' . basename($file) . '.' . bin2hex(random_bytes(8)) . '.processing';
-        if (!@rename($file, $claim)) {
+        if (!$this->tryRename($file, $claim)) {
             return null;
         }
 
@@ -162,7 +167,7 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
             return;
         }
 
-        if ($file !== $sourceFile && !@rename($file, $sourceFile)) {
+        if ($file !== $sourceFile && !$this->tryRename($file, $sourceFile)) {
             throw new RuntimeException(sprintf('Unable to restore claimed spool file "%s".', $sourceFile));
         }
     }
@@ -236,7 +241,7 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
         }
 
         if ($file !== $sourceFile && file_exists($file) && !file_exists($sourceFile)) {
-            @rename($file, $sourceFile);
+            $this->tryRename($file, $sourceFile);
         }
     }
 
@@ -255,7 +260,7 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
             $target = $this->uniqueTarget($directory, $basename);
         }
 
-        if (!rename($file, $target)) {
+        if (!$this->tryRename($file, $target)) {
             throw new RuntimeException(sprintf('Unable to move file "%s" to "%s".', $file, $target));
         }
 
@@ -370,6 +375,31 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
         ]);
 
         return $parsed;
+    }
+
+    private function isSameFilesystem(string $file, string $directory): bool
+    {
+        $source = stat($file);
+        $target = stat($directory);
+        if (!is_array($source) || !is_array($target)) {
+            return false;
+        }
+
+        $sourceDevice = $source['dev'] ?? null;
+        $targetDevice = $target['dev'] ?? null;
+
+        return is_int($sourceDevice) && is_int($targetDevice) && $sourceDevice === $targetDevice;
+    }
+
+    private function tryRename(string $source, string $target): bool
+    {
+        set_error_handler(static fn(): bool => true, E_WARNING);
+
+        try {
+            return rename($source, $target);
+        } finally {
+            restore_error_handler();
+        }
     }
 
     private function uniqueTarget(string $directory, string $basename): string
