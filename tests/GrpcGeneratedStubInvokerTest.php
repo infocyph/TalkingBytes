@@ -578,13 +578,15 @@ it('documents that generated bidi flow is write-then-read rather than interactiv
         }
     };
 
-    expect(fn() => GrpcClient::usingGeneratedStub($stub)->bidiStream(
+    $result = GrpcClient::usingGeneratedStub($stub)->bidiStream(
         method: 'Orders/Chat',
         messages: [['id' => 1], ['id' => 2]],
         onMessage: static function (mixed $message): void {
             unset($message);
         },
-    ))->toThrow(RuntimeException::class, 'interactive peer requires an inbound read');
+    );
 
+    expect($result->successful)->toBeFalse();
+    expect($result->error)->toContain('interactive peer requires an inbound read');
     expect($cancelled)->toBeTrue();
 });
