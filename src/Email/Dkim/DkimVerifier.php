@@ -245,6 +245,7 @@ final readonly class DkimVerifier
         return $publicKey;
     }
 
+    /** @return list<string> */
     private function rawHeaderGroups(string $headers): array
     {
         $groups = [];
