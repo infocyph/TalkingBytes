@@ -54,3 +54,14 @@ first protocol call.
    ]);
 
 Method map keys are gRPC method paths; values are PHP stub method names.
+
+Native interoperability lane
+----------------------------
+
+The repository includes an opt-in localhost interoperability test for the
+actual upstream PHP call objects. CI pins ``grpc/grpc`` and ``ext-grpc`` to
+1.82.0 and ``google/protobuf`` to 5.36.2, and uses a pinned Python gRPC peer.
+The lane exercises unary, server-streaming, client-streaming and bidirectional
+call shapes plus native deadline and cancellation cleanup. It is intentionally
+separate from the minimal optional-capability job so gRPC remains a cold
+optional dependency for ordinary installs.
