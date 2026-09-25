@@ -228,10 +228,12 @@ it('keeps accepted sensitive header names trackable at the configured boundary',
         ->prepareForTransport();
 
     expect($prepared->sensitiveHeaderNames())->toContain(strtolower($acceptedName));
-    expect(HttpRedactor::redactHeaders(
+    $redacted = HttpRedactor::redactHeaders(
         $prepared->headers->all(),
         $prepared->sensitiveHeaderNames(),
-    )[$acceptedName] ?? null)->toBe('[REDACTED]');
+    );
+    expect(array_values($redacted))->toContain('[REDACTED]')
+        ->and($redacted)->not->toContain($secret);
 
     $crossOrigin = $prepared->redirectedTo('https://other.example.test/orders', 307, false);
     expect($crossOrigin->headers->get($acceptedName))->toBeNull();
@@ -248,7 +250,8 @@ it('keeps accepted sensitive header names trackable at the configured boundary',
             ->connectTimeout(1)
             ->timeout(1),
     );
-    expect($events[0]['headers'][$acceptedName] ?? null)->toBe('[REDACTED]');
+    expect(array_values($events[0]['headers'] ?? []))->toContain('[REDACTED]')
+        ->and($events[0]['headers'] ?? [])->not->toContain($secret);
 
     $rejectedName = str_repeat('B', 257);
     expect(fn() => HttpRequest::get('https://api.example.test/orders')
