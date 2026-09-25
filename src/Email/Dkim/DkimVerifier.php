@@ -75,22 +75,11 @@ final readonly class DkimVerifier
         }
         [$domain, $selector] = $identity;
 
-        if (($tags['v'] ?? null) !== '1' || !isset($tags['a'])) {
-            return new DkimVerificationResult(false, $domain, $selector, 'DKIM version or algorithm tag is invalid.');
+        $modes = $this->signatureModes($tags, $domain, $selector);
+        if ($modes instanceof DkimVerificationResult) {
+            return $modes;
         }
-
-        $algorithm = strtolower($tags['a']);
-        if (!in_array($algorithm, ['rsa-sha256', 'ed25519-sha256'], true)) {
-            return new DkimVerificationResult(false, $domain, $selector, 'Unsupported DKIM algorithm.');
-        }
-
-        $canon = strtolower((string) ($tags['c'] ?? 'simple/simple'));
-        [$headerCanon, $bodyCanon] = array_pad(explode('/', $canon, 2), 2, 'simple');
-        if (!in_array($headerCanon, ['simple', 'relaxed'], true)
-            || !in_array($bodyCanon, ['simple', 'relaxed'], true)
-        ) {
-            return new DkimVerificationResult(false, $domain, $selector, 'Unsupported DKIM canonicalization.');
-        }
+        [$algorithm, $headerCanon, $bodyCanon] = $modes;
 
         $bodyFailure = $this->bodyFailure($tags, $body, $bodyCanon, $domain, $selector);
         if ($bodyFailure !== null) {
@@ -125,6 +114,32 @@ final readonly class DkimVerifier
         }
 
         return new DkimVerificationResult(true, $domain, $selector);
+    }
+
+    /**
+     * @param array<string, string> $tags
+     * @return array{0:string,1:string,2:string}|DkimVerificationResult
+     */
+    private function signatureModes(array $tags, string $domain, string $selector): array|DkimVerificationResult
+    {
+        if (($tags['v'] ?? null) !== '1' || !isset($tags['a'])) {
+            return new DkimVerificationResult(false, $domain, $selector, 'DKIM version or algorithm tag is invalid.');
+        }
+
+        $algorithm = strtolower($tags['a']);
+        if (!in_array($algorithm, ['rsa-sha256', 'ed25519-sha256'], true)) {
+            return new DkimVerificationResult(false, $domain, $selector, 'Unsupported DKIM algorithm.');
+        }
+
+        $canon = strtolower((string) ($tags['c'] ?? 'simple/simple'));
+        [$headerCanon, $bodyCanon] = array_pad(explode('/', $canon, 2), 2, 'simple');
+        if (!in_array($headerCanon, ['simple', 'relaxed'], true)
+            || !in_array($bodyCanon, ['simple', 'relaxed'], true)
+        ) {
+            return new DkimVerificationResult(false, $domain, $selector, 'Unsupported DKIM canonicalization.');
+        }
+
+        return [$algorithm, $headerCanon, $bodyCanon];
     }
 
     /**
