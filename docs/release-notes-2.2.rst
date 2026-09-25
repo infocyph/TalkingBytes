@@ -27,15 +27,22 @@ HTTP
 ~~~~
 
 - Cross-origin redirects remove native and declared custom authentication
-  outputs rather than relying on a small fixed header list.
+  outputs rather than relying on a small fixed header list. Sensitive header
+  names are bounded consistently: names longer than 256 bytes are rejected
+  before native authenticators add credential values.
 - Strict private-network mode disables inherited cURL proxy environment
   settings and still rejects explicit proxies.
 - Redirect cookies are stored against the origin that actually emitted them
-  and are recomputed per hop.
+  and are recomputed per hop. Cookie provenance remains correct through
+  supported transport decorators such as ``SpyHttpTransport`` around the
+  native cURL transport.
 - Domain cookies remain opt-in and parent-domain sharing fails closed unless
   the parent is explicitly allowed.
 - Buffered and streamed downloads publish atomically only after an accepted
-  transfer; failed requests preserve an existing target.
+  complete transaction; intermediate redirect bodies are never published.
+  Redirect loops, blocked destinations, final HTTP/transfer failures and
+  truncated final responses preserve an existing target and do not create a
+  missing destination.
 - Valid empty 200/204/304 and empty redirect responses are no longer treated
   as transport failures.
 
@@ -47,12 +54,16 @@ Email and DKIM
 - Sendmail submission passes the complete envelope recipient list explicitly,
   including Bcc, while keeping Bcc out of MIME headers.
 - Spool consumers atomically claim messages before parsing; a lost claim is
-  treated as contention/claim failure rather than malformed mail.
+  treated as contention/claim failure rather than malformed mail. ``peek()``
+  is strictly non-consuming even when reading or parsing fails, so it never
+  deletes or quarantines the source message.
 - Ed25519-SHA256 DKIM now signs/verifies the SHA-256 digest required by
   RFC 8463. Historical TalkingBytes signatures made over raw canonical input
   are intentionally not accepted through a compatibility fallback.
 - DKIM relaxed empty-body, oversigning, strict key identity, multi-signature,
-  and ambiguous DNS-key handling are aligned with verifier policy.
+  and ambiguous DNS-key handling are aligned with verifier policy. DNS key
+  records may omit the optional ``v=DKIM1`` tag; an explicit version is still
+  validated and revoked or ambiguous key sets remain rejected.
 
 gRPC
 ~~~~
@@ -68,9 +79,21 @@ gRPC
 Webhook
 ~~~~~~~
 
-- Replay claims are retained for at least the complete remaining signature
+- Replay claims are retained beyond the complete remaining signature
   acceptance window, including accepted future timestamps, even when a
-  shorter custom replay TTL is requested.
+  shorter custom replay TTL is requested. The receiver also reserves one
+  verifier max-age interval for backward wall-clock correction while
+  process-local expiry uses monotonic elapsed time. Distributed stores must
+  honor the requested TTL as an elapsed-duration lower bound.
+
+Cross-check closure
+-------------------
+
+A post-candidate independent review reopened six edge cases in HTTP credential
+tracking, decorated cookie provenance, buffered redirect downloads, spool
+peek failure handling, webhook replay timing, and versionless DKIM DNS keys.
+Those cases now have dedicated regressions and passed the corrected candidate
+quality and integration matrix before release-note finalization.
 
 Compatibility and migration
 ---------------------------
