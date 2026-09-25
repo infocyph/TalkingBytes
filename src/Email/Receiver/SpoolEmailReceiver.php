@@ -177,7 +177,7 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
             if (!$entry instanceof SplFileInfo) {
                 continue;
             }
-            if (!$entry->isFile() || strtolower($entry->getExtension()) !== strtolower($extension)) {
+            if ($entry->isLink() || !$entry->isFile() || strtolower($entry->getExtension()) !== strtolower($extension)) {
                 continue;
             }
             $file = $entry->getPathname();
