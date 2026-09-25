@@ -287,3 +287,31 @@ it('covers accepted future timestamps until they leave the verification window',
     expect(fn() => $receiver->receive($payload, $headers))
         ->toThrow(RuntimeException::class, 'expired_timestamp');
 });
+
+
+it('uses monotonic retention for in-memory replay claims across wall-clock jumps', function (): void {
+    $wall = 10_000.0;
+    $mono = 100.0;
+    $clock = new Clock(
+        static function () use (&$wall): float {
+            return $wall;
+        },
+        static function () use (&$mono): float {
+            return $mono;
+        },
+    );
+    $store = new InMemoryWebhookReplayStore(clock: $clock);
+
+    expect($store->claim('tenant-a', 'evt_clock_jump', 60))->toBeTrue();
+
+    $wall += 86_400.0;
+    $mono += 1.0;
+    expect($store->claim('tenant-a', 'evt_clock_jump', 60))->toBeFalse();
+
+    $wall -= 172_800.0;
+    $mono += 58.0;
+    expect($store->claim('tenant-a', 'evt_clock_jump', 60))->toBeFalse();
+
+    $mono += 1.0;
+    expect($store->claim('tenant-a', 'evt_clock_jump', 60))->toBeTrue();
+});
