@@ -55,6 +55,9 @@ final readonly class SignedRequestAuth implements AuthenticatorInterface
         $signature = $this->signer->sign($canonical);
 
         return $request
+            ->markSensitiveHeader($this->timestampHeader)
+            ->markSensitiveHeader($this->nonceHeader)
+            ->markSensitiveHeader($this->signatureHeader)
             ->header($this->timestampHeader, $timestamp)
             ->header($this->nonceHeader, $nonce)
             ->header($this->signatureHeader, $signature);
