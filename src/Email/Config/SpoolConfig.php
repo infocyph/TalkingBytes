@@ -53,16 +53,6 @@ final readonly class SpoolConfig
         }
     }
 
-    private static function normalizeDirectoryPath(string $path): string
-    {
-        $normalized = rtrim(str_replace('\\', '/', $path), '/');
-        $realPath = realpath($normalized);
-
-        return is_string($realPath)
-            ? rtrim(str_replace('\\', '/', $realPath), '/')
-            : $normalized;
-    }
-
     /**
      * @param array<string, mixed> $config
      */
@@ -79,5 +69,15 @@ final readonly class SpoolConfig
             newerThanSeconds: ConfigValue::nullableInt($config, 'newerThanSeconds'),
             maxMessageBytes: ConfigValue::nullableInt($config, 'maxMessageBytes'),
         );
+    }
+
+    private static function normalizeDirectoryPath(string $path): string
+    {
+        $normalized = rtrim(str_replace('\\', '/', $path), '/');
+        $realPath = realpath($normalized);
+
+        return is_string($realPath)
+            ? rtrim(str_replace('\\', '/', $realPath), '/')
+            : $normalized;
     }
 }
