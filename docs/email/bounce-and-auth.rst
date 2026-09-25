@@ -73,3 +73,13 @@ Resolvers:
 - ``CachedDkimPublicKeyResolver``
 
 Use ``StaticDkimPublicKeyResolver`` for deterministic tests.
+
+DKIM interoperability corrections
+---------------------------------
+
+Ed25519-SHA256 follows RFC 8463 by signing and verifying the binary SHA-256
+hash of the DKIM header input with PureEd25519. Relaxed empty bodies
+canonicalize to zero bytes. Verification also honors strict ``t=s`` key
+identity policy and valid oversigning of absent header occurrences. Historical
+TalkingBytes Ed25519 signatures produced from the raw canonical input are not
+accepted as a fallback representation.
