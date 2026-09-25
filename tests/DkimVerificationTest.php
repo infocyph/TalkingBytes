@@ -238,17 +238,17 @@ it('resolves dkim txt records with split entries and ignores unrelated records',
     expect($record)->toBe('v=DKIM1; k=rsa; p=abcDEF123');
 });
 
-it('treats dkim txt records with empty p tag as revoked', function (): void {
-    $resolver = new DnsDkimPublicKeyResolver(static function (string $name, int $type): array {
-        expect($name)->toBe('selector._domainkey.example.com');
-        expect($type)->toBe(DNS_TXT);
+it('treats dkim txt records with empty or whitespace p tags as revoked', function (): void {
+    foreach (['v=DKIM1; p=', 'v=DKIM1; p =   '] as $record) {
+        $resolver = new DnsDkimPublicKeyResolver(static function (string $name, int $type) use ($record): array {
+            expect($name)->toBe('selector._domainkey.example.com');
+            expect($type)->toBe(DNS_TXT);
 
-        return [
-            ['txt' => 'v=DKIM1; p='],
-        ];
-    });
+            return [['txt' => $record]];
+        });
 
-    expect($resolver->resolve('example.com', 'selector'))->toBeNull();
+        expect($resolver->resolve('example.com', 'selector'))->toBeNull();
+    }
 });
 
 
@@ -522,12 +522,21 @@ it('rejects ambiguous dkim dns key records and accepts an omitted key version ta
         new DkimConfig('example.com', 'selector', $privateKey),
     );
     $record = preg_replace('/-----BEGIN PUBLIC KEY-----|-----END PUBLIC KEY-----|\s+/', '', $publicKey);
-    $resolver = new StaticDkimPublicKeyResolver([
+    $staticResolver = new StaticDkimPublicKeyResolver([
         'selector._domainkey.example.com' => 'k=rsa; p=' . (string) $record,
     ]);
 
     $parsed = (new RawEmailParser())->parse(
         $signature . "\r\n" . $raw->headers . "\r\n\r\n" . $raw->body,
     );
-    expect((new DkimVerifier($resolver))->verify($parsed)->valid)->toBeTrue();
+    expect((new DkimVerifier($staticResolver))->verify($parsed)->valid)->toBeTrue();
+
+    $dnsResolver = new DnsDkimPublicKeyResolver(static function (string $name, int $type) use ($record): array {
+        expect($name)->toBe('selector._domainkey.example.com');
+        expect($type)->toBe(DNS_TXT);
+
+        return [['txt' => 'k = rsa; p = ' . (string) $record]];
+    });
+
+    expect((new DkimVerifier($dnsResolver))->verify($parsed)->valid)->toBeTrue();
 });
