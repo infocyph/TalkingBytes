@@ -5,6 +5,9 @@ declare(strict_types=1);
 use Infocyph\TalkingBytes\Email\Config\DkimConfig;
 use Infocyph\TalkingBytes\Email\Dkim\DkimCanonicalizer;
 use Infocyph\TalkingBytes\Email\Dkim\DkimSigner;
+use Infocyph\TalkingBytes\Email\Dkim\DkimVerifier;
+use Infocyph\TalkingBytes\Email\Dkim\StaticDkimPublicKeyResolver;
+use Infocyph\TalkingBytes\Email\Parser\RawEmailParser;
 use Infocyph\TalkingBytes\Email\Dkim\DnsDkimPublicKeyResolver;
 use Infocyph\TalkingBytes\Email\EmailMessage;
 use Infocyph\TalkingBytes\Email\Enum\DkimAlgorithm;
@@ -246,4 +249,168 @@ it('treats dkim txt records with empty p tag as revoked', function (): void {
     });
 
     expect($resolver->resolve('example.com', 'selector'))->toBeNull();
+});
+
+
+/**
+ * @param list<string> $signedHeaderNames
+ */
+function dkimBuildIndependentRsaSignature(
+    string $headers,
+    string $body,
+    string $privateKey,
+    array $signedHeaderNames,
+    string $extraTags = '',
+): string {
+    $canonicalizer = new DkimCanonicalizer();
+    $bodyHash = base64_encode(hash('sha256', $canonicalizer->canonicalizeBody($body, 'relaxed'), true));
+    $h = implode(':', $signedHeaderNames);
+    $value = 'v=1; a=rsa-sha256; c=relaxed/relaxed; d=example.com; s=selector; h='
+        . $h . '; bh=' . $bodyHash . '; ' . $extraTags . 'b=';
+
+    $used = [];
+    $canonicalized = [];
+    $headerLines = dkimUnfoldedHeaders($headers);
+    foreach ($signedHeaderNames as $wanted) {
+        $found = null;
+        for ($index = count($headerLines) - 1; $index >= 0; $index--) {
+            if (isset($used[$index]) || !str_contains($headerLines[$index], ':')) {
+                continue;
+            }
+            [$name, $headerValue] = explode(':', $headerLines[$index], 2);
+            if (strtolower(trim($name)) !== strtolower($wanted)) {
+                continue;
+            }
+            $found = $index;
+            $used[$index] = true;
+            $canonicalized[] = $canonicalizer->canonicalizeHeader($name, $headerValue, 'relaxed');
+            break;
+        }
+
+        if ($found === null) {
+            continue;
+        }
+    }
+
+    $canonicalized[] = $canonicalizer->canonicalizeHeader('dkim-signature', $value, 'relaxed');
+    $input = implode("\r\n", $canonicalized);
+    $signature = '';
+    expect(openssl_sign($input, $signature, $privateKey, OPENSSL_ALGO_SHA256))->toBeTrue();
+
+    return 'DKIM-Signature: ' . $value . base64_encode($signature);
+}
+
+it('signs ed25519 dkim over the sha256 digest and verifies independently', function (): void {
+    $seed = random_bytes(SODIUM_CRYPTO_SIGN_SEEDBYTES);
+    $pair = sodium_crypto_sign_seed_keypair($seed);
+    $publicKey = sodium_crypto_sign_publickey($pair);
+
+    $message = EmailMessage::new()
+        ->from('sender@example.com')
+        ->to('alice@example.com')
+        ->subject('Ed25519 digest')
+        ->text('Body');
+    $raw = (new RawEmailBuilder())->build($message, includeSubject: true);
+    $config = DkimConfig::fromPrivateKeyString(
+        'example.com',
+        'selector',
+        base64_encode($seed),
+        algorithm: DkimAlgorithm::Ed25519Sha256,
+    );
+
+    $headerLine = (new DkimSigner())->buildSignatureHeader($raw->headers, $raw->body, $config);
+    $headerValue = trim(substr($headerLine, strlen('DKIM-Signature:')));
+    $tags = dkimParseTags($headerValue);
+    $canonicalizer = new DkimCanonicalizer();
+    $canonicalized = [];
+
+    foreach (array_filter(array_map('trim', explode(':', strtolower($tags['h'])))) as $headerName) {
+        $value = dkimFindHeaderValue($raw->headers, $headerName);
+        expect($value)->not->toBeNull();
+        $canonicalized[] = $canonicalizer->canonicalizeHeader($headerName, (string) $value);
+    }
+
+    $withoutSignature = preg_replace('/\bb=[^;]*/', 'b=', $headerValue, 1);
+    expect($withoutSignature)->toBeString();
+    $canonicalized[] = $canonicalizer->canonicalizeHeader('dkim-signature', (string) $withoutSignature);
+    $input = implode("\r\n", $canonicalized);
+    $signature = base64_decode($tags['b'], true);
+    expect($signature)->toBeString();
+
+    expect(sodium_crypto_sign_verify_detached(
+        $signature,
+        hash('sha256', $input, true),
+        $publicKey,
+    ))->toBeTrue();
+    expect(sodium_crypto_sign_verify_detached($signature, $input, $publicKey))->toBeFalse();
+
+    $signed = (new RawEmailParser())->parse($headerLine . "\r\n" . $raw->headers . "\r\n\r\n" . $raw->body);
+    $resolver = new StaticDkimPublicKeyResolver([
+        'selector._domainkey.example.com' => 'v=DKIM1; k=ed25519; p=' . base64_encode($publicKey),
+    ]);
+    expect((new DkimVerifier($resolver))->verify($signed)->valid)->toBeTrue();
+});
+
+it('canonicalizes an empty relaxed dkim body to zero bytes', function (): void {
+    $canonicalizer = new DkimCanonicalizer();
+
+    expect($canonicalizer->canonicalizeBody('', 'relaxed'))->toBe('');
+    expect($canonicalizer->canonicalizeBody("\r\n\r\n", 'relaxed'))->toBe('');
+    expect($canonicalizer->canonicalizeBody('', 'simple'))->toBe("\r\n");
+});
+
+it('accepts valid oversigned absent header occurrences', function (): void {
+    [$privateKey, $publicKey] = dkimBuildKeyPair();
+    $raw = (new RawEmailBuilder())->build(
+        EmailMessage::new()
+            ->from('sender@example.com')
+            ->to('alice@example.com')
+            ->subject('Oversigned')
+            ->text('Body'),
+        includeSubject: true,
+    );
+
+    $signature = dkimBuildIndependentRsaSignature(
+        $raw->headers,
+        $raw->body,
+        $privateKey,
+        ['from', 'from'],
+    );
+    $parsed = (new RawEmailParser())->parse($signature . "\r\n" . $raw->headers . "\r\n\r\n" . $raw->body);
+    $record = preg_replace('/-----BEGIN PUBLIC KEY-----|-----END PUBLIC KEY-----|\s+/', '', $publicKey);
+    $resolver = new StaticDkimPublicKeyResolver([
+        'selector._domainkey.example.com' => 'v=DKIM1; k=rsa; p=' . $record,
+    ]);
+
+    expect((new DkimVerifier($resolver))->verify($parsed)->valid)->toBeTrue();
+});
+
+it('enforces strict identity domains from dkim key flags', function (): void {
+    [$privateKey, $publicKey] = dkimBuildKeyPair();
+    $raw = (new RawEmailBuilder())->build(
+        EmailMessage::new()
+            ->from('sender@example.com')
+            ->to('alice@example.com')
+            ->subject('Strict identity')
+            ->text('Body'),
+        includeSubject: true,
+    );
+
+    $signature = dkimBuildIndependentRsaSignature(
+        $raw->headers,
+        $raw->body,
+        $privateKey,
+        ['from'],
+        'i=user@sub.example.com; ',
+    );
+    $parsed = (new RawEmailParser())->parse($signature . "\r\n" . $raw->headers . "\r\n\r\n" . $raw->body);
+    $record = preg_replace('/-----BEGIN PUBLIC KEY-----|-----END PUBLIC KEY-----|\s+/', '', $publicKey);
+    $resolver = new StaticDkimPublicKeyResolver([
+        'selector._domainkey.example.com' => 'v=DKIM1; k=rsa; t=s; p=' . $record,
+    ]);
+
+    $result = (new DkimVerifier($resolver))->verify($parsed);
+
+    expect($result->valid)->toBeFalse();
+    expect($result->reason)->toContain('strict identity');
 });
