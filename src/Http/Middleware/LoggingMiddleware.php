@@ -20,7 +20,7 @@ final readonly class LoggingMiddleware implements HttpMiddleware
     {
         $this->log('http.request.start', [
             'method' => $request->method->value,
-            'url' => HttpRedactor::redactUrl($request->buildUrl()),
+            'url' => HttpRedactor::redactUrl($request->buildUrl(), $request->sensitiveQueryNames()),
         ]);
 
         try {
