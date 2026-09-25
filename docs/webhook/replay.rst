@@ -22,6 +22,8 @@ Backend atomicity alone cannot secure an unsigned delivery ID.
 
 ``claim()`` must be atomic and returns true only for the first claimant. The
 namespace isolates tenants/endpoints that may legitimately reuse a delivery ID.
+The requested TTL is an elapsed-duration **lower bound**: a backend must not
+expire a claim early because its wall clock moves.
 
 Built-in implementation
 -----------------------
@@ -41,6 +43,13 @@ separate check-then-write implementation is race-prone and is not sufficient.
 Replay backend errors are fail-closed. Implementations must throw when the
 atomic claim cannot be completed instead of treating an unavailable backend as
 an unused delivery ID.
+
+The receiver may request a TTL longer than the caller-configured replay TTL. It
+covers the complete remaining signature-acceptance window and adds one verifier
+``maxAgeSeconds`` interval as a bounded backward wall-clock correction budget.
+The built-in in-memory store measures that duration with a monotonic clock.
+Deployments that permit larger backward corrections must configure a replay TTL
+large enough to cover the additional clock-discipline budget.
 
 The built-in in-memory store is single-process only. It is appropriate for
 tests and local development, not for multi-worker or multi-node replay

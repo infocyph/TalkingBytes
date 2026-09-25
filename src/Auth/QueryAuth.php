@@ -25,6 +25,6 @@ final readonly class QueryAuth implements AuthenticatorInterface
 
     public function apply(HttpRequest $request): HttpRequest
     {
-        return $request->query($this->key, $this->value);
+        return $request->markSensitiveQuery($this->key)->query($this->key, $this->value);
     }
 }

@@ -22,6 +22,7 @@ final class CurlResultFactory
         string $error,
         array|false $rawInfo,
         array $responseHeaders,
+        bool $publishBufferedDownload = true,
     ): CommunicationResult {
         $info = is_array($rawInfo) ? $rawInfo : [];
         $statusCode = self::statusCode($info);
@@ -45,18 +46,6 @@ final class CurlResultFactory
             );
         }
 
-        if ($downloadPath !== null) {
-            $downloadError = self::writeDownloadBody($downloadPath, $body);
-
-            if ($downloadError !== null) {
-                return CommunicationResult::failure(
-                    $downloadError,
-                    $statusCode,
-                    metadata: ['transport' => $transport, 'curl' => $info],
-                );
-            }
-        }
-
         if ($errno !== 0) {
             return CommunicationResult::failure(
                 sprintf('cURL request failed (%d): %s', $errno, $error),
@@ -77,7 +66,35 @@ final class CurlResultFactory
             );
         }
 
-        return CommunicationResult::success($statusCode, $response, ['transport' => $transport, 'curl' => $info]);
+        $result = CommunicationResult::success(
+            $statusCode,
+            $response,
+            ['transport' => $transport, 'curl' => $info],
+        );
+
+        return $publishBufferedDownload
+            ? self::publishBufferedDownload($request, $result)
+            : $result;
+    }
+
+    public static function publishBufferedDownload(HttpRequest $request, CommunicationResult $result): CommunicationResult
+    {
+        $path = $request->options->downloadPath;
+        if (!$result->successful || $path === null || !$result->response instanceof HttpResponse) {
+            return $result;
+        }
+
+        $downloadError = self::writeDownloadBody($path, $result->response->body);
+        if ($downloadError === null) {
+            return $result;
+        }
+
+        return CommunicationResult::failure(
+            $downloadError,
+            $result->statusCode,
+            $result->response,
+            $result->metadata,
+        );
     }
 
     /**
@@ -110,10 +127,39 @@ final class CurlResultFactory
             return sprintf('Download directory is not writable: %s', $directory);
         }
 
-        if (file_put_contents($path, $body) === false) {
-            return sprintf('Failed to write download file: %s', $path);
+        $tempPath = tempnam($directory, 'tb-http-download-');
+        if ($tempPath === false) {
+            return sprintf('Unable to allocate temporary download file in directory: %s', $directory);
         }
 
-        return null;
+        try {
+            if (file_put_contents($tempPath, $body, LOCK_EX) === false) {
+                return sprintf('Failed to write download file: %s', $path);
+            }
+
+            set_error_handler(static fn(): bool => true, E_WARNING);
+
+            try {
+                $secured = chmod($tempPath, 0600);
+            } finally {
+                restore_error_handler();
+            }
+
+            if (!$secured) {
+                return sprintf('Failed to secure temporary download file: %s', $path);
+            }
+
+            if (!rename($tempPath, $path)) {
+                return sprintf('Failed to finalize download file: %s', $path);
+            }
+
+            $tempPath = null;
+
+            return null;
+        } finally {
+            if (is_string($tempPath) && is_file($tempPath)) {
+                unlink($tempPath);
+            }
+        }
     }
 }

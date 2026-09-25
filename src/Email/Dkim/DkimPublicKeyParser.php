@@ -24,6 +24,13 @@ final readonly class DkimPublicKeyParser
             : self::rsaKey($base64);
     }
 
+    public static function requiresStrictIdentity(string $record): bool
+    {
+        $tags = DkimTagValueParser::parse($record);
+
+        return in_array('s', self::lowercaseList($tags['t'] ?? ''), true);
+    }
+
     /** @param array<string, string> $tags */
     private static function allowsAlgorithm(array $tags, string $expectedType): bool
     {

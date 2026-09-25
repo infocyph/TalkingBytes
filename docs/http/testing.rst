@@ -35,6 +35,7 @@ Pool tests
 Concurrent tests validate:
 
 - key-preserving result mapping
-- fail-fast behavior
+- rolling concurrency and slot refill
+- stop-scheduling-on-failure semantics without cancelling already-active work
 - mixed success/failure collection
-- pool event lifecycle dispatch
+- pool cancellation/cleanup and event lifecycle dispatch

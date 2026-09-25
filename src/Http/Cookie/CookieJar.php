@@ -16,12 +16,26 @@ final class CookieJar
      */
     private array $cookies = [];
 
+    /**
+     * @param list<string> $allowedParentDomains
+     */
     public function __construct(
         private readonly int $maxCookies = 3000,
         private readonly bool $allowDomainCookies = false,
+        private readonly array $allowedParentDomains = [],
     ) {
         if ($this->maxCookies < 1) {
             throw new InvalidArgumentException('Cookie jar maxCookies must be greater than zero.');
+        }
+
+        if (count($this->allowedParentDomains) > 64) {
+            throw new InvalidArgumentException('Cookie jar allowedParentDomains cannot contain more than 64 entries.');
+        }
+
+        foreach ($this->allowedParentDomains as $domain) {
+            if (!$this->isValidAllowedParentDomain($domain)) {
+                throw new InvalidArgumentException('Cookie jar allowed parent domain is invalid.');
+            }
         }
     }
 
@@ -313,6 +327,16 @@ final class CookieJar
         return substr($requestPath, 0, $lastSlash);
     }
 
+    private function domainCookieScopeAllowed(string $cookieDomain): bool
+    {
+        $cookieDomain = strtolower(rtrim($cookieDomain, '.'));
+
+        return array_any(
+            $this->allowedParentDomains,
+            static fn(string $allowed): bool => strtolower(rtrim($allowed, '.')) === $cookieDomain,
+        );
+    }
+
     private function domainMatchesOrigin(string $originHost, string $cookieDomain): bool
     {
         $originHost = strtolower(rtrim($originHost, '.'));
@@ -368,6 +392,17 @@ final class CookieJar
         return $pairs;
     }
 
+    private function isValidAllowedParentDomain(string $domain): bool
+    {
+        $domain = strtolower(rtrim(trim($domain), '.'));
+
+        return $domain !== ''
+            && strlen($domain) <= 253
+            && str_contains($domain, '.')
+            && filter_var($domain, FILTER_VALIDATE_IP) === false
+            && preg_match('/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/', $domain) === 1;
+    }
+
     private function parseExpires(string $value): ?DateTimeImmutable
     {
         try {
@@ -413,8 +448,14 @@ final class CookieJar
             $attributes = $this->applyAttribute($attributes, $segment);
         }
 
-        if (!$attributes['hostOnly'] && !$this->domainMatchesOrigin($context['host'], $attributes['domain'])) {
-            return null;
+        if (!$attributes['hostOnly']) {
+            if (!$this->domainMatchesOrigin($context['host'], $attributes['domain'])) {
+                return null;
+            }
+
+            if (!$this->domainCookieScopeAllowed($attributes['domain'])) {
+                return null;
+            }
         }
 
         try {

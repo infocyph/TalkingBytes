@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Infocyph\TalkingBytes\Core\Support\Clock;
 use Infocyph\TalkingBytes\Webhook\Contracts\WebhookReplayStore;
 use Infocyph\TalkingBytes\Webhook\Replay\InMemoryWebhookReplayStore;
 use Infocyph\TalkingBytes\Webhook\Testing\WebhookTestFactory;
@@ -220,4 +221,140 @@ it('receives the signed request produced by the native sender', function (): voi
         $headers[$name] = (string) $request->headers->get($name);
     }
     expect(Webhook::receiver('secret')->receive('{"id":1}', $headers)->event)->toBe('order.created');
+});
+
+
+it('retains replay claims for the full remaining signature acceptance window', function (): void {
+    $now = 1_000_000.0;
+    $clock = new Clock(static function () use (&$now): float {
+        return $now;
+    });
+    $verifier = new \Infocyph\TalkingBytes\Webhook\WebhookVerifier(
+        'secret',
+        maxAgeSeconds: 300,
+        clock: $clock,
+    );
+    $store = new InMemoryWebhookReplayStore(clock: $clock);
+    $receiver = (new WebhookReceiver($verifier))->withReplayStore($store, 1);
+
+    [$payload, $headers] = WebhookTestFactory::signedJson(
+        'secret',
+        'order.created',
+        ['id' => 10],
+        'evt_short_ttl',
+        (int) $now,
+    );
+
+    expect($receiver->receive($payload, $headers)->deliveryId)->toBe('evt_short_ttl');
+
+    $now += 2.0;
+
+    expect(fn() => $receiver->receive($payload, $headers))
+        ->toThrow(RuntimeException::class, 'already been processed');
+});
+
+it('covers accepted future timestamps until they leave the verification window', function (): void {
+    $now = 2_000_000.0;
+    $clock = new Clock(static function () use (&$now): float {
+        return $now;
+    });
+    $verifier = new \Infocyph\TalkingBytes\Webhook\WebhookVerifier(
+        'secret',
+        maxAgeSeconds: 300,
+        clock: $clock,
+    );
+    $store = new InMemoryWebhookReplayStore(clock: $clock);
+    $receiver = (new WebhookReceiver($verifier))->withReplayStore($store, 1);
+    $futureTimestamp = (int) $now + 300;
+
+    [$payload, $headers] = WebhookTestFactory::signedJson(
+        'secret',
+        'order.created',
+        ['id' => 11],
+        'evt_future',
+        $futureTimestamp,
+    );
+
+    expect($receiver->receive($payload, $headers)->deliveryId)->toBe('evt_future');
+
+    $now += 301.0;
+
+    expect(fn() => $receiver->receive($payload, $headers))
+        ->toThrow(RuntimeException::class, 'already been processed');
+
+    $now += 300.0;
+
+    expect(fn() => $receiver->receive($payload, $headers))
+        ->toThrow(RuntimeException::class, 'expired_timestamp');
+});
+
+
+it('uses monotonic retention for in-memory replay claims across wall-clock jumps', function (): void {
+    $wall = 10_000.0;
+    $mono = 100.0;
+    $clock = new Clock(
+        static function () use (&$wall): float {
+            return $wall;
+        },
+        static function () use (&$mono): float {
+            return $mono;
+        },
+    );
+    $store = new InMemoryWebhookReplayStore(clock: $clock);
+
+    expect($store->claim('tenant-a', 'evt_clock_jump', 60))->toBeTrue();
+
+    $wall += 86_400.0;
+    $mono += 1.0;
+    expect($store->claim('tenant-a', 'evt_clock_jump', 60))->toBeFalse();
+
+    $wall -= 172_800.0;
+    $mono += 58.0;
+    expect($store->claim('tenant-a', 'evt_clock_jump', 60))->toBeFalse();
+
+    $mono += 1.0;
+    expect($store->claim('tenant-a', 'evt_clock_jump', 60))->toBeTrue();
+});
+
+
+it('keeps an accepted delivery claimed across bounded backward wall-clock correction', function (): void {
+    $wall = 3_000_000.0;
+    $mono = 10_000.0;
+    $clock = new Clock(
+        static function () use (&$wall): float {
+            return $wall;
+        },
+        static function () use (&$mono): float {
+            return $mono;
+        },
+    );
+    $verifier = new \Infocyph\TalkingBytes\Webhook\WebhookVerifier(
+        'secret',
+        maxAgeSeconds: 300,
+        clock: $clock,
+    );
+    $store = new InMemoryWebhookReplayStore(clock: $clock);
+    $receiver = (new WebhookReceiver($verifier))->withReplayStore($store, 1);
+
+    [$payload, $headers] = WebhookTestFactory::signedJson(
+        'secret',
+        'order.created',
+        ['id' => 12],
+        'evt_clock_correction',
+        (int) $wall,
+    );
+
+    expect($receiver->receive($payload, $headers)->deliveryId)->toBe('evt_clock_correction');
+
+    $mono += 302.0;
+    $wall += 299.0;
+
+    expect(fn() => $receiver->receive($payload, $headers))
+        ->toThrow(RuntimeException::class, 'already been processed');
+
+    $mono += 2.0;
+    $wall += 2.0;
+
+    expect(fn() => $receiver->receive($payload, $headers))
+        ->toThrow(RuntimeException::class, 'expired_timestamp');
 });

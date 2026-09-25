@@ -22,6 +22,10 @@ final class DkimCanonicalizer
             array_pop($lines);
         }
 
+        if ($lines === []) {
+            return $mode === 'relaxed' ? '' : "\r\n";
+        }
+
         return implode("\r\n", $lines) . "\r\n";
     }
 

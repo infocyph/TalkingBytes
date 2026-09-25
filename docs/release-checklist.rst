@@ -13,6 +13,8 @@ Pre-release gates
 
      sphinx-build -W --keep-going -b html docs build/docs
 
+- verify ``.readthedocs.yaml``, ``docs/requirements.txt`` and the docs CI Python
+  version describe the same supported documentation toolchain
 - verify the supported PHP and dependency-version matrix is green in CI
 - verify the Mailpit integration job is green
 - verify the optional-capability coldness job is green with unloadable gRPC,

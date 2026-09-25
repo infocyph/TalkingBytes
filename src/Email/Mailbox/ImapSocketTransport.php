@@ -203,9 +203,18 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
             return;
         }
 
+        if (!$this->hasCapability('UIDPLUS')) {
+            throw new MailboxProtocolException(
+                'Safe IMAP move fallback requires MOVE or UIDPLUS capability.',
+            );
+        }
+
         $this->copy($folder, $uid, $targetFolder);
         $this->delete($folder, $uid);
-        $this->expunge($folder);
+        $this->expectOk(
+            $this->runCommand(sprintf('UID EXPUNGE %d', $uid)),
+            'UID EXPUNGE',
+        );
     }
 
     public function noop(): void

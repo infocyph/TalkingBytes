@@ -78,7 +78,8 @@ The same ``usingNative()`` flow works for external providers:
 - map API method path with ``methodMap``
 - set explicit deadline
 - send auth metadata
-- add ``withGrpcRetry()`` only for idempotent methods
+- add ``withGrpcRetry()`` only when retry policy is wanted, and mark each
+  retry-safe request with ``GrpcRequest::withRetrySafety()``
 
 Request model
 -------------

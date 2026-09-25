@@ -13,10 +13,10 @@ Protocol-focused communication toolkit for PHP.
 TalkingBytes provides typed HTTP and gRPC pipelines, shared result/event primitives,
 and protocol modules for:
 
-- Email (SMTP/sendmail/mail/spool + IMAP/POP3/parser)
-- HTTP (cURL + cURL multi)
-- Webhook (sign/verify/replay)
-- gRPC (adapter + retry + fake caller)
+- Email (SMTP/sendmail/mail/spool, IMAP/POP3, MIME parsing, DKIM)
+- HTTP (cURL/cURL-multi, redirects, cookies, streaming, retry)
+- Webhook (v2 signing/verification, replay protection, retry)
+- gRPC (callback/generated/native adapters, streaming, retry, inbound dispatch, fakes)
 
 ## Install
 
@@ -26,7 +26,7 @@ composer require infocyph/talkingbytes
 
 Requirements:
 
-- PHP `^8.4`
+- PHP `>=8.4`
 - `ext-curl`
 - `ext-fileinfo`
 - `ext-openssl`

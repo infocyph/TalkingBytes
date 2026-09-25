@@ -9,6 +9,10 @@ Utilities
 - ``FakeGrpcInboundSource``
 - ``FakeGrpcInboundExchange``
 
+Generated-stub tests use native-shaped unary/client/server/bidirectional call
+doubles. A separate optional integration lane exercises actual upstream PHP
+gRPC call objects against a localhost peer.
+
 Example
 -------
 

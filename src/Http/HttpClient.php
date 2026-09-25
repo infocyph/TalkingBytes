@@ -101,8 +101,13 @@ final readonly class HttpClient
         ?CancellationSignal $cancellation = null,
         ?HttpTransport $transport = null,
         ?Clock $clock = null,
+        ?HttpClientConfig $baseConfig = null,
     ): self {
-        return new HttpClientFactory($events, $cancellation, $clock)->fromArray($config, $transport);
+        $factory = new HttpClientFactory($events, $cancellation, $clock);
+
+        return $baseConfig === null
+            ? $factory->fromArray($config, $transport)
+            : $factory->fromConfig($baseConfig, $config, $transport);
     }
 
     public static function multi(
@@ -238,13 +243,26 @@ final readonly class HttpClient
     public function send(HttpRequest $request): CommunicationResult
     {
         $resolvedRequest = $this->applyDefaults($request);
+
         if ($this->cookieJar !== null) {
+            $originUrl = $resolvedRequest->buildUrl();
+            $originCookieHeader = $resolvedRequest->headers->get('Cookie');
+            $resolvedRequest = $resolvedRequest->metadata([
+                ...$resolvedRequest->metadata,
+                '_cookie_jar' => $this->cookieJar,
+                '_cookie_origin_url' => $originUrl,
+                '_cookie_origin_header' => $originCookieHeader,
+            ]);
             $resolvedRequest = $this->cookieJar->applyToRequest($resolvedRequest);
         }
 
         $result = $this->pipeline->send($resolvedRequest);
 
-        if ($this->cookieJar !== null && $result->response instanceof HttpResponse) {
+        $transportOwnsCookieProvenance = ($result->metadata['_cookie_provenance_managed'] ?? false) === true;
+        if (!$transportOwnsCookieProvenance
+            && $this->cookieJar !== null
+            && $result->response instanceof HttpResponse
+        ) {
             $this->cookieJar->storeFromResponse($result->response, $resolvedRequest->buildUrl());
         }
 

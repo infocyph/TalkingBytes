@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Infocyph\TalkingBytes\Auth\AuthenticatorInterface;
 use Infocyph\TalkingBytes\Core\Event\CommunicationEventBus;
 use Infocyph\TalkingBytes\Core\Event\CallableEventDispatcher;
 use Infocyph\TalkingBytes\Http\Concurrent\CurlMultiTransport;
@@ -84,6 +85,7 @@ it('blocks additional reserved host ranges when private network blocking is enab
         'http://[::1]',
         'http://[fc00::1]',
         'http://[fe80::1]',
+        'http://[::ffff:127.0.0.1]',
     ];
 
     foreach ($reservedUrls as $url) {
@@ -144,4 +146,116 @@ it('dispatches http request start and failure events for curl transport', functi
     expect($events[0]['payload']['url'] ?? null)->toContain('client_secret=%5BREDACTED%5D');
     expect($events[0]['payload']['headers']['Authorization'] ?? null)->toBe('[REDACTED]');
     expect($events[0]['payload']['headers']['Set-Cookie'] ?? null)->toBe('[REDACTED]');
+});
+
+
+it('tracks native and custom authentication fields for redirects and observability', function (): void {
+    $prepared = HttpRequest::get('https://api.example.test/orders')
+        ->withApiKeyHeader('X-Vendor-Credential', 'sentinel-header-secret')
+        ->withApiKeyQuery('vendor_credential', 'sentinel-query-secret')
+        ->prepareForTransport();
+
+    expect(HttpRedactor::redactHeaders(
+        $prepared->headers->all(),
+        $prepared->sensitiveHeaderNames(),
+    )['X-Vendor-Credential'] ?? null)->toBe('[REDACTED]');
+    expect(HttpRedactor::redactUrl(
+        $prepared->buildUrl(),
+        $prepared->sensitiveQueryNames(),
+    ))->not->toContain('sentinel-query-secret');
+
+    $sameOrigin = $prepared->redirectedTo('https://api.example.test/next', 307, true)->prepareForTransport();
+    expect($sameOrigin->headers->get('X-Vendor-Credential'))->toBe('sentinel-header-secret');
+
+    $crossOrigin = $prepared->redirectedTo('https://other.example.test/next', 307, false)->prepareForTransport();
+    expect($crossOrigin->headers->get('X-Vendor-Credential'))->toBeNull();
+    expect($crossOrigin->authenticators)->toBe([]);
+});
+
+it('lets custom authenticators mark nonstandard credentials as sensitive', function (): void {
+    $authenticator = new class implements AuthenticatorInterface
+    {
+        public function apply(HttpRequest $request): HttpRequest
+        {
+            return $request
+                ->markSensitiveHeader('X-Custom-Credential')
+                ->markSensitiveQuery('custom_credential')
+                ->header('X-Custom-Credential', 'sentinel-custom-header')
+                ->query('custom_credential', 'sentinel-custom-query');
+        }
+    };
+
+    $prepared = HttpRequest::get('https://example.test')
+        ->withAuthenticator($authenticator)
+        ->prepareForTransport();
+
+    expect(HttpRedactor::redactHeaders(
+        $prepared->headers->all(),
+        $prepared->sensitiveHeaderNames(),
+    )['X-Custom-Credential'] ?? null)->toBe('[REDACTED]');
+    expect(HttpRedactor::redactUrl(
+        $prepared->buildUrl(),
+        $prepared->sensitiveQueryNames(),
+    ))->not->toContain('sentinel-custom-query');
+    expect($prepared->redirectedTo('https://different.test/', 302, false)->headers->get('X-Custom-Credential'))->toBeNull();
+});
+
+it('redacts nested and dynamically named query credentials', function (): void {
+    $url = HttpRedactor::redactUrl(
+        'https://example.test/path?auth%5Btoken%5D=sentinel-nested&vendor_key=sentinel-vendor&page=2',
+        ['vendor_key'],
+    );
+
+    expect($url)->not->toContain('sentinel-nested');
+    expect($url)->not->toContain('sentinel-vendor');
+    expect($url)->toContain('auth%5Btoken%5D=%5BREDACTED%5D');
+    expect($url)->toContain('vendor_key=%5BREDACTED%5D');
+    expect($url)->toContain('page=2');
+});
+
+it('rejects explicit proxies with strict private-network protection', function (): void {
+    expect(fn() => RequestSecurityGuard::assertAllowed(
+        HttpRequest::get('https://8.8.8.8')->proxy('http://127.0.0.1:8080')->blockPrivateNetworks(),
+    ))->toThrow(InvalidArgumentException::class, 'cannot be combined with a remote proxy');
+});
+
+
+it('keeps accepted sensitive header names trackable at the configured boundary', function (): void {
+    $acceptedName = str_repeat('A', 256);
+    $secret = 'sentinel-boundary-secret';
+    $prepared = HttpRequest::get('https://api.example.test/orders')
+        ->withApiKeyHeader($acceptedName, $secret)
+        ->prepareForTransport();
+
+    expect($prepared->sensitiveHeaderNames())->toContain(strtolower($acceptedName));
+    $redacted = HttpRedactor::redactHeaders(
+        $prepared->headers->all(),
+        $prepared->sensitiveHeaderNames(),
+    );
+    expect(array_values($redacted))->toContain('[REDACTED]')
+        ->and($redacted)->not->toContain($secret);
+
+    $crossOrigin = $prepared->redirectedTo('https://other.example.test/orders', 307, false);
+    expect($crossOrigin->headers->get($acceptedName))->toBeNull();
+
+    $events = [];
+    $dispatcher = new CallableEventDispatcher(static function (string $event, array $payload) use (&$events): void {
+        if ($event === 'http.request.start') {
+            $events[] = $payload;
+        }
+    });
+    (new CurlTransport($dispatcher))->send(
+        HttpRequest::get('http://127.0.0.1:1')
+            ->withApiKeyHeader($acceptedName, $secret)
+            ->connectTimeout(1)
+            ->timeout(1),
+    );
+    expect(array_values($events[0]['headers'] ?? []))->toContain('[REDACTED]')
+        ->and($events[0]['headers'] ?? [])->not->toContain($secret);
+
+    $rejectedName = str_repeat('B', 257);
+    expect(fn() => HttpRequest::get('https://api.example.test/orders')
+        ->withApiKeyHeader($rejectedName, $secret)
+        ->prepareForTransport())
+        ->toThrow(InvalidArgumentException::class, 'cannot exceed 256 bytes');
 });

@@ -38,8 +38,12 @@ final class CurlHandleConfigurator
                 $this->setOption($handle, CURLOPT_RESOLVE, [$pinnedResolution], 'Unable to pin the validated cURL DNS resolution.');
             }
 
-            $this->setOptionalStringOption($handle, CURLOPT_PROXY, $resolvedRequest->options->proxy);
-            $this->setOptionalStringOption($handle, CURLOPT_PROXYUSERPWD, $resolvedRequest->options->proxyAuth);
+            if (($resolvedRequest->metadata['security_block_private_networks'] ?? false) === true) {
+                $this->setOption($handle, CURLOPT_PROXY, '', 'Unable to disable inherited cURL proxy.');
+            } else {
+                $this->setOptionalStringOption($handle, CURLOPT_PROXY, $resolvedRequest->options->proxy);
+                $this->setOptionalStringOption($handle, CURLOPT_PROXYUSERPWD, $resolvedRequest->options->proxyAuth);
+            }
             $this->setOptionalStringOption($handle, CURLOPT_CAINFO, $resolvedRequest->options->caBundle);
             $this->setOptionalStringOption($handle, CURLOPT_SSLCERT, $resolvedRequest->options->clientCertificate);
             $this->setOptionalStringOption($handle, CURLOPT_SSLKEY, $resolvedRequest->options->clientKey);

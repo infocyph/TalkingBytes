@@ -35,13 +35,11 @@ final class ResponseBodyCollector
 
     public function abort(): void
     {
-        if ($this->finalized) {
-            return;
-        }
-
-        $this->finalized = true;
-        if (is_resource($this->stream)) {
-            fclose($this->stream);
+        if (!$this->finalized) {
+            $this->finalized = true;
+            if (is_resource($this->stream)) {
+                fclose($this->stream);
+            }
         }
 
         $this->stream = null;
@@ -87,6 +85,32 @@ final class ResponseBodyCollector
         return $length;
     }
 
+    public function commit(): ?string
+    {
+        $error = $this->finalize();
+        if ($error !== null || $this->tempPath === null) {
+            return $error;
+        }
+
+        if ($this->targetPath === null) {
+            $this->error = 'Stream download destination was not initialized.';
+            $this->cleanupTempFile();
+
+            return $this->error;
+        }
+
+        if (!rename($this->tempPath, $this->targetPath)) {
+            $this->error = sprintf('Failed to finalize streamed download file: %s', $this->targetPath);
+            $this->cleanupTempFile();
+
+            return $this->error;
+        }
+
+        $this->tempPath = null;
+
+        return null;
+    }
+
     public function error(): ?string
     {
         return $this->error;
@@ -120,26 +144,9 @@ final class ResponseBodyCollector
 
         if ($this->error !== null) {
             $this->cleanupTempFile();
-
-            return $this->error;
         }
 
-        if ($this->targetPath === null || $this->tempPath === null) {
-            $this->error = 'Stream download destination was not initialized.';
-
-            return $this->error;
-        }
-
-        if (!rename($this->tempPath, $this->targetPath)) {
-            $this->error = sprintf('Failed to finalize streamed download file: %s', $this->targetPath);
-            $this->cleanupTempFile();
-
-            return $this->error;
-        }
-
-        $this->tempPath = null;
-
-        return null;
+        return $this->error;
     }
 
     public function responseBody(): string

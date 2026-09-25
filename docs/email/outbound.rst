@@ -144,3 +144,12 @@ The transcript can still contain envelope addresses, non-authentication SMTP
 commands, capability text, and server response text. Treat it as sensitive
 diagnostic data, retain it only when necessary, and do not enable it as routine
 production logging.
+
+Sendmail envelope recipients
+----------------------------
+
+The sendmail transport submits the validated envelope recipient list explicitly
+after an option terminator, including Bcc recipients. ``-t`` is removed from
+configured extra arguments for this path to avoid deriving and duplicating
+recipients from visible headers. Bcc addresses remain absent from the MIME
+headers.

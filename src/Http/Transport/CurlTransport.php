@@ -11,7 +11,9 @@ use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
 use Infocyph\TalkingBytes\Core\Support\Clock;
 use Infocyph\TalkingBytes\Core\Support\ObservabilitySanitizer;
 use Infocyph\TalkingBytes\Http\Contract\HttpTransport;
+use Infocyph\TalkingBytes\Http\Cookie\CookieJar;
 use Infocyph\TalkingBytes\Http\HttpRequest;
+use Infocyph\TalkingBytes\Http\HttpResponse;
 use Infocyph\TalkingBytes\Http\Internal\CurlHandleConfigurator;
 use Infocyph\TalkingBytes\Http\Internal\CurlResultFactory;
 use Infocyph\TalkingBytes\Http\Internal\RedirectResolver;
@@ -37,7 +39,8 @@ final readonly class CurlTransport implements HttpTransport
 
     public function send(HttpRequest $request): CommunicationResult
     {
-        $request = $request->prepareForTransport();
+        $request = $this->prepareCookieContext($request);
+        $request = $this->applyCookiesForHop($request, $request->buildUrl())->prepareForTransport();
         $startedAt = $this->clock->monotonic();
         $this->dispatchStartEvent($request, $request->buildUrl());
         $current = $request;
@@ -56,7 +59,11 @@ final readonly class CurlTransport implements HttpTransport
 
             $result = $this->executeSingle($current, $url);
             $response = $result->response;
-            if (!$current->options->followRedirects || !$response instanceof \Infocyph\TalkingBytes\Http\HttpResponse) {
+            if ($response instanceof HttpResponse) {
+                $this->storeResponseCookies($current, $response, $url);
+            }
+
+            if (!$current->options->followRedirects || !$response instanceof HttpResponse) {
                 break;
             }
 
@@ -88,7 +95,8 @@ final readonly class CurlTransport implements HttpTransport
                 $nextUrl = RedirectResolver::resolve($url, $location);
                 $this->assertRedirectScheme($current, $url, $nextUrl);
                 $sameOrigin = $this->sameOrigin($url, $nextUrl);
-                $current = $current->redirectedTo($nextUrl, $status, $sameOrigin)->prepareForTransport();
+                $current = $current->redirectedTo($nextUrl, $status, $sameOrigin);
+                $current = $this->applyCookiesForHop($current, $nextUrl)->prepareForTransport();
                 RequestSecurityGuard::assertAllowed($current, $nextUrl);
             } catch (InvalidArgumentException $exception) {
                 $result = CommunicationResult::failure(
@@ -104,9 +112,37 @@ final readonly class CurlTransport implements HttpTransport
             $redirects++;
         }
 
+        $result = CurlResultFactory::publishBufferedDownload($current, $result);
         $this->dispatchResultEvents($current, $result, $startedAt);
 
-        return $result;
+        if ($this->cookieJar($current) === null) {
+            return $result;
+        }
+
+        return new CommunicationResult(
+            $result->successful,
+            $result->statusCode,
+            $result->error,
+            $result->response,
+            [...$result->metadata, '_cookie_provenance_managed' => true],
+        );
+    }
+
+    private function applyCookiesForHop(HttpRequest $request, string $url): HttpRequest
+    {
+        $jar = $this->cookieJar($request);
+        if ($jar === null) {
+            return $request;
+        }
+
+        $request = $request->withoutHeader('Cookie');
+        $originUrl = $request->metadata['_cookie_origin_url'] ?? null;
+        $originHeader = $this->cookieHeaderFromMetadata($request->metadata['_cookie_origin_header'] ?? null);
+        if (is_string($originUrl) && $this->sameOrigin($originUrl, $url) && $originHeader !== null) {
+            $request = $request->header('Cookie', $originHeader);
+        }
+
+        return $jar->applyToRequest($request);
     }
 
     private function assertRedirectScheme(HttpRequest $request, string $from, string $to): void
@@ -142,13 +178,6 @@ final readonly class CurlTransport implements HttpTransport
             );
         }
 
-        if (!is_string($rawBody) && $body === '') {
-            return CommunicationResult::failure(
-                sprintf('cURL request failed (%d): %s', $errno, $bodyCollector->error() ?? $error),
-                metadata: ['curl' => is_array($info) ? $info : [], 'transport' => 'curl'],
-            );
-        }
-
         return CurlResultFactory::fromExecution(
             $request,
             'curl',
@@ -157,6 +186,7 @@ final readonly class CurlTransport implements HttpTransport
             $bodyCollector->error() ?? $error,
             $info,
             $headerCollector->headers(),
+            publishBufferedDownload: false,
         );
     }
 
@@ -181,7 +211,7 @@ final readonly class CurlTransport implements HttpTransport
             $configurator = new CurlHandleConfigurator();
             $request = $configurator->configure($handle, $request, $headerCollector, $bodyCollector, $pinnedResolution);
         } catch (InvalidArgumentException $exception) {
-            $bodyCollector?->finalize();
+            $bodyCollector?->abort();
 
             return CommunicationResult::failure($exception->getMessage(), metadata: ['transport' => 'curl']);
         }
@@ -193,11 +223,43 @@ final readonly class CurlTransport implements HttpTransport
         ];
     }
 
+    /**
+     * @return string|list<string>|null
+     */
+    private function cookieHeaderFromMetadata(mixed $value): string|array|null
+    {
+        if (is_string($value)) {
+            return $value;
+        }
+
+        if (!is_array($value)) {
+            return null;
+        }
+
+        $headers = [];
+        foreach ($value as $header) {
+            if (!is_string($header)) {
+                return null;
+            }
+
+            $headers[] = $header;
+        }
+
+        return $headers === [] ? null : $headers;
+    }
+
+    private function cookieJar(HttpRequest $request): ?CookieJar
+    {
+        $jar = $request->metadata['_cookie_jar'] ?? null;
+
+        return $jar instanceof CookieJar ? $jar : null;
+    }
+
     private function dispatchResultEvents(HttpRequest $request, CommunicationResult $result, float $startedAt): void
     {
         $payload = [
             'method' => $request->method->value,
-            'url' => HttpRedactor::redactUrl($request->buildUrl()),
+            'url' => HttpRedactor::redactUrl($request->buildUrl(), $request->sensitiveQueryNames()),
             'status' => $result->statusCode,
             'successful' => $result->successful,
             'duration_ms' => (int) (($this->clock->monotonic() - $startedAt) * 1000),
@@ -220,8 +282,8 @@ final readonly class CurlTransport implements HttpTransport
     {
         $this->events->dispatch('http.request.start', [
             'method' => $request->method->value,
-            'url' => HttpRedactor::redactUrl($url),
-            'headers' => HttpRedactor::redactHeaders($request->headers->all()),
+            'url' => HttpRedactor::redactUrl($url, $request->sensitiveQueryNames()),
+            'headers' => HttpRedactor::redactHeaders($request->headers->all(), $request->sensitiveHeaderNames()),
             'transport' => 'curl',
         ]);
     }
@@ -277,7 +339,7 @@ final readonly class CurlTransport implements HttpTransport
             );
         }
 
-        return $this->buildExecutionResult(
+        $result = $this->buildExecutionResult(
             $resolvedRequest,
             $rawBody,
             $bodyCollector,
@@ -287,6 +349,37 @@ final readonly class CurlTransport implements HttpTransport
             $info,
             $headerCollector,
         );
+
+        if (!$result->successful) {
+            $bodyCollector->abort();
+
+            return $result;
+        }
+
+        $commitError = $bodyCollector->commit();
+        if ($commitError !== null) {
+            return CommunicationResult::failure(
+                $commitError,
+                $result->statusCode,
+                $result->response,
+                $result->metadata,
+            );
+        }
+
+        return $result;
+    }
+
+    private function prepareCookieContext(HttpRequest $request): HttpRequest
+    {
+        if ($this->cookieJar($request) === null || array_key_exists('_cookie_origin_url', $request->metadata)) {
+            return $request;
+        }
+
+        return $request->metadata([
+            ...$request->metadata,
+            '_cookie_origin_url' => $request->buildUrl(),
+            '_cookie_origin_header' => $request->headers->get('Cookie'),
+        ]);
     }
 
     private function sameOrigin(string $first, string $second): bool
@@ -299,5 +392,10 @@ final readonly class CurlTransport implements HttpTransport
         $secondPort = parse_url($second, PHP_URL_PORT) ?: ($secondScheme === 'https' ? 443 : 80);
 
         return $firstScheme === $secondScheme && $firstHost === $secondHost && $firstPort === $secondPort;
+    }
+
+    private function storeResponseCookies(HttpRequest $request, HttpResponse $response, string $url): void
+    {
+        $this->cookieJar($request)?->storeFromResponse($response, $url);
     }
 }

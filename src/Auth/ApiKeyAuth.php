@@ -32,9 +32,9 @@ final readonly class ApiKeyAuth implements AuthenticatorInterface
     public function apply(HttpRequest $request): HttpRequest
     {
         if ($this->inQuery) {
-            return $request->query($this->key, $this->value);
+            return $request->markSensitiveQuery($this->key)->query($this->key, $this->value);
         }
 
-        return $request->header($this->key, $this->value);
+        return $request->markSensitiveHeader($this->key)->header($this->key, $this->value);
     }
 }

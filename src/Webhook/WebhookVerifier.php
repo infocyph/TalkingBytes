@@ -114,7 +114,11 @@ final readonly class WebhookVerifier
             timestamp: $timestamp,
             signaturePresent: true,
             signaturePrefix: substr($signatures[0], 0, 8),
-            metadata: ['max_age_seconds' => $this->maxAgeSeconds, 'signature_count' => count($signatures)],
+            metadata: [
+                'max_age_seconds' => $this->maxAgeSeconds,
+                'signature_count' => count($signatures),
+                'verified_at' => $now,
+            ],
         );
 
         $this->events->dispatch('webhook.verified', [

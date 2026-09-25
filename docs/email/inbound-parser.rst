@@ -67,7 +67,7 @@ Limits
 Parsing is bounded by ``EmailLimits``:
 
 - max raw message bytes
-- max header bytes/count
+- max header bytes/count and max physical header-line bytes
 - max MIME depth/parts
 - max decoded body bytes
 - max attachment count/size

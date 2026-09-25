@@ -28,6 +28,6 @@ final readonly class BasicAuth implements AuthenticatorInterface
     {
         $token = base64_encode($this->username . ':' . $this->password);
 
-        return $request->header('Authorization', 'Basic ' . $token);
+        return $request->markSensitiveHeader('Authorization')->header('Authorization', 'Basic ' . $token);
     }
 }

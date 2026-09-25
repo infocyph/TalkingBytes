@@ -62,10 +62,9 @@ Middleware receives an ``HttpRequest`` and a typed closure for the next stage.
            HttpRequest $request,
            Closure $next,
        ): CommunicationResult {
-           $headers = $request->headers;
-           $headers['X-Tenant-Id'] = $this->tenantId;
-
-           return $next($request->withHeaders($headers));
+           return $next(
+               $request->header('X-Tenant-Id', $this->tenantId),
+           );
        }
    }
 
@@ -89,8 +88,9 @@ Operational guidance
   request.
 - Keep retry attempts, rate limits, timeouts, and circuit-breaker thresholds
   bounded.
-- Retry only idempotent operations unless the application supplies
-  deduplication semantics.
+- Respect protocol retry-safety gates: HTTP retries safe methods by default and
+  requires idempotency or explicit opt-in for unsafe methods; gRPC retries only
+  requests explicitly marked with ``withRetrySafety()``.
 - Keep idempotency outside retry so one logical HTTP request retains one key.
 - Inject ``Clock`` and ``Sleeper`` in deterministic tests.
 - ``RateLimiter`` and ``CircuitBreaker`` are process-local. Use a shared

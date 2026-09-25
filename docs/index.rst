@@ -8,7 +8,7 @@ It provides:
 - outbound and inbound email (SMTP, sendmail, spool, IMAP, POP3, parser)
 - cURL-native HTTP client with retry, streaming, fakes, and concurrency
 - webhook sender/receiver with HMAC verification and replay protection
-- gRPC adapter with retry, fake callers, and native invoker bridge
+- gRPC callback/generated/native adapters with streaming, retry, inbound dispatch, and fakes
 - shared middleware pipeline, event bus, testing transports, and resilience primitives
 
 .. toctree::
@@ -40,3 +40,4 @@ It provides:
    extensions
    naming
    release-checklist
+   release-notes-2.2

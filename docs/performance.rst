@@ -82,5 +82,5 @@ it with fragile absolute memory or timing thresholds.
 These benchmarks and soak tests do not establish production application RPM.
 Measure sustained successful RPM separately on the production-equivalent host
 application and include concurrency, failures, timeouts, latency percentiles,
-and memory in that result. Foundation owns direct-versus-TalkingBytes bridge
-attribution.
+and memory in that result. The integrating host application owns attribution
+between its bridge/framework overhead and TalkingBytes protocol work.

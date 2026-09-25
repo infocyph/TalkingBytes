@@ -31,10 +31,7 @@ final readonly class SpoolConfig
         }
 
         $directories = array_filter([$this->directory, $this->processingDirectory], is_string(...));
-        $normalizedDirectories = array_map(
-            static fn(string $path): string => rtrim(str_replace('\\', '/', $path), '/'),
-            $directories,
-        );
+        $normalizedDirectories = array_map(self::normalizeDirectoryPath(...), $directories);
         if (count($normalizedDirectories) !== count(array_unique($normalizedDirectories))) {
             throw new InvalidArgumentException('Spool source and processing directories must not overlap.');
         }
@@ -72,5 +69,15 @@ final readonly class SpoolConfig
             newerThanSeconds: ConfigValue::nullableInt($config, 'newerThanSeconds'),
             maxMessageBytes: ConfigValue::nullableInt($config, 'maxMessageBytes'),
         );
+    }
+
+    private static function normalizeDirectoryPath(string $path): string
+    {
+        $normalized = rtrim(str_replace('\\', '/', $path), '/');
+        $realPath = realpath($normalized);
+
+        return is_string($realPath)
+            ? rtrim(str_replace('\\', '/', $realPath), '/')
+            : $normalized;
     }
 }

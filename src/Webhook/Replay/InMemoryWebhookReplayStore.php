@@ -20,7 +20,7 @@ final class InMemoryWebhookReplayStore implements WebhookReplayStore
     private readonly Clock $clock;
 
     /**
-     * @var array<string, int>
+     * @var array<string, float>
      */
     private array $entries = [];
 
@@ -54,17 +54,16 @@ final class InMemoryWebhookReplayStore implements WebhookReplayStore
             }
         }
 
-        $now = (int) floor($this->clock->timestamp());
-        $this->entries[$key] = $ttlSeconds > PHP_INT_MAX - $now
-            ? PHP_INT_MAX
-            : $now + $ttlSeconds;
+        $now = $this->clock->monotonic();
+        $expiresAt = $now + $ttlSeconds;
+        $this->entries[$key] = is_finite($expiresAt) ? $expiresAt : PHP_FLOAT_MAX;
 
         return true;
     }
 
     private function purgeExpired(): void
     {
-        $now = (int) floor($this->clock->timestamp());
+        $now = $this->clock->monotonic();
 
         foreach ($this->entries as $deliveryId => $expiresAt) {
             if ($expiresAt <= $now) {

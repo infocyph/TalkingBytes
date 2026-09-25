@@ -24,10 +24,14 @@ Verification result
 
 ``WebhookVerificationResult`` exposes:
 
-- valid flag
-- reason code (for rejection paths)
-- parsed timestamp metadata
-- redacted signature context (no secret leakage)
+- ``valid`` and rejection ``reason``
+- parsed ``timestamp``
+- ``signaturePresent`` and a short ``signaturePrefix`` diagnostic
+- metadata including ``max_age_seconds``; successful verification also records
+  ``signature_count`` and ``verified_at``
+
+Protocol events still redact signature values. The verification-result prefix
+is diagnostic context for the direct caller and is not the signing secret.
 
 Receiver
 --------

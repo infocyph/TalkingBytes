@@ -63,8 +63,8 @@ body/timestamp-only ``v1`` signing for direct integrations.
 Security upgrade from 2.0
 -------------------------
 
-Upgrade senders and receivers together. TalkingBytes 2.1 receivers reject
-legacy ``v1`` deliveries, and 2.0 receivers do not understand ``v2``. This is an
+Upgrade senders and receivers together. TalkingBytes 2.1 and later receivers
+reject legacy ``v1`` deliveries, and 2.0 receivers do not understand ``v2``. This is an
 intentional security compatibility correction: accepting unsigned delivery IDs
 allows replay protection to be bypassed, and unsigned event names allow event
 substitution. There is no automatic downgrade or insecure receiver opt-out.

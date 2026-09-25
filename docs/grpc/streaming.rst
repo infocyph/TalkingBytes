@@ -80,3 +80,15 @@ deliveries. When cancellation or a consumer callback failure is observed,
 TalkingBytes invokes the native call object's ``cancel()`` method when
 available before propagating the failure. Streaming remains incremental; the
 adapter does not buffer a complete stream in memory.
+
+Generated bidirectional coordination
+------------------------------------
+
+The generated-stub adapter currently performs outbound writes to completion,
+closes the client write side, and then drains inbound responses. This is
+bounded streaming and does not accumulate the complete stream, but it is not
+a guarantee of interactive full-duplex flow control. A peer that requires an
+inbound read before accepting later writes needs a different coordination
+contract (for example, host-driven read/write scheduling). Changing that
+contract is deferred to a future major version rather than being hidden behind
+the existing ``iterable + onMessage`` API.

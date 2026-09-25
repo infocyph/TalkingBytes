@@ -36,6 +36,16 @@ Default transient statuses include:
 
 ``Retry-After`` header values are supported in both second and HTTP-date forms.
 
+Retry eligibility
+-----------------
+
+Automatic retry is enabled by method safety as well as policy. ``GET``,
+``HEAD``, ``OPTIONS``, ``PUT`` and ``DELETE`` are retry-eligible by default.
+``POST`` and ``PATCH`` require either an ``Idempotency-Key`` header (for
+example through ``HttpClient::withIdempotency()``) or an explicit request-level
+``allowUnsafeMethodRetry()`` opt-in. Automatic retry also requires a repeatable
+upload source; non-repeatable streams fail before a retry loop is attempted.
+
 Client configuration object
 ---------------------------
 

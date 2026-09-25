@@ -9,5 +9,7 @@ Use these boundaries consistently:
 - ``Pop3Mailbox``: POP3-specific mailbox operations
 - ``RawEmailParser`` and parser stack: raw ``.eml`` parsing
 - ``HttpClient``: cURL HTTP entry point
-- ``GrpcClient``: gRPC adapter entry point
-- ``Webhook``: webhook send/verify/receive entry point
+- ``GrpcClient``: outbound gRPC callback/native/generated client entry point
+- ``GrpcInboundDispatcher``: host-driven inbound gRPC request/response dispatch
+- ``Webhook``: webhook send/verify/receive factory entry point
+- ``WebhookSender`` / ``WebhookReceiver``: configured outbound/inbound webhook pipelines

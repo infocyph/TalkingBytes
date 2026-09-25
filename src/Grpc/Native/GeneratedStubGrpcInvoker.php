@@ -34,15 +34,16 @@ final readonly class GeneratedStubGrpcInvoker implements NativeGrpcInvoker, Nati
         $reflection = new ReflectionObject($this->stubClient);
         $this->methodMap = $this->normalizeMethodMap($reflection, $methodMap);
 
-        $streamOpenArity = [];
-        foreach ($reflection->getMethods(ReflectionMethod::IS_PUBLIC) as $method) {
-            if ($method->isStatic()) {
-                continue;
-            }
+        $methods = array_values(array_filter(
+            $reflection->getMethods(ReflectionMethod::IS_PUBLIC),
+            static fn(ReflectionMethod $method): bool => !$method->isStatic(),
+        ));
 
-            $streamOpenArity[$method->getName()] = self::resolveStreamOpenArity($method);
-        }
-
+        /** @var array<string, int> $streamOpenArity */
+        $streamOpenArity = array_combine(
+            array_map(static fn(ReflectionMethod $method): string => $method->getName(), $methods),
+            array_map(self::resolveStreamOpenArity(...), $methods),
+        );
         $this->streamOpenArity = $streamOpenArity;
     }
 
@@ -63,7 +64,7 @@ final readonly class GeneratedStubGrpcInvoker implements NativeGrpcInvoker, Nati
             $this->drainInboundStream($call, $onMessage);
             $this->assertNotCancelled();
 
-            return $this->finalizeCall($call);
+            return $this->finalizeStreamingCall($call);
         } catch (Throwable $exception) {
             $this->cancelCall($call);
 
@@ -133,7 +134,7 @@ final readonly class GeneratedStubGrpcInvoker implements NativeGrpcInvoker, Nati
             $this->drainInboundStream($call, $onMessage);
             $this->assertNotCancelled();
 
-            return $this->finalizeCall($call);
+            return $this->finalizeStreamingCall($call);
         } catch (Throwable $exception) {
             $this->cancelCall($call);
 
@@ -343,10 +344,26 @@ final readonly class GeneratedStubGrpcInvoker implements NativeGrpcInvoker, Nati
         );
     }
 
+    private function finalizeStreamingCall(mixed $call): NativeGrpcResult
+    {
+        if (!is_object($call) || !method_exists($call, 'getStatus')) {
+            throw new RuntimeException('Unsupported gRPC stream call result: expected getStatus() method.');
+        }
+
+        $status = $call->getStatus();
+
+        return new NativeGrpcResult(
+            statusCode: $this->extractWaitStatusCode($status),
+            headers: $this->extractHeaders($call),
+            trailers: $this->extractTrailers($call),
+            metadata: $this->extractWaitStatusMetadata($status),
+        );
+    }
+
     private function finishClientWrites(mixed $call): void
     {
         if (!is_object($call)) {
-            return;
+            throw new RuntimeException('Unsupported client stream call result.');
         }
 
         if (method_exists($call, 'writesDone')) {

@@ -30,7 +30,12 @@ Generated stub adapter
 ----------------------
 
 ``GeneratedStubGrpcInvoker`` adapts generated ``grpc/grpc`` stub clients using
-duck-typed call objects (``wait()``, ``responses()``/``read()``, ``write()``).
+the native call shapes rather than one synthetic interface. Unary and
+client-streaming completion use ``wait()``; server-streaming and bidirectional
+completion use ``getStatus()``. Inbound stream messages are drained through
+``responses()`` or ``read()``. Client-streaming and bidirectional calls use
+``write()`` and close the write side through ``writesDone()`` or ``closeWrite()``
+when the native call exposes those methods.
 
 Stream call shape is resolved once from public method reflection when the
 adapter is constructed. TalkingBytes never invokes a stream method merely to
@@ -54,3 +59,16 @@ first protocol call.
    ]);
 
 Method map keys are gRPC method paths; values are PHP stub method names.
+
+Native interoperability lane
+----------------------------
+
+The repository includes an opt-in localhost interoperability test for the
+actual upstream PHP call objects. CI pins ``grpc/grpc`` to 1.82.0,
+``google/protobuf`` to 4.33.6 and the Python peer to 1.82.0. The runner uses
+its current native ``ext-grpc`` build and records the loaded extension version
+in the job output.
+The lane exercises unary, server-streaming, client-streaming and bidirectional
+call shapes plus native deadline and cancellation cleanup. It is intentionally
+separate from the minimal optional-capability job so gRPC remains a cold
+optional dependency for ordinary installs.
