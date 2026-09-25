@@ -20,7 +20,12 @@ file_put_contents($readyPath, json_encode(['port' => $port], JSON_THROW_ON_ERROR
 $deadline = microtime(true) + 5.0;
 $handled = 0;
 while ($handled < 8 && microtime(true) < $deadline) {
-    $client = @stream_socket_accept($server, 0.1);
+    set_error_handler(static fn(): bool => true, E_WARNING);
+    try {
+        $client = stream_socket_accept($server, 0.1);
+    } finally {
+        restore_error_handler();
+    }
     if ($client === false) {
         continue;
     }
