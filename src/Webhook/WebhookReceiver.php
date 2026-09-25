@@ -133,7 +133,13 @@ final readonly class WebhookReceiver
             ? $acceptedUntil - $verifiedAt + 1
             : 1;
 
-        return max($this->replayTtlSeconds, $remaining);
+        if ($remaining > PHP_INT_MAX - $maxAge) {
+            return PHP_INT_MAX;
+        }
+
+        $protectedRetention = $remaining + $maxAge;
+
+        return max($this->replayTtlSeconds, $protectedRetention);
     }
 
     /**
