@@ -103,7 +103,10 @@ it('accepts parent-domain cookies and applies rfc path boundaries', function ():
         ->pushJson(['ok' => true], 200)
         ->pushJson(['ok' => true], 200);
 
-    $client = HttpClient::fake($transport)->withCookieJar(new CookieJar(allowDomainCookies: true));
+    $client = HttpClient::fake($transport)->withCookieJar(new CookieJar(
+        allowDomainCookies: true,
+        allowedParentDomains: ['example.test'],
+    ));
 
     $client->get('https://api.example.test/api/login');
     $client->get('https://www.example.test/apix');
@@ -136,4 +139,37 @@ it('validates cookie names and values at construction', function (): void {
         ->toThrow(InvalidArgumentException::class, 'Cookie name contains invalid characters.');
     expect(fn() => new Cookie('session', "value; injected=1", 'example.test'))
         ->toThrow(InvalidArgumentException::class, 'Cookie value contains invalid characters.');
+});
+
+
+it('fails closed for domain cookies without an explicit sharing policy', function (): void {
+    $transport = (new FakeHttpTransport)
+        ->pushJson(['ok' => true], 200, [
+            'Set-Cookie' => 'session=injected; Domain=co.uk; Path=/',
+        ])
+        ->pushJson(['ok' => true], 200);
+
+    $client = HttpClient::fake($transport)->withCookieJar(new CookieJar(allowDomainCookies: true));
+
+    $client->get('https://attacker.co.uk/login');
+    $client->get('https://victim.co.uk/orders');
+
+    expect($transport->sentRequests()[1]->headers->get('Cookie'))->toBeNull();
+});
+
+it('accepts only explicitly allowed domain-cookie scopes', function (): void {
+    $jar = new CookieJar(
+        allowDomainCookies: true,
+        allowedParentDomains: ['example.test'],
+    );
+    $response = new \Infocyph\TalkingBytes\Http\HttpResponse(
+        200,
+        '',
+        ['Set-Cookie' => 'shared=1; Domain=example.test; Path=/'],
+    );
+
+    $jar->storeFromResponse($response, 'https://api.example.test/login');
+    $request = $jar->applyToRequest(HttpRequest::get('https://www.example.test/orders'));
+
+    expect((string) $request->headers->get('Cookie'))->toContain('shared=1');
 });
