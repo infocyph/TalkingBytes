@@ -318,11 +318,15 @@ final readonly class CurlTransport implements HttpTransport
         $request = $request->withoutHeader('Cookie');
         $originUrl = $request->metadata['_cookie_origin_url'] ?? null;
         $originHeader = $request->metadata['_cookie_origin_header'] ?? null;
-        if (is_string($originUrl)
-            && $this->sameOrigin($originUrl, $url)
-            && (is_string($originHeader) || is_array($originHeader))
-        ) {
-            $request = $request->header('Cookie', $originHeader);
+        if (is_string($originUrl) && $this->sameOrigin($originUrl, $url)) {
+            if (is_string($originHeader)) {
+                $request = $request->header('Cookie', $originHeader);
+            } elseif (is_array($originHeader)) {
+                $values = array_values(array_filter($originHeader, is_string(...)));
+                if ($values !== []) {
+                    $request = $request->header('Cookie', $values);
+                }
+            }
         }
 
         return $jar->applyToRequest($request);
