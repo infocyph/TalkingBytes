@@ -144,7 +144,7 @@ Owner: `src/Grpc/Native/GeneratedStubGrpcInvoker.php:315`; tests in `tests/GrpcG
 - [x] Resolve completion strategy for unary/client streaming versus server/bidirectional streaming without invocation-and-catch probing.
 - [x] Map final status, details and trailers exactly once; preserve non-OK stream results and cleanup on callback exceptions.
 - [x] Fix native-shaped doubles so unsupported synthetic methods do not conceal adapter defects.
-- [ ] Add an optional real grpc/grpc + ext-grpc integration lane for all four call shapes and cancellation/deadline cleanup.
+- [x] Add an optional real grpc/grpc + ext-grpc integration lane for all four call shapes and cancellation/deadline cleanup.
 - [x] Independently test bidirectional flow control: an interactive native-shaped peer proves the current generated adapter is write-then-read; true interactive duplex requires a different coordination contract and is deferred to a future major-version decision gate.
 
 **Acceptance:** real supported generated clients complete successfully and report status/trailers accurately. Reference: [upstream ServerStreamingCall](https://github.com/grpc/grpc/blob/master/src/php/lib/Grpc/ServerStreamingCall.php), [BidiStreamingCall](https://github.com/grpc/grpc/blob/master/src/php/lib/Grpc/BidiStreamingCall.php), [ClientStreamingCall](https://github.com/grpc/grpc/blob/master/src/php/lib/Grpc/ClientStreamingCall.php). Pin concrete supported package revisions when creating fixtures.
@@ -264,9 +264,9 @@ Each batch is reviewable independently; add a failing regression before changing
 | 1 | HTTP trust boundaries — F01-F03 | Implemented; CI verification pending |
 | 2 | HTTP transfer correctness — F04-F05 | Implemented; CI verification pending |
 | 3 | Email data integrity — F09-F11 | Implemented; extended process/CI verification pending |
-| 4 | Protocol interoperability — F06-F08 | Core implementation complete; live gRPC/duplex verification pending |
+| 4 | Protocol interoperability — F06-F08 | Implemented; native lane execution pending CI |
 | 5 | Replay policy — F12 | Implemented; CI verification pending |
-| 6 | Measurement/docs/release | Implementation-gap sweep in progress |
+| 6 | Measurement/docs/release | Implementation complete; exact-candidate verification pending |
 
 1. **HTTP trust boundaries:** F01–F03. Establish provenance/sensitivity handling once in existing owners; verify redirect chains and environment isolation.
 2. **HTTP transfer correctness:** F04–F05. Shared commit/abort policy and single/multi response parity; include redirects and uploads in affected lifecycle tests.
