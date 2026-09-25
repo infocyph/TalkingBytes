@@ -33,6 +33,36 @@ final readonly class DkimVerifier
         if ($dkimField === null) {
             return new DkimVerificationResult(false, reason: 'DKIM-Signature header not found.');
         }
+        return $this->verifyField($headers, $body, $dkimField);
+    }
+
+    public function verifyAll(ParsedEmail $email): DkimVerificationReport
+    {
+        [$headersBlock, $body] = $this->splitRaw($email->raw);
+        $headers = $this->parseHeaderLines($headersBlock);
+        $results = [];
+
+        foreach ($headers as $index => $field) {
+            if (strcasecmp($field['name'], 'dkim-signature') !== 0) {
+                continue;
+            }
+
+            $results[] = $this->verifyField(
+                $headers,
+                $body,
+                [...$field, 'index' => $index],
+            );
+        }
+
+        return new DkimVerificationReport($results);
+    }
+
+    /**
+     * @param list<array{name:string,value:string}> $headers
+     * @param array{name:string,value:string,index:int} $dkimField
+     */
+    private function verifyField(array $headers, string $body, array $dkimField): DkimVerificationResult
+    {
         $dkimHeader = $dkimField['value'];
         if (strlen($dkimHeader) > 16_384) {
             return new DkimVerificationResult(false, reason: 'DKIM-Signature header exceeds safe bounds.');
@@ -90,39 +120,23 @@ final readonly class DkimVerifier
             return new DkimVerificationResult(false, $domain, $selector, 'DKIM key requires strict identity domain matching.');
         }
 
-        $signingInput = $this->buildSigningInput($headers, $h, $dkimField['name'], $dkimHeader, $headerCanon);
+        $signingInput = $this->buildSigningInput(
+            $headers,
+            $h,
+            $dkimField['name'],
+            $dkimHeader,
+            $headerCanon,
+            $dkimField['index'],
+        );
         if ($signingInput === null) {
             return new DkimVerificationResult(false, $domain, $selector, 'Signed header list could not be matched to message headers.');
         }
 
-        $verified = $this->verifySignature($algorithm, $signingInput, $signature, $publicKey);
-
-        if (!$verified) {
+        if (!$this->verifySignature($algorithm, $signingInput, $signature, $publicKey)) {
             return new DkimVerificationResult(false, $domain, $selector, 'DKIM signature verification failed.');
         }
 
         return new DkimVerificationResult(true, $domain, $selector);
-    }
-
-    public function verifyAll(ParsedEmail $email): DkimVerificationReport
-    {
-        [$headersBlock, $body] = $this->splitRaw($email->raw);
-        $groups = $this->rawHeaderGroups($headersBlock);
-        $dkimGroups = array_values(array_filter(
-            $groups,
-            static fn(string $group): bool => preg_match('/^DKIM-Signature:/i', $group) === 1,
-        ));
-        $otherGroups = array_values(array_filter(
-            $groups,
-            static fn(string $group): bool => preg_match('/^DKIM-Signature:/i', $group) !== 1,
-        ));
-        $results = [];
-        foreach ($dkimGroups as $dkimGroup) {
-            $raw = implode("\r\n", [...$otherGroups, $dkimGroup]) . "\r\n\r\n" . $body;
-            $results[] = $this->verify($this->withRaw($email, $raw));
-        }
-
-        return new DkimVerificationReport($results);
     }
 
     /**
@@ -164,6 +178,7 @@ final readonly class DkimVerifier
         string $dkimName,
         string $dkimValue,
         string $headerCanon,
+        int $dkimIndex,
     ): ?string {
         $wantedHeaders = array_values(array_filter(array_map(
             static fn(string $name): string => strtolower(trim($name)),
@@ -174,7 +189,7 @@ final readonly class DkimVerifier
             return null;
         }
 
-        $usedIndices = [];
+        $usedIndices = [$dkimIndex => true];
         $canonicalized = [];
 
         foreach ($wantedHeaders as $wantedHeader) {
@@ -228,7 +243,7 @@ final readonly class DkimVerifier
 
     /**
      * @param list<array{name:string,value:string}> $headers
-     * @return array{name:string,value:string}|null
+     * @return array{name:string,value:string,index:int}|null
      */
     private function lastHeader(array $headers, string $name): ?array
     {
@@ -237,7 +252,7 @@ final readonly class DkimVerifier
                 continue;
             }
 
-            return $headers[$index];
+            return [...$headers[$index], 'index' => $index];
         }
 
         return null;
