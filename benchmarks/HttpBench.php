@@ -10,6 +10,7 @@ use Infocyph\TalkingBytes\Http\Contract\HttpMiddleware;
 use Infocyph\TalkingBytes\Http\Contract\HttpTransport;
 use Infocyph\TalkingBytes\Http\Cookie\CookieJar;
 use Infocyph\TalkingBytes\Http\HttpClient;
+use Infocyph\TalkingBytes\Http\HttpClientConfig;
 use Infocyph\TalkingBytes\Http\HttpClientFactory;
 use Infocyph\TalkingBytes\Http\HttpRequest;
 use Infocyph\TalkingBytes\Http\Support\HeaderBag;
@@ -32,6 +33,8 @@ final class HttpBench
 
     /** @var array<string, mixed> */
     private array $resolvedConfig;
+
+    private HttpClientConfig $typedResolvedConfig;
 
     public function setUp(): void
     {
@@ -64,6 +67,7 @@ final class HttpBench
             'circuit_breaker' => ['enabled' => true, 'failure_threshold' => 5, 'cool_down_seconds' => 30],
             'idempotency' => ['enabled' => true, 'header' => 'Idempotency-Key'],
         ];
+        $this->typedResolvedConfig = HttpClientConfig::fromArray($this->resolvedConfig);
         $this->request = HttpRequest::post('https://api.example.com/v1/orders?existing=1#frag')
             ->header('X-App', 'TalkingBytes')
             ->header('X-Trace', 'bench-123')
@@ -155,5 +159,16 @@ final class HttpBench
     public function benchResolvedFactoryConstruction(): void
     {
         (new HttpClientFactory())->fromArray($this->resolvedConfig, new FakeHttpTransport());
+    }
+
+    #[Iterations(5)]
+    #[Revs(250)]
+    public function benchResolvedTypedFactoryConstruction(): void
+    {
+        (new HttpClientFactory())->fromConfig(
+            $this->typedResolvedConfig,
+            $this->resolvedConfig,
+            new FakeHttpTransport(),
+        );
     }
 }
