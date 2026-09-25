@@ -776,8 +776,10 @@ it('avoids success target collisions and preserves sources when cross-device cla
     rmdir($success);
 
     $sharedMemory = '/dev/shm';
-    $sourceDevice = @stat($directory)['dev'] ?? null;
-    $targetDevice = @stat($sharedMemory)['dev'] ?? null;
+    $sourceStat = @stat($directory);
+    $targetStat = @stat($sharedMemory);
+    $sourceDevice = is_array($sourceStat) ? ($sourceStat['dev'] ?? null) : null;
+    $targetDevice = is_array($targetStat) ? ($targetStat['dev'] ?? null) : null;
     if (is_dir($sharedMemory) && is_writable($sharedMemory)
         && is_int($sourceDevice) && is_int($targetDevice) && $sourceDevice !== $targetDevice
     ) {
