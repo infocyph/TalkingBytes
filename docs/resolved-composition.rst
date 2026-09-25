@@ -79,25 +79,42 @@ configuration is supplied, base keys in the resolved array are not reparsed;
 the array contributes only the optional auth/cookie/resilience/idempotency
 sections.
 
+Resolved HTTP sections use these native keys:
+
+- ``auth.driver``: ``none``, ``bearer``, ``basic``, header API key, or query API key
+- ``cookies.enabled``
+- ``retry.enabled`` plus ``attempts``, ``base_delay_ms``, ``max_retry_after_seconds``
+- ``rate_limit.enabled`` plus ``max_requests`` and ``per_seconds``
+- ``circuit_breaker.enabled`` plus ``failure_threshold`` and ``cool_down_seconds``
+- ``idempotency.enabled`` plus optional ``header``
+
 Email
 -----
 
 ``EmailSenderFactory::fromResolvedConfig()`` expects a resolved primary
 ``transport`` array, optional resolved ``fallbacks`` arrays, and optional
-``retry``, ``rate_limit`` and ``dkim`` sections. File paths in log/spool/DKIM
-configuration should already be absolute or otherwise resolved by the host.
+``retry``, ``rate_limit`` and ``dkim`` sections. ``retry`` uses ``enabled``,
+``max_attempts``, ``delay_ms`` and ``policy`` (``fixed`` or
+``backoff``/``exponential``); ``rate_limit`` uses ``max_requests`` and
+``per_seconds``. File paths in log/spool/DKIM configuration should already be
+absolute or otherwise resolved by the host.
 
 gRPC
 ----
 
 ``GrpcClientFactory`` accepts the resolved retry section while the host supplies
-the callable/native/generated endpoint object. Generated stubs no longer need
-host code to construct ``GeneratedStubGrpcInvoker`` for ordinary use.
+the callable/native/generated endpoint object. The retry section uses
+``enabled``, ``attempts``, ``base_delay_ms``, optional ``max_delay_ms``, and
+``jitter_ratio``. Generated stubs no longer need host code to construct
+``GeneratedStubGrpcInvoker`` for ordinary use.
 
 Webhook
 -------
 
-Outbound resolved configuration can include ``signing_secret`` and ``retry``.
-Inbound resolved configuration can include ``max_age_seconds``,
-``max_payload_bytes`` and replay TTL/namespace. The replay-store object itself
-remains host-provided.
+Outbound resolved configuration can include ``signing_secret``,
+``max_payload_bytes``, and a ``retry`` section with ``enabled``, ``attempts``,
+``base_delay_ms`` and ``max_retry_after_seconds``. Inbound resolved
+configuration can include ``max_age_seconds`` and ``max_payload_bytes`` plus a
+nested ``replay`` section containing ``enabled``, ``ttl_seconds`` and
+``namespace``. The replay-store object itself remains host-provided; its TTL
+must satisfy the elapsed-duration lower-bound contract.
