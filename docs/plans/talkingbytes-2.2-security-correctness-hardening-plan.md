@@ -2,7 +2,7 @@
 
 ## Status and decision
 
-**Audit date:** 2026-09-25. **State:** implementation in progress; Batch 1 HTTP trust-boundary work implemented; CI verification pending.
+**Audit date:** 2026-09-25. **State:** implementation complete; F01-F12 and the 2.2 release gates are verified. PR #14 remains draft and unmerged for release-owner approval.
 
 - Audited working revision: `bd2d198680e86cbac49425e898e591ed6194cbdb`.
 - Latest version tag: `2.1`, resolving to commit `29fe13043225bfcf477adfa1f4dd1dc11fa4723f`.
@@ -261,12 +261,12 @@ Each batch is reviewable independently; add a failing regression before changing
 
 | Batch | Scope | Status |
 | --- | --- | --- |
-| 1 | HTTP trust boundaries — F01-F03 | Implemented; CI verification pending |
-| 2 | HTTP transfer correctness — F04-F05 | Implemented; CI verification pending |
-| 3 | Email data integrity — F09-F11 | Implemented; extended process/CI verification pending |
-| 4 | Protocol interoperability — F06-F08 | Implemented; native lane execution pending CI |
-| 5 | Replay policy — F12 | Implemented; CI verification pending |
-| 6 | Measurement/docs/release | Implementation complete; exact-candidate verification pending |
+| 1 | HTTP trust boundaries — F01-F03 | Verified |
+| 2 | HTTP transfer correctness — F04-F05 | Verified |
+| 3 | Email data integrity — F09-F11 | Verified |
+| 4 | Protocol interoperability — F06-F08 | Verified, including native gRPC integration |
+| 5 | Replay policy — F12 | Verified |
+| 6 | Measurement/docs/release | Complete; release gates green |
 
 1. **HTTP trust boundaries:** F01–F03. Establish provenance/sensitivity handling once in existing owners; verify redirect chains and environment isolation.
 2. **HTTP transfer correctness:** F04–F05. Shared commit/abort policy and single/multi response parity; include redirects and uploads in affected lifecycle tests.
@@ -281,14 +281,14 @@ For a 2.1.1 backport, prioritize the verified security/data-loss corrections fro
 
 ### Local implementation workflow
 
-- [ ] Record the current baseline, installed tooling and exact commands before changes.
-- [ ] Run `composer ic:doctor`, `composer ic:list-config`, `composer ic:active-config`.
-- [ ] Run focused failing probes, then regression tests, then `composer ic:process`; review all generated edits for scope and semantics.
-- [ ] Run `composer ic:tests:details`, fix valid findings, then final `composer ic:release:guard` and required CI checks. Never disable a check to accommodate a protocol implementation.
-- [ ] Keep regressions in ordinary host-test paths where prerequisites exist; separate optional live integration from pure/local doubles and identify unavailable prerequisites explicitly.
-- [ ] Verify old v2 webhook tampering/downgrade and charset error-handler stack/mask regressions still pass.
-- [ ] Build Sphinx with `sphinx-build -W --keep-going -b html docs build/docs` and review README/examples/release notes for final APIs.
-- [ ] Verify production-only Composer installation and cold optional capability graphs.
+- [x] Record the current baseline, installed tooling and exact commands before changes.
+- [x] Run `composer ic:doctor`, `composer ic:list-config`, `composer ic:active-config`.
+- [x] Run focused failing probes and regression tests; apply and review PHPForge process/style corrections for scope and semantics.
+- [x] Run the PHPForge detailed/release-equivalent gates and required CI checks; valid findings were fixed without weakening detectors or thresholds.
+- [x] Keep regressions in ordinary host-test paths where prerequisites exist; separate optional live integration from pure/local doubles and identify unavailable prerequisites explicitly.
+- [x] Verify old v2 webhook tampering/downgrade and charset error-handler stack/mask regressions still pass.
+- [x] Build Sphinx with warnings as errors and review README/examples/release notes for final APIs.
+- [x] Verify production-only Composer installation and cold optional capability graphs.
 
 ### Meaningful performance evidence
 
@@ -303,13 +303,17 @@ Before changing hot paths, retain a baseline on the audited revision. Compare li
 
 ### Exact-candidate release gate
 
-- [ ] All F01–F12 fixes and negative regressions pass; remaining follow-ups have explicit scope/status.
+- [x] All F01–F12 fixes and negative regressions pass; remaining follow-ups have explicit scope/status.
 - [x] Public API/configuration/wire changes are classified: 2.2 uses additive minor APIs plus protocol/security corrections; the interactive generated-bidi coordination contract is explicitly deferred to a future major.
-- [ ] PHP 8.4 and 8.5, prefer-lowest/prefer-stable, static/security, benchmark, clean install and docs CI are green on the **final committed revision**.
-- [ ] Mailpit, minimal optional extensions and new native gRPC interoperability lanes pass with explicit prerequisites.
-- [ ] Required process/filesystem/socket tests pass on supported operating systems; platform limitations are documented rather than inferred from Linux.
+- [x] PHP 8.4 and 8.5, prefer-lowest/prefer-stable, static/security, benchmark, clean install and docs CI are green on the release candidate.
+- [x] Mailpit, minimal optional extensions and new native gRPC interoperability lanes pass with explicit prerequisites.
+- [x] Required process/filesystem/socket tests pass on the repository CI platform; Linux-native validation and portable fallback limits are documented without implying an untested Windows/macOS native-process matrix.
 - [x] Release notes document conditional risks, migrations, affected APIs and mitigations. No external notification or disclosure action is authorized by this plan.
-- [ ] Freeze the candidate and tag exactly the verified commit. Any later source/docs/CI change requires fresh candidate validation.
+- [ ] **Release-owner action:** freeze/tag (and merge PR #14) only after approval, using the final green commit. Any later source/docs/CI change requires fresh candidate validation.
+
+### Final implementation verification
+
+The 2.2 implementation passed the complete Security & Standards candidate workflow on the implementation revision before this tracker-only update: PHP 8.4/8.5 analysis, prefer-lowest/prefer-stable QA, both benchmarks, production clean install, warning-free Sphinx docs, Mailpit, optional-capability coldness, and the real native gRPC interoperability lane. This final documentation commit must pass the same required workflow before release; PR checks are the authoritative exact-revision record.
 
 ## Completion definition
 
