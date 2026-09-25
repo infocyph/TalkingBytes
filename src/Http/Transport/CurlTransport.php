@@ -112,9 +112,20 @@ final readonly class CurlTransport implements HttpTransport
             $redirects++;
         }
 
+        $result = CurlResultFactory::publishBufferedDownload($current, $result);
         $this->dispatchResultEvents($current, $result, $startedAt);
 
-        return $result;
+        if ($this->cookieJar($current) === null) {
+            return $result;
+        }
+
+        return new CommunicationResult(
+            $result->successful,
+            $result->statusCode,
+            $result->error,
+            $result->response,
+            [...$result->metadata, '_cookie_provenance_managed' => true],
+        );
     }
 
     private function applyCookiesForHop(HttpRequest $request, string $url): HttpRequest
@@ -175,6 +186,7 @@ final readonly class CurlTransport implements HttpTransport
             $bodyCollector->error() ?? $error,
             $info,
             $headerCollector->headers(),
+            publishBufferedDownload: false,
         );
     }
 
