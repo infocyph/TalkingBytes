@@ -63,11 +63,20 @@ final readonly class SendmailTransport implements EmailTransport
      */
     private function buildCommand(EmailMessage $message): array
     {
-        $command = [$this->config->path, ...$this->config->extraArguments];
+        $arguments = array_values(array_filter(
+            $this->config->extraArguments,
+            static fn(string $argument): bool => $argument !== '-t',
+        ));
+        $command = [$this->config->path, ...$arguments];
 
         $sender = $message->envelope()->envelopeSender();
         if ($sender !== null) {
             $command[] = sprintf('-f%s', $sender->email);
+        }
+
+        $command[] = '--';
+        foreach ($message->envelope()->recipients() as $recipient) {
+            $command[] = $recipient->email;
         }
 
         return $command;
