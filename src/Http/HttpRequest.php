@@ -313,6 +313,9 @@ final readonly class HttpRequest
     public function markSensitiveHeader(string $name): self
     {
         HeaderBag::assertValidHeaderName($name);
+        if (strlen($name) > 256) {
+            throw new InvalidArgumentException('Sensitive HTTP header name cannot exceed 256 bytes.');
+        }
 
         return $this->withSensitiveName('_sensitive_headers', strtolower($name));
     }
