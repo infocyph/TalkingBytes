@@ -62,10 +62,9 @@ Middleware receives an ``HttpRequest`` and a typed closure for the next stage.
            HttpRequest $request,
            Closure $next,
        ): CommunicationResult {
-           $headers = $request->headers;
-           $headers['X-Tenant-Id'] = $this->tenantId;
-
-           return $next($request->withHeaders($headers));
+           return $next(
+               $request->header('X-Tenant-Id', $this->tenantId),
+           );
        }
    }
 
