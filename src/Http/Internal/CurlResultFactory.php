@@ -22,6 +22,7 @@ final class CurlResultFactory
         string $error,
         array|false $rawInfo,
         array $responseHeaders,
+        bool $publishBufferedDownload = true,
     ): CommunicationResult {
         $info = is_array($rawInfo) ? $rawInfo : [];
         $statusCode = self::statusCode($info);
@@ -65,7 +66,7 @@ final class CurlResultFactory
             );
         }
 
-        if ($downloadPath !== null) {
+        if ($publishBufferedDownload && $downloadPath !== null) {
             $downloadError = self::writeDownloadBody($downloadPath, $body);
             if ($downloadError !== null) {
                 return CommunicationResult::failure(
@@ -78,6 +79,26 @@ final class CurlResultFactory
         }
 
         return CommunicationResult::success($statusCode, $response, ['transport' => $transport, 'curl' => $info]);
+    }
+
+    public static function publishBufferedDownload(HttpRequest $request, CommunicationResult $result): CommunicationResult
+    {
+        $path = $request->options->downloadPath;
+        if (!$result->successful || $path === null || !$result->response instanceof HttpResponse) {
+            return $result;
+        }
+
+        $downloadError = self::writeDownloadBody($path, $result->response->body);
+        if ($downloadError === null) {
+            return $result;
+        }
+
+        return CommunicationResult::failure(
+            $downloadError,
+            $result->statusCode,
+            $result->response,
+            $result->metadata,
+        );
     }
 
     /**
