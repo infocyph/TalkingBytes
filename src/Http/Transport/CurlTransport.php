@@ -317,19 +317,37 @@ final readonly class CurlTransport implements HttpTransport
 
         $request = $request->withoutHeader('Cookie');
         $originUrl = $request->metadata['_cookie_origin_url'] ?? null;
-        $originHeader = $request->metadata['_cookie_origin_header'] ?? null;
-        if (is_string($originUrl) && $this->sameOrigin($originUrl, $url)) {
-            if (is_string($originHeader)) {
-                $request = $request->header('Cookie', $originHeader);
-            } elseif (is_array($originHeader)) {
-                $values = array_values(array_filter($originHeader, is_string(...)));
-                if ($values !== []) {
-                    $request = $request->header('Cookie', $values);
-                }
-            }
+        $originHeader = $this->cookieHeaderFromMetadata($request->metadata['_cookie_origin_header'] ?? null);
+        if (is_string($originUrl) && $this->sameOrigin($originUrl, $url) && $originHeader !== null) {
+            $request = $request->header('Cookie', $originHeader);
         }
 
         return $jar->applyToRequest($request);
+    }
+
+    /**
+     * @return string|list<string>|null
+     */
+    private function cookieHeaderFromMetadata(mixed $value): string|array|null
+    {
+        if (is_string($value)) {
+            return $value;
+        }
+
+        if (!is_array($value)) {
+            return null;
+        }
+
+        $headers = [];
+        foreach ($value as $header) {
+            if (!is_string($header)) {
+                return null;
+            }
+
+            $headers[] = $header;
+        }
+
+        return $headers === [] ? null : $headers;
     }
 
     private function cookieJar(HttpRequest $request): ?CookieJar
