@@ -66,19 +66,15 @@ final class CurlResultFactory
             );
         }
 
-        if ($publishBufferedDownload && $downloadPath !== null) {
-            $downloadError = self::writeDownloadBody($downloadPath, $body);
-            if ($downloadError !== null) {
-                return CommunicationResult::failure(
-                    $downloadError,
-                    $statusCode,
-                    $response,
-                    ['transport' => $transport, 'curl' => $info],
-                );
-            }
-        }
+        $result = CommunicationResult::success(
+            $statusCode,
+            $response,
+            ['transport' => $transport, 'curl' => $info],
+        );
 
-        return CommunicationResult::success($statusCode, $response, ['transport' => $transport, 'curl' => $info]);
+        return $publishBufferedDownload
+            ? self::publishBufferedDownload($request, $result)
+            : $result;
     }
 
     public static function publishBufferedDownload(HttpRequest $request, CommunicationResult $result): CommunicationResult
