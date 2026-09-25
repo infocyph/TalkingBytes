@@ -19,7 +19,7 @@ file_put_contents($readyPath, json_encode(['port' => $port], JSON_THROW_ON_ERROR
 
 $deadline = microtime(true) + 5.0;
 $handled = 0;
-while ($handled < 8 && microtime(true) < $deadline) {
+while ($handled < 32 && microtime(true) < $deadline) {
     set_error_handler(static fn(): bool => true, E_WARNING);
     try {
         $client = stream_socket_accept($server, 0.1);
@@ -46,6 +46,17 @@ while ($handled < 8 && microtime(true) < $deadline) {
         $path = is_string($parsed) ? $parsed : '/';
     }
 
+    $hostHeader = '';
+    $cookieHeader = '';
+    foreach (preg_split('/\r\n/', $buffer) ?: [] as $line) {
+        if (str_starts_with(strtolower($line), 'host:')) {
+            $hostHeader = trim(substr($line, 5));
+        }
+        if (str_starts_with(strtolower($line), 'cookie:')) {
+            $cookieHeader = trim(substr($line, 7));
+        }
+    }
+
     $status = 200;
     $body = '';
     $headers = [];
@@ -56,6 +67,36 @@ while ($handled < 8 && microtime(true) < $deadline) {
     } elseif ($path === '/redirect') {
         $status = 302;
         $headers['Location'] = sprintf('http://127.0.0.1:%d/zero', $port);
+    } elseif ($path === '/download-redirect-success') {
+        $status = 302;
+        $body = 'REDIRECT-BODY';
+        $headers['Location'] = sprintf('http://127.0.0.1:%d/download-final', $port);
+    } elseif ($path === '/download-redirect-error') {
+        $status = 302;
+        $body = 'REDIRECT-BODY';
+        $headers['Location'] = sprintf('http://127.0.0.1:%d/error', $port);
+    } elseif ($path === '/download-loop') {
+        $status = 302;
+        $body = 'REDIRECT-BODY';
+        $headers['Location'] = sprintf('http://127.0.0.1:%d/download-loop', $port);
+    } elseif ($path === '/download-blocked') {
+        $status = 302;
+        $body = 'REDIRECT-BODY';
+        $headers['Location'] = sprintf('http://localhost:%d/download-final', $port);
+    } elseif ($path === '/download-final') {
+        $body = 'FINAL-BODY';
+    } elseif ($path === '/cookie-chain-start') {
+        $status = 302;
+        $headers['Set-Cookie'] = 'origin_cookie=origin-value; Path=/';
+        $headers['Location'] = sprintf('http://localhost:%d/cookie-chain-target', $port);
+    } elseif ($path === '/cookie-chain-target') {
+        $status = 302;
+        $headers['Set-Cookie'] = 'target_cookie=target-value; Path=/';
+        $headers['Location'] = sprintf('http://127.0.0.1:%d/cookie-chain-return', $port);
+    } elseif ($path === '/cookie-chain-return' || $path === '/cookie-echo') {
+        $body = $cookieHeader;
+    } elseif ($path === '/host-echo') {
+        $body = $hostHeader;
     } elseif ($path === '/error') {
         $status = 500;
         $body = 'failure';
