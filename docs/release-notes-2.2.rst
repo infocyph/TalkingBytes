@@ -86,3 +86,15 @@ No exactly-once guarantees are introduced for SMTP, sendmail, spool
 application processing, or distributed webhook handling. The corrected
 ownership and replay rules are fail-closed transport guarantees within their
 documented boundaries.
+
+
+Platform validation
+-------------------
+
+The 2.2 release candidate's process, filesystem, socket, Mailpit, and native
+gRPC integration gates run on Ubuntu Linux. Portable code paths retain their
+documented fallbacks when optional POSIX/native facilities are absent, but this
+release does not claim a separately exercised Windows or macOS native-process
+integration matrix. In particular, POSIX sendmail process-group cleanup remains
+opportunistic and spool claims that move between directories require a
+same-filesystem atomic rename boundary.
