@@ -243,13 +243,17 @@ final readonly class HttpClient
     public function send(HttpRequest $request): CommunicationResult
     {
         $resolvedRequest = $this->applyDefaults($request);
+        $transportOwnsCookies = $this->cookieJar !== null && $this->transport instanceof CurlTransport;
+
         if ($this->cookieJar !== null) {
-            $resolvedRequest = $this->cookieJar->applyToRequest($resolvedRequest);
+            $resolvedRequest = $transportOwnsCookies
+                ? $resolvedRequest->metadata([...$resolvedRequest->metadata, '_cookie_jar' => $this->cookieJar])
+                : $this->cookieJar->applyToRequest($resolvedRequest);
         }
 
         $result = $this->pipeline->send($resolvedRequest);
 
-        if ($this->cookieJar !== null && $result->response instanceof HttpResponse) {
+        if (!$transportOwnsCookies && $this->cookieJar !== null && $result->response instanceof HttpResponse) {
             $this->cookieJar->storeFromResponse($result->response, $resolvedRequest->buildUrl());
         }
 
