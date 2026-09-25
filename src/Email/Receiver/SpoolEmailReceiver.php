@@ -322,6 +322,7 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
         }
 
         $processingFile = $sourceFile;
+        $ownsClaim = false;
         $startedAt = $this->clock->monotonic();
         $this->events->dispatch('email.receive.start', [
             'source' => 'spool',
@@ -342,9 +343,12 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
             }
 
             $processingFile = $claimedFile;
+            $ownsClaim = $consume && $processingFile !== $sourceFile;
             $raw = $this->readFile($processingFile, $consume);
             if ($raw === false) {
-                $this->markFailed($processingFile, 'Unable to read spool file.', $sourceFile);
+                if ($ownsClaim) {
+                    $this->markFailed($processingFile, 'Unable to read spool file.', $sourceFile);
+                }
                 $this->events->dispatch('email.receive.finish', [
                     'source' => 'spool',
                     'successful' => false,
@@ -357,7 +361,9 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
 
             $parsed = $this->parseFile($raw, $this->buildMetadata($sourceFile, $processingFile, $consume));
         } catch (\Throwable $exception) {
-            $this->markFailed($processingFile, $exception->getMessage(), $sourceFile);
+            if ($ownsClaim) {
+                $this->markFailed($processingFile, $exception->getMessage(), $sourceFile);
+            }
             $this->events->dispatch('email.parse.failed', [
                 'source' => 'spool',
                 'failure_category' => 'parse_failure',
