@@ -111,11 +111,11 @@ Owners: `src/Http/Internal/ResponseBodyCollector.php:95`, `src/Http/Transport/Cu
 
 **Reproduction:** prefill a target with `KEEP-ORIGINAL`. A local server declares `Content-Length: 100` but sends `PART` and closes. Both single and multi streamed downloads report failure yet replace the target with `PART`. The collector promotes the temporary file before the transport decides success. Buffered download writes also precede the cURL error check by source inspection.
 
-- [ ] Separate close/flush from commit. Promote only after transport completion and the documented accepted-response policy are known.
-- [ ] Abort temporary output on cURL failure, cancellation, invalid redirects, callback failure and configured size violations.
-- [ ] Give buffered downloads the same atomic replacement guarantees and failure ordering.
-- [ ] Define whether HTTP error bodies are saved; prefer an explicit opt-in when saving an error response would overwrite a successful artifact. Preserve documented behavior where a separate artifact API is necessary.
-- [ ] Test truncated bodies, resets, connect failures, timeouts, zero-byte success, HTTP errors, disk failures and cleanup in single/multi modes.
+- [x] Separate close/flush from commit. Promote only after transport completion and the documented accepted-response policy are known.
+- [x] Abort temporary output on cURL failure, cancellation, invalid redirects, callback failure and configured size violations.
+- [x] Give buffered downloads the same atomic replacement guarantees and failure ordering.
+- [x] Define whether HTTP error bodies are saved; prefer an explicit opt-in when saving an error response would overwrite a successful artifact. Preserve documented behavior where a separate artifact API is necessary.
+- [x] Test truncated bodies, resets, connect failures, timeouts, zero-byte success, HTTP errors, disk failures and cleanup in single/multi modes.
 
 **Acceptance:** unsuccessful transfers preserve existing targets; new failed targets do not appear; temporary resources are released. Successful output is published atomically.
 
@@ -127,9 +127,9 @@ Owner: `src/Http/Transport/CurlTransport.php:145`.
 
 **Reproduction:** a local server returns `204` with no body. Single transport returns `successful=false`, `status=null`, `cURL request failed (0):`; multi transport correctly returns status 204 and success. Empty redirect responses can fail before following their Location. The single transport treats a non-string callback-based cURL return plus an empty collected body as failure independently of cURL status.
 
-- [ ] Distinguish `curl_exec() === false`/cURL errors from a valid empty collected body.
-- [ ] Preserve status and headers on valid bodyless responses.
-- [ ] Add single/multi parity for HEAD, 204, 304, zero-length 200 and empty 301/302/307/308 with redirects both enabled and disabled.
+- [x] Distinguish `curl_exec() === false`/cURL errors from a valid empty collected body.
+- [x] Preserve status and headers on valid bodyless responses.
+- [x] Add single/multi parity for HEAD, 204, 304, zero-length 200 and empty 301/302/307/308 with redirects both enabled and disabled.
 
 **Acceptance:** valid empty HTTP responses remain valid results; actual transport failures remain failures.
 
@@ -262,7 +262,7 @@ Each batch is reviewable independently; add a failing regression before changing
 | Batch | Scope | Status |
 | --- | --- | --- |
 | 1 | HTTP trust boundaries — F01-F03 | Implemented; CI verification pending |
-| 2 | HTTP transfer correctness — F04-F05 | Pending |
+| 2 | HTTP transfer correctness — F04-F05 | Implemented; CI verification pending |
 | 3 | Email data integrity — F09-F11 | Pending |
 | 4 | Protocol interoperability — F06-F08 | Pending |
 | 5 | Replay policy — F12 | Pending |
