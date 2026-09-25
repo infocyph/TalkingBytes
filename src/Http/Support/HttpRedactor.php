@@ -110,7 +110,7 @@ final class HttpRedactor
 
         $redacted = [];
         foreach (explode('&', $query) as $pair) {
-            [$rawName] = array_pad(explode('=', $pair, 2), 2, null);
+            [$rawName] = explode('=', $pair, 2);
             if (!self::isSensitiveQueryName(urldecode($rawName), $sensitive)) {
                 $redacted[] = $pair;
 
@@ -132,10 +132,6 @@ final class HttpRedactor
     {
         $lookup = [];
         foreach ([...$defaults, ...array_slice($additional, 0, 64)] as $name) {
-            if (!is_string($name)) {
-                continue;
-            }
-
             $name = strtolower(trim($name));
             if ($name !== '' && strlen($name) <= 256) {
                 $lookup[$name] = true;
