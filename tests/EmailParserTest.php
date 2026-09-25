@@ -632,3 +632,170 @@ it('prevents overlapping spool consumers from returning the same message', funct
 
     rmdir($directory);
 });
+
+
+it('keeps a claimed spool message exclusive across independent processes', function (): void {
+    $directory = sys_get_temp_dir().'/tb-spool-process-'.bin2hex(random_bytes(6));
+    mkdir($directory, 0775, true);
+    $source = $directory.'/20260101_000001_a.eml';
+    $marker = $directory.'/claimed';
+    $firstOutput = $directory.'/first.json';
+    $secondOutput = $directory.'/second.json';
+    file_put_contents($source, "From: sender@example.com\r\nTo: a@example.com\r\nSubject: A\r\n\r\nBody");
+
+    $first = proc_open(
+        [PHP_BINARY, __DIR__.'/Fixtures/spool-consumer.php', $directory, 'hold', $marker, $firstOutput],
+        [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+        $firstPipes,
+    );
+    expect($first)->toBeResource();
+
+    $deadline = microtime(true) + 2.0;
+    while (!is_file($marker) && microtime(true) < $deadline) {
+        usleep(10_000);
+    }
+    expect(is_file($marker))->toBeTrue();
+
+    $second = proc_open(
+        [PHP_BINARY, __DIR__.'/Fixtures/spool-consumer.php', $directory, 'consume', '', $secondOutput],
+        [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+        $secondPipes,
+    );
+    expect($second)->toBeResource();
+
+    foreach ([$firstPipes, $secondPipes] as $pipes) {
+        foreach ($pipes as $pipe) {
+            if (is_resource($pipe)) {
+                fclose($pipe);
+            }
+        }
+    }
+
+    expect(proc_close($second))->toBe(0);
+    expect(proc_close($first))->toBe(0);
+
+    $firstResult = json_decode((string) file_get_contents($firstOutput), true);
+    $secondResult = json_decode((string) file_get_contents($secondOutput), true);
+
+    expect($firstResult['subject'] ?? null)->toBe('A');
+    expect($secondResult['subject'] ?? null)->toBeNull();
+    expect(glob($directory.'/*.eml') ?: [])->toBe([]);
+    expect(glob($directory.'/*.processing') ?: [])->toBe([]);
+
+    foreach (glob($directory.'/*') ?: [] as $path) {
+        if (is_file($path)) {
+            unlink($path);
+        }
+    }
+    rmdir($directory);
+});
+
+it('leaves a crash-time spool claim recoverable without duplicating consumption', function (): void {
+    $directory = sys_get_temp_dir().'/tb-spool-crash-'.bin2hex(random_bytes(6));
+    mkdir($directory, 0775, true);
+    $source = $directory.'/20260101_000001_a.eml';
+    $marker = $directory.'/claimed';
+    $output = $directory.'/crash.json';
+    file_put_contents($source, "From: sender@example.com\r\nTo: a@example.com\r\nSubject: Crash\r\n\r\nBody");
+
+    $process = proc_open(
+        [PHP_BINARY, __DIR__.'/Fixtures/spool-consumer.php', $directory, 'crash', $marker, $output],
+        [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+        $pipes,
+    );
+    expect($process)->toBeResource();
+    foreach ($pipes as $pipe) {
+        if (is_resource($pipe)) {
+            fclose($pipe);
+        }
+    }
+    expect(proc_close($process))->toBe(0);
+
+    $claims = glob($directory.'/*.processing') ?: [];
+    expect($claims)->toHaveCount(1);
+    expect(is_file($source))->toBeFalse();
+
+    expect(rename($claims[0], $source))->toBeTrue();
+    $recovered = (new SpoolEmailReceiver(
+        new SpoolConfig($directory, lockBeforeRead: true),
+        deleteAfterRead: true,
+    ))->receiveParsed();
+
+    expect($recovered?->subject)->toBe('Crash');
+    expect(is_file($source))->toBeFalse();
+
+    foreach (glob($directory.'/*') ?: [] as $path) {
+        if (is_file($path)) {
+            unlink($path);
+        }
+    }
+    rmdir($directory);
+});
+
+it('rejects canonical spool directory overlap and ignores symlink message inputs', function (): void {
+    $directory = sys_get_temp_dir().'/tb-spool-path-'.bin2hex(random_bytes(6));
+    $outside = sys_get_temp_dir().'/tb-spool-outside-'.bin2hex(random_bytes(6)).'.eml';
+    mkdir($directory, 0775, true);
+
+    expect(fn() => new SpoolConfig($directory, processingDirectory: $directory.'/.'))
+        ->toThrow(InvalidArgumentException::class, 'must not overlap');
+
+    file_put_contents($outside, "From: sender@example.com\r\nTo: a@example.com\r\nSubject: Link\r\n\r\nBody");
+    $link = $directory.'/linked.eml';
+    if (@symlink($outside, $link)) {
+        $received = (new SpoolEmailReceiver(new SpoolConfig($directory), deleteAfterRead: true))->receiveParsed();
+        expect($received)->toBeNull();
+        expect(is_file($outside))->toBeTrue();
+        unlink($link);
+    }
+
+    unlink($outside);
+    rmdir($directory);
+});
+
+it('avoids success target collisions and preserves sources when cross-device claim is unavailable', function (): void {
+    $directory = sys_get_temp_dir().'/tb-spool-collision-'.bin2hex(random_bytes(6));
+    $success = $directory.'/success';
+    mkdir($success, 0775, true);
+    $source = $directory.'/20260101_000001_a.eml';
+    file_put_contents($source, "From: sender@example.com\r\nTo: a@example.com\r\nSubject: Collision\r\n\r\nBody");
+    file_put_contents($success.'/20260101_000001_a.eml', 'existing');
+
+    $received = (new SpoolEmailReceiver(
+        new SpoolConfig($directory),
+        moveAfterRead: $success,
+    ))->receiveParsed();
+
+    expect($received?->subject)->toBe('Collision');
+    expect(file_get_contents($success.'/20260101_000001_a.eml'))->toBe('existing');
+    expect(glob($success.'/20260101_000001_a-*.eml') ?: [])->toHaveCount(1);
+
+    foreach (glob($success.'/*') ?: [] as $path) {
+        unlink($path);
+    }
+    rmdir($success);
+
+    $sharedMemory = '/dev/shm';
+    $sourceDevice = @stat($directory)['dev'] ?? null;
+    $targetDevice = @stat($sharedMemory)['dev'] ?? null;
+    if (is_dir($sharedMemory) && is_writable($sharedMemory)
+        && is_int($sourceDevice) && is_int($targetDevice) && $sourceDevice !== $targetDevice
+    ) {
+        $processing = $sharedMemory.'/tb-spool-processing-'.bin2hex(random_bytes(6));
+        mkdir($processing, 0775, true);
+        $crossSource = $directory.'/20260101_000002_b.eml';
+        file_put_contents($crossSource, "From: sender@example.com\r\nTo: b@example.com\r\nSubject: Cross\r\n\r\nBody");
+
+        $cross = (new SpoolEmailReceiver(
+            new SpoolConfig($directory, processingDirectory: $processing),
+            deleteAfterRead: true,
+        ))->receiveParsed();
+
+        expect($cross)->toBeNull();
+        expect(is_file($crossSource))->toBeTrue();
+        unlink($crossSource);
+        rmdir($processing);
+    }
+
+    rmdir($directory);
+});
