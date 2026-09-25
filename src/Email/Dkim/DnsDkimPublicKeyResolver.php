@@ -42,16 +42,17 @@ final readonly class DnsDkimPublicKeyResolver implements DkimPublicKeyResolver
             $dkimRecords[] = $txt;
         }
 
-        foreach ($dkimRecords as $dkimRecord) {
-            $publicKey = $this->extractTag($dkimRecord, 'p');
-            if ($publicKey === null || trim($publicKey) === '') {
-                continue;
-            }
-
-            return $dkimRecord;
+        if (count($dkimRecords) !== 1) {
+            return null;
         }
 
-        return null;
+        $dkimRecord = $dkimRecords[0];
+        $publicKey = $this->extractTag($dkimRecord, 'p');
+        if ($publicKey === null || trim($publicKey) === '') {
+            return null;
+        }
+
+        return $dkimRecord;
     }
 
     private function extractTag(string $record, string $tag): ?string
