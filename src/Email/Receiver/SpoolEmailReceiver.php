@@ -213,6 +213,20 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
         return $candidate;
     }
 
+    private function isSameFilesystem(string $file, string $directory): bool
+    {
+        $source = stat($file);
+        $target = stat($directory);
+        if (!is_array($source) || !is_array($target)) {
+            return false;
+        }
+
+        $sourceDevice = $source['dev'] ?? null;
+        $targetDevice = $target['dev'] ?? null;
+
+        return is_int($sourceDevice) && is_int($targetDevice) && $sourceDevice === $targetDevice;
+    }
+
     private function markFailed(string $file, string $reason, string $sourceFile): void
     {
         if ($this->failedDirectory !== null && $this->failedDirectory !== '') {
@@ -250,8 +264,7 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
         string $directory,
         bool $ensureUnique = false,
         ?string $targetBasename = null,
-    ): string
-    {
+    ): string {
         $this->ensureDirectory($directory);
 
         $basename = $targetBasename ?? basename($file);
@@ -375,20 +388,6 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
         ]);
 
         return $parsed;
-    }
-
-    private function isSameFilesystem(string $file, string $directory): bool
-    {
-        $source = stat($file);
-        $target = stat($directory);
-        if (!is_array($source) || !is_array($target)) {
-            return false;
-        }
-
-        $sourceDevice = $source['dev'] ?? null;
-        $targetDevice = $target['dev'] ?? null;
-
-        return is_int($sourceDevice) && is_int($targetDevice) && $sourceDevice === $targetDevice;
     }
 
     private function tryRename(string $source, string $target): bool
