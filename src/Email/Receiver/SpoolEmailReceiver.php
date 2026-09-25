@@ -95,7 +95,11 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
         }
 
         if ($this->config->processingDirectory !== null && $this->config->processingDirectory !== '') {
-            return $this->moveFileToDirectory($file, $this->config->processingDirectory, ensureUnique: true);
+            try {
+                return $this->moveFileToDirectory($file, $this->config->processingDirectory, ensureUnique: true);
+            } catch (RuntimeException) {
+                return null;
+            }
         }
 
         $claim = dirname($file) . '/.' . basename($file) . '.' . bin2hex(random_bytes(8)) . '.processing';
@@ -315,7 +319,7 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
                 $this->events->dispatch('email.receive.finish', [
                     'source' => 'spool',
                     'successful' => false,
-                    'failure_category' => 'claim_contention',
+                    'failure_category' => 'claim_failure',
                     'duration_ms' => (int) round(($this->clock->monotonic() - $startedAt) * 1000),
                 ]);
 
