@@ -45,18 +45,6 @@ final class CurlResultFactory
             );
         }
 
-        if ($downloadPath !== null) {
-            $downloadError = self::writeDownloadBody($downloadPath, $body);
-
-            if ($downloadError !== null) {
-                return CommunicationResult::failure(
-                    $downloadError,
-                    $statusCode,
-                    metadata: ['transport' => $transport, 'curl' => $info],
-                );
-            }
-        }
-
         if ($errno !== 0) {
             return CommunicationResult::failure(
                 sprintf('cURL request failed (%d): %s', $errno, $error),
@@ -75,6 +63,18 @@ final class CurlResultFactory
                 $response,
                 ['transport' => $transport, 'curl' => $info],
             );
+        }
+
+        if ($downloadPath !== null) {
+            $downloadError = self::writeDownloadBody($downloadPath, $body);
+            if ($downloadError !== null) {
+                return CommunicationResult::failure(
+                    $downloadError,
+                    $statusCode,
+                    $response,
+                    ['transport' => $transport, 'curl' => $info],
+                );
+            }
         }
 
         return CommunicationResult::success($statusCode, $response, ['transport' => $transport, 'curl' => $info]);
@@ -110,10 +110,28 @@ final class CurlResultFactory
             return sprintf('Download directory is not writable: %s', $directory);
         }
 
-        if (file_put_contents($path, $body) === false) {
-            return sprintf('Failed to write download file: %s', $path);
+        $tempPath = tempnam($directory, 'tb-http-download-');
+        if ($tempPath === false) {
+            return sprintf('Unable to allocate temporary download file in directory: %s', $directory);
         }
 
-        return null;
+        try {
+            if (file_put_contents($tempPath, $body, LOCK_EX) === false) {
+                return sprintf('Failed to write download file: %s', $path);
+            }
+
+            @chmod($tempPath, 0600);
+            if (!rename($tempPath, $path)) {
+                return sprintf('Failed to finalize download file: %s', $path);
+            }
+
+            $tempPath = null;
+
+            return null;
+        } finally {
+            if (is_string($tempPath) && is_file($tempPath)) {
+                unlink($tempPath);
+            }
+        }
     }
 }
