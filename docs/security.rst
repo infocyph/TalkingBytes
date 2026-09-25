@@ -11,27 +11,33 @@ Defaults
 HTTP safeguards
 ---------------
 
-- host allow/block controls
-- private/reserved network blocking
-- redirect destination validation
-- response/download/upload size limits
-- redaction of auth-like headers and query secrets
+- host allow/block controls and private/reserved network blocking
+- strict private-network mode disables inherited proxies and rejects explicit proxies
+- redirect destination validation plus cross-origin credential stripping
+- per-hop cookie provenance and opt-in parent-domain cookie policy
+- response/download/upload size limits and atomic download publication
+- redaction of built-in and explicitly marked credential headers/query keys
 
 Webhook safeguards
 ------------------
 
 - HMAC signature verification with ``hash_equals``
+- v2 signatures bind timestamp, event, delivery ID, and exact raw body
 - timestamp tolerance window checks
-- replay protection hook via ``WebhookReplayStore``
+- replay claims cover the remaining signature window plus clock-correction budget
+- replay-store failures are fail closed
 - event payload redaction for signature/body/secret
 
 Email safeguards
 ----------------
 
 - mailbox command redaction (LOGIN/PASS/AUTH sensitive values)
-- parser limits for message/header/multipart boundaries
+- parser limits for message/header/multipart/attachment boundaries
 - attachment filename sanitization
 - IMAP/POP3 command guards for UID/part/message number validation
+- IMAP move fallback uses UID-scoped expunge or fails before destructive mutation
+- spool consumption uses an atomic ownership claim; ``peek()`` remains non-destructive
+- DKIM verification enforces canonicalization, key policy, and DNS key semantics
 
 Operational guidance
 --------------------
