@@ -101,8 +101,13 @@ final readonly class HttpClient
         ?CancellationSignal $cancellation = null,
         ?HttpTransport $transport = null,
         ?Clock $clock = null,
+        ?HttpClientConfig $baseConfig = null,
     ): self {
-        return new HttpClientFactory($events, $cancellation, $clock)->fromArray($config, $transport);
+        $factory = new HttpClientFactory($events, $cancellation, $clock);
+
+        return $baseConfig === null
+            ? $factory->fromArray($config, $transport)
+            : $factory->fromConfig($baseConfig, $config, $transport);
     }
 
     public static function multi(
