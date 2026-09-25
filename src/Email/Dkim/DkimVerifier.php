@@ -381,25 +381,4 @@ final readonly class DkimVerifier
         return openssl_verify($input, $decodedSignature, $key, OPENSSL_ALGO_SHA256) === 1;
     }
 
-    private function withRaw(ParsedEmail $email, string $raw): ParsedEmail
-    {
-        return new ParsedEmail(
-            $email->from,
-            $email->to,
-            $email->cc,
-            $email->bcc,
-            $email->subject,
-            $email->date,
-            $email->messageId,
-            $email->inReplyTo,
-            $email->references,
-            $email->textBody,
-            $email->htmlBody,
-            $email->attachments,
-            $email->parts,
-            $email->headers,
-            $raw,
-            $email->metadata,
-        );
-    }
 }
