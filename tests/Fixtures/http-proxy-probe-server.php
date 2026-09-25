@@ -22,7 +22,12 @@ file_put_contents($readyPath, json_encode(['port' => $port], JSON_THROW_ON_ERROR
 $requests = 0;
 $deadline = microtime(true) + 8.0;
 while (microtime(true) < $deadline) {
-    $client = @stream_socket_accept($server, 0);
+    set_error_handler(static fn(): bool => true, E_WARNING);
+    try {
+        $client = stream_socket_accept($server, 0);
+    } finally {
+        restore_error_handler();
+    }
     if ($client === false) {
         usleep(10_000);
         continue;
