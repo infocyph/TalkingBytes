@@ -150,13 +150,6 @@ final readonly class CurlTransport implements HttpTransport
             );
         }
 
-        if (!is_string($rawBody) && $body === '') {
-            return CommunicationResult::failure(
-                sprintf('cURL request failed (%d): %s', $errno, $bodyCollector->error() ?? $error),
-                metadata: ['curl' => is_array($info) ? $info : [], 'transport' => 'curl'],
-            );
-        }
-
         return CurlResultFactory::fromExecution(
             $request,
             'curl',
@@ -189,7 +182,7 @@ final readonly class CurlTransport implements HttpTransport
             $configurator = new CurlHandleConfigurator();
             $request = $configurator->configure($handle, $request, $headerCollector, $bodyCollector, $pinnedResolution);
         } catch (InvalidArgumentException $exception) {
-            $bodyCollector?->finalize();
+            $bodyCollector?->abort();
 
             return CommunicationResult::failure($exception->getMessage(), metadata: ['transport' => 'curl']);
         }
@@ -285,7 +278,7 @@ final readonly class CurlTransport implements HttpTransport
             );
         }
 
-        return $this->buildExecutionResult(
+        $result = $this->buildExecutionResult(
             $resolvedRequest,
             $rawBody,
             $bodyCollector,
@@ -295,6 +288,24 @@ final readonly class CurlTransport implements HttpTransport
             $info,
             $headerCollector,
         );
+
+        if (!$result->successful) {
+            $bodyCollector->abort();
+
+            return $result;
+        }
+
+        $commitError = $bodyCollector->commit();
+        if ($commitError !== null) {
+            return CommunicationResult::failure(
+                $commitError,
+                $result->statusCode,
+                $result->response,
+                $result->metadata,
+            );
+        }
+
+        return $result;
     }
 
     private function applyCookiesForHop(HttpRequest $request, string $url): HttpRequest
