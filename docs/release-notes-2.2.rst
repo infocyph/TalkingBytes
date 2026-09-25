@@ -93,15 +93,18 @@ Cross-check closure
 A post-candidate independent review reopened six edge cases in HTTP credential
 tracking, decorated cookie provenance, buffered redirect downloads, spool
 peek failure handling, webhook replay timing, and versionless DKIM DNS keys.
-Those cases now have dedicated regressions and passed the corrected candidate
-quality and integration matrix before release-note finalization.
+A follow-up P2 review also found RFC-valid whitespace around the DKIM ``p`` tag
+was lost by a second raw-string extraction step. All seven reviewed edge cases
+now have dedicated regressions and passed the corrected candidate quality and
+integration matrix before release-note finalization.
 
 Compatibility and migration
 ---------------------------
 
-Applications that intentionally share cookies across sibling hosts must list
-the accepted parent domain through ``allowedParentDomains``. Custom HTTP
-authenticators should mark credential-bearing fields as sensitive. Consumers
+Applications that intentionally share cookies across sibling hosts must enable
+``allowDomainCookies`` and list each accepted parent domain through
+``allowedParentDomains``. Custom HTTP authenticators should mark
+credential-bearing fields as sensitive. Consumers
 that exchange historical TalkingBytes Ed25519 DKIM signatures must regenerate
 standards-compliant signatures; verification does not try both the standard
 and former non-standard representation.
