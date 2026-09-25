@@ -218,3 +218,27 @@ it('rejects explicit proxies with strict private-network protection', function (
         HttpRequest::get('https://8.8.8.8')->proxy('http://127.0.0.1:8080')->blockPrivateNetworks(),
     ))->toThrow(InvalidArgumentException::class, 'cannot be combined with a remote proxy');
 });
+
+
+it('keeps accepted sensitive header names trackable at the configured boundary', function (): void {
+    $acceptedName = str_repeat('A', 256);
+    $secret = 'sentinel-boundary-secret';
+    $prepared = HttpRequest::get('https://api.example.test/orders')
+        ->withApiKeyHeader($acceptedName, $secret)
+        ->prepareForTransport();
+
+    expect($prepared->sensitiveHeaderNames())->toContain(strtolower($acceptedName));
+    expect(HttpRedactor::redactHeaders(
+        $prepared->headers->all(),
+        $prepared->sensitiveHeaderNames(),
+    )[$acceptedName] ?? null)->toBe('[REDACTED]');
+
+    $crossOrigin = $prepared->redirectedTo('https://other.example.test/orders', 307, false);
+    expect($crossOrigin->headers->get($acceptedName))->toBeNull();
+
+    $rejectedName = str_repeat('B', 257);
+    expect(fn() => HttpRequest::get('https://api.example.test/orders')
+        ->withApiKeyHeader($rejectedName, $secret)
+        ->prepareForTransport())
+        ->toThrow(InvalidArgumentException::class, 'cannot exceed 256 bytes');
+});
