@@ -117,11 +117,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Setup PHP with pinned gRPC extension
+      - name: Setup PHP with native gRPC extension
         uses: shivammathur/setup-php@v2
         with:
           php-version: "8.5"
-          extensions: "curl, fileinfo, openssl, grpc-1.82.0"
+          extensions: "curl, fileinfo, openssl, grpc"
           coverage: none
 
       - name: Setup Python peer runtime
@@ -150,6 +150,7 @@ jobs:
               fwrite(STDERR, "ext-grpc is not loaded\n");
               exit(1);
           }
+          fwrite(STDOUT, "ext-grpc " . phpversion("grpc") . "\n");
           if (!class_exists(Grpc\\BaseStub::class) || !class_exists(Google\\Protobuf\\GPBEmpty::class)) {
               fwrite(STDERR, "grpc/grpc or google/protobuf is unavailable\n");
               exit(1);
