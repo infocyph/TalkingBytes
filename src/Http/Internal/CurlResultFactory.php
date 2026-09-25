@@ -121,6 +121,7 @@ final class CurlResultFactory
             }
 
             set_error_handler(static fn(): bool => true, E_WARNING);
+
             try {
                 $secured = chmod($tempPath, 0600);
             } finally {
