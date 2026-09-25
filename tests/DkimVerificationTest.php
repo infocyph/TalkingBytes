@@ -335,7 +335,9 @@ it('signs ed25519 dkim over the sha256 digest and verifies independently', funct
     $canonicalized[] = $canonicalizer->canonicalizeHeader('dkim-signature', (string) $withoutSignature);
     $input = implode("\r\n", $canonicalized);
     $signature = base64_decode($tags['b'], true);
-    expect($signature)->toBeString();
+    if (!is_string($signature)) {
+        throw new RuntimeException('Generated Ed25519 DKIM signature was not valid base64.');
+    }
 
     expect(sodium_crypto_sign_verify_detached(
         $signature,
@@ -379,7 +381,7 @@ it('accepts valid oversigned absent header occurrences', function (): void {
     $parsed = (new RawEmailParser())->parse($signature . "\r\n" . $raw->headers . "\r\n\r\n" . $raw->body);
     $record = preg_replace('/-----BEGIN PUBLIC KEY-----|-----END PUBLIC KEY-----|\s+/', '', $publicKey);
     $resolver = new StaticDkimPublicKeyResolver([
-        'selector._domainkey.example.com' => 'v=DKIM1; k=rsa; p=' . $record,
+        'selector._domainkey.example.com' => 'v=DKIM1; k=rsa; p=' . (string) $record,
     ]);
 
     expect((new DkimVerifier($resolver))->verify($parsed)->valid)->toBeTrue();
@@ -406,7 +408,7 @@ it('enforces strict identity domains from dkim key flags', function (): void {
     $parsed = (new RawEmailParser())->parse($signature . "\r\n" . $raw->headers . "\r\n\r\n" . $raw->body);
     $record = preg_replace('/-----BEGIN PUBLIC KEY-----|-----END PUBLIC KEY-----|\s+/', '', $publicKey);
     $resolver = new StaticDkimPublicKeyResolver([
-        'selector._domainkey.example.com' => 'v=DKIM1; k=rsa; t=s; p=' . $record,
+        'selector._domainkey.example.com' => 'v=DKIM1; k=rsa; t=s; p=' . (string) $record,
     ]);
 
     $result = (new DkimVerifier($resolver))->verify($parsed);
