@@ -808,3 +808,83 @@ it('avoids success target collisions and preserves sources when cross-device cla
 
     rmdir($directory);
 });
+
+
+it('keeps spool peek non-destructive across oversized unreadable and parser failures', function (): void {
+    $directory = sys_get_temp_dir().'/tb-spool-peek-safe-'.bin2hex(random_bytes(6));
+    $failed = $directory.'/failed';
+    mkdir($directory, 0775, true);
+
+    try {
+        $oversized = $directory.'/20260101_000001_oversized.eml';
+        file_put_contents($oversized, str_repeat('X', 64));
+        $oversizedReceiver = new SpoolEmailReceiver(
+            new SpoolConfig($directory, maxMessageBytes: 16),
+            deleteAfterRead: true,
+            failedDirectory: $failed,
+        );
+
+        expect($oversizedReceiver->peek())->toBeNull()
+            ->and(is_file($oversized))->toBeTrue()
+            ->and(is_dir($failed) ? (glob($failed.'/*') ?: []) : [])->toBe([]);
+
+        unlink($oversized);
+
+        $unreadable = $directory.'/20260101_000002_unreadable.eml';
+        file_put_contents($unreadable, "From: sender@example.com\r\nTo: a@example.com\r\nSubject: Unreadable\r\n\r\nBody");
+        chmod($unreadable, 0000);
+
+        try {
+            $unreadableReceiver = new SpoolEmailReceiver(
+                new SpoolConfig($directory),
+                deleteAfterRead: true,
+                failedDirectory: $failed,
+            );
+            expect($unreadableReceiver->peek())->toBeNull()
+                ->and(is_file($unreadable))->toBeTrue()
+                ->and(is_dir($failed) ? (glob($failed.'/*') ?: []) : [])->toBe([]);
+        } finally {
+            chmod($unreadable, 0600);
+        }
+
+        unlink($unreadable);
+
+        $rejected = $directory.'/20260101_000003_rejected.eml';
+        file_put_contents($rejected, "From: sender@example.com\r\nTo: a@example.com\r\nSubject: Rejected\r\n\r\nBody");
+        $rejectingParser = new class implements EmailParser
+        {
+            public function parse(string $rawEmail, array $metadata = []): ParsedEmail
+            {
+                throw new RuntimeException('Synthetic parser rejection.');
+            }
+        };
+        $rejectedReceiver = new SpoolEmailReceiver(
+            new SpoolConfig($directory),
+            parser: $rejectingParser,
+            deleteAfterRead: true,
+            failedDirectory: $failed,
+        );
+
+        expect($rejectedReceiver->peek())->toBeNull()
+            ->and(is_file($rejected))->toBeTrue()
+            ->and(is_dir($failed) ? (glob($failed.'/*') ?: []) : [])->toBe([]);
+    } finally {
+        foreach (glob($failed.'/*') ?: [] as $path) {
+            if (is_file($path)) {
+                unlink($path);
+            }
+        }
+        if (is_dir($failed)) {
+            rmdir($failed);
+        }
+        foreach (glob($directory.'/*') ?: [] as $path) {
+            if (is_file($path)) {
+                chmod($path, 0600);
+                unlink($path);
+            }
+        }
+        if (is_dir($directory)) {
+            rmdir($directory);
+        }
+    }
+});
