@@ -330,6 +330,39 @@ final readonly class HttpRequest
         return $this->withOptions($this->options->withMaxUploadBytes($bytes));
     }
 
+    public function markSensitiveHeader(string $name): self
+    {
+        HeaderBag::assertValidHeaderName($name);
+
+        return $this->withSensitiveName('_sensitive_headers', strtolower($name));
+    }
+
+    public function markSensitiveQuery(string $name): self
+    {
+        $name = trim($name);
+        if ($name === '' || strlen($name) > 256 || preg_match('/[\x00-\x1F\x7F&=#]/', $name) === 1) {
+            throw new InvalidArgumentException('Sensitive HTTP query name is invalid.');
+        }
+
+        return $this->withSensitiveName('_sensitive_query_keys', strtolower($name));
+    }
+
+    /**
+     * @return list<string>
+     */
+    public function sensitiveHeaderNames(): array
+    {
+        return $this->sensitiveNames('_sensitive_headers');
+    }
+
+    /**
+     * @return list<string>
+     */
+    public function sensitiveQueryNames(): array
+    {
+        return $this->sensitiveNames('_sensitive_query_keys');
+    }
+
     /**
      * @param array<string, mixed> $metadata
      */
@@ -437,7 +470,19 @@ final readonly class HttpRequest
         $metadata = $this->metadata;
         unset($metadata['_transport_prepared']);
         if (!$preserveAuthentication) {
-            foreach (['Authorization', 'Proxy-Authorization', 'Cookie', 'X-TB-Signature', 'X-TB-Timestamp', 'X-TB-Nonce'] as $name) {
+            foreach (array_unique([
+                'Authorization',
+                'Proxy-Authorization',
+                'Cookie',
+                'X-API-Key',
+                'Api-Key',
+                'X-Auth-Token',
+                'X-Access-Token',
+                'X-TB-Signature',
+                'X-TB-Timestamp',
+                'X-TB-Nonce',
+                ...$this->sensitiveHeaderNames(),
+            ]) as $name) {
                 $headers = $headers->without($name);
             }
             $authenticators = [];
@@ -642,6 +687,53 @@ final readonly class HttpRequest
         if (parse_url($trimmed, PHP_URL_USER) !== null || parse_url($trimmed, PHP_URL_PASS) !== null) {
             throw new InvalidArgumentException('HTTP URL userinfo is not allowed; use an authentication API.');
         }
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function sensitiveNames(string $metadataKey): array
+    {
+        $raw = $this->metadata[$metadataKey] ?? [];
+        if (!is_array($raw)) {
+            return [];
+        }
+
+        $names = [];
+        foreach ($raw as $name) {
+            if (!is_string($name)) {
+                continue;
+            }
+
+            $name = strtolower(trim($name));
+            if ($name === '' || strlen($name) > 256) {
+                continue;
+            }
+
+            $names[$name] = true;
+            if (count($names) >= 64) {
+                break;
+            }
+        }
+
+        return array_keys($names);
+    }
+
+    private function withSensitiveName(string $metadataKey, string $name): self
+    {
+        $names = $this->sensitiveNames($metadataKey);
+        if (!in_array($name, $names, true)) {
+            $names[] = $name;
+        }
+
+        if (count($names) > 64) {
+            throw new InvalidArgumentException('HTTP sensitive-field metadata cannot contain more than 64 names.');
+        }
+
+        return $this->metadata([
+            ...$this->metadata,
+            $metadataKey => $names,
+        ]);
     }
 
     /**
