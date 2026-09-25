@@ -59,8 +59,10 @@ Native interoperability lane
 ----------------------------
 
 The repository includes an opt-in localhost interoperability test for the
-actual upstream PHP call objects. CI pins ``grpc/grpc`` and ``ext-grpc`` to
-1.82.0 and ``google/protobuf`` to 4.33.6, and uses a pinned Python gRPC peer.
+actual upstream PHP call objects. CI pins ``grpc/grpc`` to 1.82.0,
+``google/protobuf`` to 4.33.6 and the Python peer to 1.82.0. The runner uses
+its current native ``ext-grpc`` build and records the loaded extension version
+in the job output.
 The lane exercises unary, server-streaming, client-streaming and bidirectional
 call shapes plus native deadline and cancellation cleanup. It is intentionally
 separate from the minimal optional-capability job so gRPC remains a cold
