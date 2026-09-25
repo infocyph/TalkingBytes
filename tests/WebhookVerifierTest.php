@@ -26,6 +26,8 @@ it('rejects malformed signature and timestamp values with explicit reasons', fun
     expect($verifier->verifyResult('{"x":1}', 't=abc,v1=abcdef')->reason)->toBe('malformed_signature');
     expect($verifier->verifyResult('{"x":1}', 't=1,v1=nothex')->reason)->toBe('malformed_signature');
     expect($verifier->verifyResult('{"x":1}', 'v1=abcd', 'bad')->reason)->toBe('invalid_timestamp');
+    expect($verifier->verifyResult('{"x":1}', 'v1=' . str_repeat('0', 64), '1000.5')->reason)
+        ->toBe('invalid_timestamp');
 });
 
 it('rejects expired and mismatched signatures', function (): void {
@@ -39,4 +41,20 @@ it('rejects expired and mismatched signatures', function (): void {
 
     $wrong = (new WebhookSignature('wrong'))->buildHeader($payload, time());
     expect($verifier->verifyResult($payload, $wrong)->reason)->toBe('signature_mismatch');
+});
+
+
+it('accepts exact webhook timestamp age boundaries and rejects beyond them', function (): void {
+    $payload = '{"id":9}';
+    $verifier = new WebhookVerifier('secret', 300);
+
+    foreach ([700, 1300] as $timestamp) {
+        $signature = (new WebhookSignature('secret'))->buildHeader($payload, $timestamp);
+        expect($verifier->verifyResult($payload, $signature, now: 1000)->valid)->toBeTrue();
+    }
+
+    foreach ([699, 1301] as $timestamp) {
+        $signature = (new WebhookSignature('secret'))->buildHeader($payload, $timestamp);
+        expect($verifier->verifyResult($payload, $signature, now: 1000)->reason)->toBe('expired_timestamp');
+    }
 });
