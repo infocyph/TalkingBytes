@@ -528,3 +528,63 @@ it('preserves non-ok getStatus results for generated streams', function (): void
     expect($result->successful)->toBeFalse();
     expect($result->statusCode)->toBe(13);
 });
+
+
+it('documents that generated bidi flow is write-then-read rather than interactive full duplex', function (): void {
+    $cancelled = false;
+    $stub = new class($cancelled) {
+        public function __construct(private bool &$cancelled) {}
+
+        public function Chat(array $metadata = [], array $options = []): object
+        {
+            unset($metadata, $options);
+
+            return new class($this->cancelled) {
+                private int $writes = 0;
+
+                private bool $readStarted = false;
+
+                public function __construct(private bool &$cancelled) {}
+
+                public function cancel(): void
+                {
+                    $this->cancelled = true;
+                }
+
+                public function closeWrite(): void {}
+
+                public function getStatus(): object
+                {
+                    return (object) ['code' => 0];
+                }
+
+                public function read(): ?array
+                {
+                    $this->readStarted = true;
+
+                    return null;
+                }
+
+                public function write(mixed $message): void
+                {
+                    unset($message);
+                    $this->writes++;
+
+                    if ($this->writes > 1 && !$this->readStarted) {
+                        throw new RuntimeException('interactive peer requires an inbound read before the next write');
+                    }
+                }
+            };
+        }
+    };
+
+    expect(fn() => GrpcClient::usingGeneratedStub($stub)->bidiStream(
+        method: 'Orders/Chat',
+        messages: [['id' => 1], ['id' => 2]],
+        onMessage: static function (mixed $message): void {
+            unset($message);
+        },
+    ))->toThrow(RuntimeException::class, 'interactive peer requires an inbound read');
+
+    expect($cancelled)->toBeTrue();
+});
