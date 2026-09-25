@@ -17,6 +17,8 @@ it('streams download chunks to a temp file and finalizes atomically', function (
     expect($collector->collect('world'))->toBe(5);
     expect($collector->finalize())->toBeNull();
     expect($collector->responseBody())->toBe('');
+    expect(is_file($target))->toBeFalse();
+    expect($collector->commit())->toBeNull();
     expect(file_get_contents($target))->toBe('hello world');
 
     if (is_file($target)) {
@@ -33,6 +35,9 @@ it('keeps streamed download finalization idempotent', function (): void {
     expect($collector->finalize())->toBeNull();
     expect($collector->finalize())->toBeNull();
     expect($collector->collect('late'))->toBe(0);
+    expect(is_file($target))->toBeFalse();
+    expect($collector->commit())->toBeNull();
+    expect($collector->commit())->toBeNull();
     expect(file_get_contents($target))->toBe('complete');
 
     if (is_file($target)) {
@@ -62,6 +67,8 @@ it('allows streamed download when size is exactly the configured max', function 
 
     expect($collector->collect('hello world'))->toBe(11);
     expect($collector->finalize())->toBeNull();
+    expect(is_file($target))->toBeFalse();
+    expect($collector->commit())->toBeNull();
     expect(file_get_contents($target))->toBe('hello world');
 
     if (is_file($target)) {
@@ -236,4 +243,22 @@ it('aborts streamed downloads without publishing partial files', function (): vo
 
     expect(is_file($target))->toBeFalse();
     expect($collector->collect('late'))->toBe(0);
+});
+
+
+it('can abort a finalized stream without publishing or replacing the target', function (): void {
+    $target = sys_get_temp_dir() . '/tb-http-stream-' . bin2hex(random_bytes(6)) . '.txt';
+    file_put_contents($target, 'existing');
+
+    $request = HttpRequest::get('https://example.com')->streamDownloadTo($target);
+    $collector = new ResponseBodyCollector($request);
+
+    expect($collector->collect('replacement'))->toBe(11);
+    expect($collector->finalize())->toBeNull();
+
+    $collector->abort();
+
+    expect(file_get_contents($target))->toBe('existing');
+
+    unlink($target);
 });
