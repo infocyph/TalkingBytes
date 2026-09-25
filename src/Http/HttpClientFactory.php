@@ -29,8 +29,29 @@ final readonly class HttpClientFactory
      */
     public function fromArray(array $config, ?HttpTransport $transport = null): HttpClient
     {
-        $client = HttpClient::fromConfig(
+        return $this->fromConfig(
             HttpClientConfig::fromArray($config),
+            $config,
+            $transport,
+        );
+    }
+
+    /**
+     * Compose resolved protocol behavior around an already-parsed base HTTP configuration.
+     *
+     * Base HTTP options are taken exclusively from $baseConfig. The resolved
+     * array supplies auth, cookies, retry, rate limiting, circuit breaking,
+     * and idempotency sections without reparsing the base configuration.
+     *
+     * @param array<string, mixed> $config
+     */
+    public function fromConfig(
+        HttpClientConfig $baseConfig,
+        array $config = [],
+        ?HttpTransport $transport = null,
+    ): HttpClient {
+        $client = HttpClient::fromConfig(
+            $baseConfig,
             $this->events,
             $transport,
             $this->clock,
