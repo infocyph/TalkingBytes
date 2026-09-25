@@ -44,9 +44,9 @@ it('adapts generated grpc stub unary and stream calls', function (): void {
                     return array_shift($messages);
                 }
 
-                public function wait(): array
+                public function getStatus(): object
                 {
-                    return [['done' => true], ['code' => 0]];
+                    return (object) ['code' => 0];
                 }
 
                 public function write(mixed $message): void
@@ -108,9 +108,9 @@ it('adapts generated grpc stub unary and stream calls', function (): void {
                     return [['row' => 1], ['row' => 2]];
                 }
 
-                public function wait(): array
+                public function getStatus(): object
                 {
-                    return [null, ['code' => 0]];
+                    return (object) ['code' => 0];
                 }
             };
         }
