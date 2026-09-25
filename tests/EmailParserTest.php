@@ -711,7 +711,7 @@ it('leaves a crash-time spool claim recoverable without duplicating consumption'
     }
     expect(proc_close($process))->toBe(0);
 
-    $claims = glob($directory.'/*.processing') ?: [];
+    $claims = glob($directory.'/.'.'*.processing') ?: [];
     expect($claims)->toHaveCount(1);
     expect(is_file($source))->toBeFalse();
 
@@ -742,7 +742,14 @@ it('rejects canonical spool directory overlap and ignores symlink message inputs
 
     file_put_contents($outside, "From: sender@example.com\r\nTo: a@example.com\r\nSubject: Link\r\n\r\nBody");
     $link = $directory.'/linked.eml';
-    if (@symlink($outside, $link)) {
+    set_error_handler(static fn(): bool => true, E_WARNING);
+    try {
+        $linked = symlink($outside, $link);
+    } finally {
+        restore_error_handler();
+    }
+
+    if ($linked) {
         $received = (new SpoolEmailReceiver(new SpoolConfig($directory), deleteAfterRead: true))->receiveParsed();
         expect($received)->toBeNull();
         expect(is_file($outside))->toBeTrue();
@@ -776,8 +783,8 @@ it('avoids success target collisions and preserves sources when cross-device cla
     rmdir($success);
 
     $sharedMemory = '/dev/shm';
-    $sourceStat = @stat($directory);
-    $targetStat = @stat($sharedMemory);
+    $sourceStat = stat($directory);
+    $targetStat = stat($sharedMemory);
     $sourceDevice = is_array($sourceStat) ? ($sourceStat['dev'] ?? null) : null;
     $targetDevice = is_array($targetStat) ? ($targetStat['dev'] ?? null) : null;
     if (is_dir($sharedMemory) && is_writable($sharedMemory)
