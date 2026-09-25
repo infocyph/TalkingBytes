@@ -146,6 +146,7 @@ jobs:
       - name: Verify native prerequisites
         run: |
           php -r '
+          require "vendor/autoload.php";
           if (!extension_loaded("grpc")) {
               fwrite(STDERR, "ext-grpc is not loaded\n");
               exit(1);
