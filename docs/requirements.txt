@@ -1,5 +1,5 @@
-sphinx>=8.0,<9
-sphinx-book-theme>=1.1
-sphinxcontrib-phpdomain>=0.9
-sphinx-copybutton>=0.5.2
-sphinx-design>=0.6
+sphinx==9.1.0
+sphinx-book-theme==1.4.0
+sphinxcontrib-phpdomain==0.15.2
+sphinx-copybutton==0.5.2
+sphinx-design==0.7.0
