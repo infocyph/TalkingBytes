@@ -327,6 +327,16 @@ final class CookieJar
         return substr($requestPath, 0, $lastSlash);
     }
 
+    private function domainCookieScopeAllowed(string $cookieDomain): bool
+    {
+        $cookieDomain = strtolower(rtrim($cookieDomain, '.'));
+
+        return array_any(
+            $this->allowedParentDomains,
+            static fn(string $allowed): bool => strtolower(rtrim($allowed, '.')) === $cookieDomain,
+        );
+    }
+
     private function domainMatchesOrigin(string $originHost, string $cookieDomain): bool
     {
         $originHost = strtolower(rtrim($originHost, '.'));
@@ -345,27 +355,6 @@ final class CookieJar
         }
 
         return str_ends_with($originHost, '.' . $cookieDomain);
-    }
-
-    private function domainCookieScopeAllowed(string $cookieDomain): bool
-    {
-        $cookieDomain = strtolower(rtrim($cookieDomain, '.'));
-
-        return array_any(
-            $this->allowedParentDomains,
-            static fn(string $allowed): bool => strtolower(rtrim($allowed, '.')) === $cookieDomain,
-        );
-    }
-
-    private function isValidAllowedParentDomain(string $domain): bool
-    {
-        $domain = strtolower(rtrim(trim($domain), '.'));
-
-        return $domain !== ''
-            && strlen($domain) <= 253
-            && str_contains($domain, '.')
-            && filter_var($domain, FILTER_VALIDATE_IP) === false
-            && preg_match('/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/', $domain) === 1;
     }
 
     /**
@@ -401,6 +390,17 @@ final class CookieJar
         }
 
         return $pairs;
+    }
+
+    private function isValidAllowedParentDomain(string $domain): bool
+    {
+        $domain = strtolower(rtrim(trim($domain), '.'));
+
+        return $domain !== ''
+            && strlen($domain) <= 253
+            && str_contains($domain, '.')
+            && filter_var($domain, FILTER_VALIDATE_IP) === false
+            && preg_match('/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/', $domain) === 1;
     }
 
     private function parseExpires(string $value): ?DateTimeImmutable
