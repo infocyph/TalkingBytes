@@ -126,6 +126,7 @@ final class CurlResultFactory
             } finally {
                 restore_error_handler();
             }
+
             if (!$secured) {
                 return sprintf('Failed to secure temporary download file: %s', $path);
             }
