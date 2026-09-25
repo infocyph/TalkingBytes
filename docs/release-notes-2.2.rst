@@ -59,6 +59,8 @@ gRPC
 
 - Generated server-stream and bidirectional calls finalize through native
   ``getStatus()`` when available, preserving non-OK status and trailers.
+- A separate CI lane exercises actual upstream PHP gRPC call objects against a
+  localhost peer with pinned native/userland dependencies.
 - The current generated bidirectional adapter is explicitly write-then-read.
   Interactive full-duplex scheduling needs a different coordination contract
   and is deferred to a future major version instead of being implied by 2.2.
