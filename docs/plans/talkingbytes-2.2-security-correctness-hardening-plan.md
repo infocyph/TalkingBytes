@@ -234,10 +234,10 @@ Owners: `src/Webhook/WebhookReceiver.php`, `src/Webhook/WebhookVerifier.php`, `s
 
 **Reproduction:** inject the same clock into verifier and store; use verifier max age 300 seconds and replay TTL 1 second. Accept a signed delivery at time 1,000,000, advance two seconds, and replay unchanged headers/body. It is accepted again. Default TTL 86,400 with default tolerance avoids this specific configuration; constructor validation currently permits the unsafe pair.
 
-- [ ] Ensure claims cover the complete remaining signature-acceptance window, including accepted future timestamps and boundary precision. Derive effective retention or reject unsafe combinations through an additive policy API.
-- [ ] Keep protocol timestamp validation on wall time; use monotonic duration accounting for process-local retention where appropriate. Document distributed backend TTL semantics and limits.
-- [ ] Test future/old timestamp boundaries, short TTL, fractional timestamps, wall-clock jumps, backend failure and duplicate contention.
-- [ ] Preserve provider neutrality, strict v2 event/delivery binding and fail-closed store behavior.
+- [x] Ensure claims cover the complete remaining signature-acceptance window, including accepted future timestamps and boundary precision. Derive effective retention or reject unsafe combinations through an additive policy API.
+- [x] Keep protocol timestamp validation on wall time; use monotonic duration accounting for process-local retention where appropriate. Document distributed backend TTL semantics and limits.
+- [x] Test future/old timestamp boundaries, short TTL, fractional timestamps, wall-clock jumps, backend failure and duplicate contention.
+- [x] Preserve provider neutrality, strict v2 event/delivery binding and fail-closed store behavior.
 
 **Acceptance:** a delivery cannot become replayable while its signature is still accepted under the configured policy.
 
@@ -265,7 +265,7 @@ Each batch is reviewable independently; add a failing regression before changing
 | 2 | HTTP transfer correctness — F04-F05 | Implemented; CI verification pending |
 | 3 | Email data integrity — F09-F11 | Implemented; extended process/CI verification pending |
 | 4 | Protocol interoperability — F06-F08 | Core implementation complete; live gRPC/duplex verification pending |
-| 5 | Replay policy — F12 | Pending |
+| 5 | Replay policy — F12 | Implemented; CI verification pending |
 | 6 | Measurement/docs/release | Pending |
 
 1. **HTTP trust boundaries:** F01–F03. Establish provenance/sensitivity handling once in existing owners; verify redirect chains and environment isolation.
