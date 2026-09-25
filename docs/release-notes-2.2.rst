@@ -62,8 +62,9 @@ Email and DKIM
   are intentionally not accepted through a compatibility fallback.
 - DKIM relaxed empty-body, oversigning, strict key identity, multi-signature,
   and ambiguous DNS-key handling are aligned with verifier policy. DNS key
-  records may omit the optional ``v=DKIM1`` tag; an explicit version is still
-  validated and revoked or ambiguous key sets remain rejected.
+  records may omit the optional ``v=DKIM1`` tag and may use RFC-valid
+  whitespace around tag separators such as ``p = <key>``; an explicit version
+  is still validated and revoked or ambiguous key sets remain rejected.
 
 gRPC
 ~~~~
