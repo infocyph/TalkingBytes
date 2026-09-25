@@ -236,6 +236,20 @@ it('keeps accepted sensitive header names trackable at the configured boundary',
     $crossOrigin = $prepared->redirectedTo('https://other.example.test/orders', 307, false);
     expect($crossOrigin->headers->get($acceptedName))->toBeNull();
 
+    $events = [];
+    $dispatcher = new CallableEventDispatcher(static function (string $event, array $payload) use (&$events): void {
+        if ($event === 'http.request.start') {
+            $events[] = $payload;
+        }
+    });
+    (new CurlTransport($dispatcher))->send(
+        HttpRequest::get('http://127.0.0.1:1')
+            ->withApiKeyHeader($acceptedName, $secret)
+            ->connectTimeout(1)
+            ->timeout(1),
+    );
+    expect($events[0]['headers'][$acceptedName] ?? null)->toBe('[REDACTED]');
+
     $rejectedName = str_repeat('B', 257);
     expect(fn() => HttpRequest::get('https://api.example.test/orders')
         ->withApiKeyHeader($rejectedName, $secret)
