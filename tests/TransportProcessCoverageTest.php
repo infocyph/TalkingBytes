@@ -210,3 +210,24 @@ function testMessage(): EmailMessage
         ->subject('process coverage')
         ->text('message body');
 }
+
+
+it('passes all envelope recipients to sendmail without exposing bcc headers', function (): void {
+    $transport = new SendmailTransport(new SendmailConfig(PHP_BINARY, ['-t', '-i'], 2));
+    $message = testMessage()
+        ->cc('cc@example.com')
+        ->bcc('bcc@example.com');
+
+    $reflection = new ReflectionMethod($transport, 'buildCommand');
+    $command = $reflection->invoke($transport, $message);
+
+    expect($command)->not->toContain('-t');
+    expect($command)->toContain('--');
+    expect($command)->toContain('to@example.com');
+    expect($command)->toContain('cc@example.com');
+    expect($command)->toContain('bcc@example.com');
+
+    $rawBuilder = new \Infocyph\TalkingBytes\Email\System\RawEmailBuilder();
+    $raw = $rawBuilder->build($message->prepare());
+    expect($raw)->not->toContain('Bcc:');
+});
