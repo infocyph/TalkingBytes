@@ -44,7 +44,10 @@ final readonly class DnsDkimPublicKeyResolver implements DkimPublicKeyResolver
                 continue;
             }
 
-            $dkimRecords[] = $txt;
+            $dkimRecords[] = [
+                'record' => $txt,
+                'public_key' => $tags['p'],
+            ];
         }
 
         if (count($dkimRecords) !== 1) {
@@ -52,33 +55,11 @@ final readonly class DnsDkimPublicKeyResolver implements DkimPublicKeyResolver
         }
 
         $dkimRecord = $dkimRecords[0];
-        $publicKey = $this->extractTag($dkimRecord, 'p');
-        if ($publicKey === null || trim($publicKey) === '') {
+        if (trim($dkimRecord['public_key']) === '') {
             return null;
         }
 
-        return $dkimRecord;
-    }
-
-    private function extractTag(string $record, string $tag): ?string
-    {
-        $parts = preg_split('/\s*;\s*/', trim($record)) ?: [];
-        $needle = strtolower($tag) . '=';
-
-        foreach ($parts as $part) {
-            $part = trim($part);
-            if ($part === '') {
-                continue;
-            }
-
-            if (!str_starts_with(strtolower($part), $needle)) {
-                continue;
-            }
-
-            return trim(substr($part, strlen($needle)));
-        }
-
-        return null;
+        return $dkimRecord['record'];
     }
 
     /**
