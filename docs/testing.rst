@@ -19,6 +19,8 @@ gRPC testing
 
 - ``FakeGrpcCaller``
 - ``AssertableGrpcCaller``
+- ``FakeGrpcInboundSource``
+- ``FakeGrpcInboundExchange``
 
 Webhook testing
 ---------------
