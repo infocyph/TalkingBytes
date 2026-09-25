@@ -13,11 +13,14 @@ final readonly class DkimVerifier
 {
     private Clock $clock;
 
+    private DkimCanonicalizer $canonicalizer;
+
     private DkimSignatureValidator $signatureValidator;
 
     public function __construct(private DkimPublicKeyResolver $resolver, ?Clock $clock = null)
     {
         $this->clock = $clock ?? Clock::system();
+        $this->canonicalizer = new DkimCanonicalizer();
         $this->signatureValidator = new DkimSignatureValidator($this->clock);
     }
 
@@ -80,6 +83,13 @@ final readonly class DkimVerifier
             return new DkimVerificationResult(false, $domain, $selector, 'DKIM public key record is invalid.');
         }
 
+        if (DkimPublicKeyParser::requiresStrictIdentity($keyRecord)
+            && isset($tags['i'])
+            && !$this->identityMatchesDomainExactly($tags['i'], $domain)
+        ) {
+            return new DkimVerificationResult(false, $domain, $selector, 'DKIM key requires strict identity domain matching.');
+        }
+
         $signingInput = $this->buildSigningInput($headers, $h, $dkimField['name'], $dkimHeader, $headerCanon);
         if ($signingInput === null) {
             return new DkimVerificationResult(false, $domain, $selector, 'Signed header list could not be matched to message headers.');
@@ -130,7 +140,11 @@ final readonly class DkimVerifier
             return new DkimVerificationResult(false, $domain, $selector, 'DKIM body hash missing.');
         }
 
-        $computedBodyHash = base64_encode(hash('sha256', $this->canonicalizeBody($body, $bodyCanon), true));
+        $computedBodyHash = base64_encode(hash(
+            'sha256',
+            $this->canonicalizer->canonicalizeBody($body, $bodyCanon),
+            true,
+        ));
         if (hash_equals($bodyHash, $computedBodyHash)) {
             return null;
         }
@@ -166,11 +180,11 @@ final readonly class DkimVerifier
         foreach ($wantedHeaders as $wantedHeader) {
             $index = $this->findHeaderIndexFromBottom($headers, $wantedHeader, $usedIndices);
             if ($index === null) {
-                return null;
+                continue;
             }
 
             $usedIndices[$index] = true;
-            $canonicalized[] = $this->canonicalizeHeader(
+            $canonicalized[] = $this->canonicalizer->canonicalizeHeader(
                 $headers[$index]['name'],
                 $headers[$index]['value'],
                 $headerCanon,
@@ -182,44 +196,13 @@ final readonly class DkimVerifier
             return null;
         }
 
-        $canonicalized[] = $this->canonicalizeHeader($dkimName, $dkimWithoutSignature, $headerCanon);
+        $canonicalized[] = $this->canonicalizer->canonicalizeHeader(
+            $dkimName,
+            $dkimWithoutSignature,
+            $headerCanon,
+        );
 
         return implode("\r\n", $canonicalized);
-    }
-
-    private function canonicalizeBody(string $body, string $algorithm): string
-    {
-        $algorithm = strtolower(trim($algorithm));
-
-        $normalized = str_replace("\n", "\r\n", str_replace(["\r\n", "\r"], "\n", $body));
-        $lines = explode("\r\n", $normalized);
-
-        if ($algorithm === 'relaxed') {
-            foreach ($lines as &$line) {
-                $line = rtrim(preg_replace('/[ \t]+/', ' ', $line) ?? $line, ' ');
-            }
-            unset($line);
-        }
-
-        while ($lines !== [] && end($lines) === '') {
-            array_pop($lines);
-        }
-
-        return implode("\r\n", $lines) . "\r\n";
-    }
-
-    private function canonicalizeHeader(string $name, string $value, string $algorithm): string
-    {
-        $algorithm = strtolower(trim($algorithm));
-
-        if ($algorithm === 'relaxed') {
-            $normalizedName = strtolower(trim($name));
-            $normalizedValue = preg_replace('/\s+/', ' ', trim($value)) ?? trim($value);
-
-            return sprintf('%s:%s', $normalizedName, $normalizedValue);
-        }
-
-        return sprintf('%s:%s', $name, $value);
     }
 
     /**
@@ -258,6 +241,16 @@ final readonly class DkimVerifier
         }
 
         return null;
+    }
+
+    private function identityMatchesDomainExactly(string $identity, string $domain): bool
+    {
+        $separator = strrpos($identity, '@');
+        if ($separator === false) {
+            return false;
+        }
+
+        return strtolower(substr($identity, $separator + 1)) === strtolower($domain);
     }
 
     private function nullableString(?string $value): ?string
@@ -354,7 +347,11 @@ final readonly class DkimVerifier
             return function_exists('sodium_crypto_sign_verify_detached')
                 && strlen($decodedSignature) === SODIUM_CRYPTO_SIGN_BYTES
                 && $publicKey !== ''
-                && sodium_crypto_sign_verify_detached($decodedSignature, $input, $publicKey);
+                && sodium_crypto_sign_verify_detached(
+                    $decodedSignature,
+                    hash('sha256', $input, true),
+                    $publicKey,
+                );
         }
 
         $key = openssl_pkey_get_public($publicKey);
