@@ -453,3 +453,72 @@ it('verifies the RFC 8463 Appendix A ed25519 example', function (): void {
     expect($result->domain)->toBe('football.example.com');
     expect($result->selector)->toBe('brisbane');
 });
+
+
+it('verifyAll retains sibling dkim fields that are themselves signed', function (): void {
+    [$privateKey, $publicKey] = dkimBuildKeyPair();
+    $raw = (new RawEmailBuilder())->build(
+        EmailMessage::new()
+            ->from('sender@example.com')
+            ->to('alice@example.com')
+            ->subject('Multi DKIM')
+            ->text('Body'),
+        includeSubject: true,
+    );
+
+    $first = (new DkimSigner())->buildSignatureHeader(
+        $raw->headers,
+        $raw->body,
+        new DkimConfig('example.com', 'selector', $privateKey),
+    );
+    $second = dkimBuildIndependentRsaSignature(
+        $first . "\r\n" . $raw->headers,
+        $raw->body,
+        $privateKey,
+        ['dkim-signature', 'from'],
+    );
+
+    $parsed = (new RawEmailParser())->parse(
+        $second . "\r\n" . $first . "\r\n" . $raw->headers . "\r\n\r\n" . $raw->body,
+    );
+    $record = preg_replace('/-----BEGIN PUBLIC KEY-----|-----END PUBLIC KEY-----|\s+/', '', $publicKey);
+    $resolver = new StaticDkimPublicKeyResolver([
+        'selector._domainkey.example.com' => 'v=DKIM1; k=rsa; p=' . (string) $record,
+    ]);
+
+    $report = (new DkimVerifier($resolver))->verifyAll($parsed);
+
+    expect($report->results)->toHaveCount(2);
+    expect($report->allValid())->toBeTrue();
+});
+
+it('rejects ambiguous dkim dns key records and accepts an omitted key version tag', function (): void {
+    $ambiguous = new DnsDkimPublicKeyResolver(static fn(string $name, int $type): array => [
+        ['txt' => 'v=DKIM1; k=rsa; p=abc'],
+        ['txt' => 'v=DKIM1; k=rsa; p=def'],
+    ]);
+    expect($ambiguous->resolve('example.com', 'selector'))->toBeNull();
+
+    [$privateKey, $publicKey] = dkimBuildKeyPair();
+    $raw = (new RawEmailBuilder())->build(
+        EmailMessage::new()
+            ->from('sender@example.com')
+            ->to('alice@example.com')
+            ->subject('Optional key version')
+            ->text('Body'),
+    );
+    $signature = (new DkimSigner())->buildSignatureHeader(
+        $raw->headers,
+        $raw->body,
+        new DkimConfig('example.com', 'selector', $privateKey),
+    );
+    $record = preg_replace('/-----BEGIN PUBLIC KEY-----|-----END PUBLIC KEY-----|\s+/', '', $publicKey);
+    $resolver = new StaticDkimPublicKeyResolver([
+        'selector._domainkey.example.com' => 'k=rsa; p=' . (string) $record,
+    ]);
+
+    $parsed = (new RawEmailParser())->parse(
+        $signature . "\r\n" . $raw->headers . "\r\n\r\n" . $raw->body,
+    );
+    expect((new DkimVerifier($resolver))->verify($parsed)->valid)->toBeTrue();
+});
