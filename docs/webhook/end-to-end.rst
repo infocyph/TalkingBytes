@@ -54,6 +54,10 @@ Replay protection
 
    $event = $receiver->receive($rawBody, getallheaders());
 
+``ttlSeconds`` is the caller-selected replay floor, not necessarily the final
+claim duration. The receiver can extend it to protect the remaining signature
+acceptance window and bounded backward clock correction.
+
 Security behavior
 -----------------
 
