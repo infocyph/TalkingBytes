@@ -2,69 +2,96 @@
 
 declare(strict_types=1);
 
-use Google\Protobuf\GPBEmpty;
 use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
 use Infocyph\TalkingBytes\Grpc\GrpcClient;
 use Infocyph\TalkingBytes\Grpc\Sender\GrpcRequest;
 use Infocyph\TalkingBytes\Grpc\Sender\GrpcResponse;
+use ReflectionMethod;
+use RuntimeException;
 
 if (getenv('RUN_GRPC_NATIVE_INTEGRATION') !== '1') {
     return;
 }
 
-final class TalkingBytesNativeIntegrationStub extends \Grpc\BaseStub
+final class TalkingBytesNativeIntegrationStub
 {
-    public function Unary(GPBEmpty $argument, array $metadata = [], array $options = []): object
-    {
-        return $this->_simpleRequest(
-            '/talkingbytes.Integration/Unary',
-            $argument,
-            [GPBEmpty::class, 'decode'],
-            $metadata,
-            $options,
-        );
-    }
+    private object $stub;
 
-    public function Server(GPBEmpty $argument, array $metadata = [], array $options = []): object
+    public function __construct(string $target)
     {
-        return $this->_serverStreamRequest(
-            '/talkingbytes.Integration/Server',
-            $argument,
-            [GPBEmpty::class, 'decode'],
-            $metadata,
-            $options,
-        );
-    }
+        $baseStub = 'Grpc\\BaseStub';
+        $credentials = 'Grpc\\ChannelCredentials';
 
-    public function Client(array $metadata = [], array $options = []): object
-    {
-        return $this->_clientStreamRequest(
-            '/talkingbytes.Integration/Client',
-            [GPBEmpty::class, 'decode'],
-            $metadata,
-            $options,
+        $this->stub = new $baseStub(
+            $target,
+            ['credentials' => $credentials::createInsecure()],
         );
     }
 
     public function Bidi(array $metadata = [], array $options = []): object
     {
-        return $this->_bidiRequest(
+        return $this->invokeBase('_bidiRequest', [
             '/talkingbytes.Integration/Bidi',
-            [GPBEmpty::class, 'decode'],
+            ['Google\\Protobuf\\GPBEmpty', 'decode'],
             $metadata,
             $options,
-        );
+        ]);
     }
 
-    public function SlowServer(GPBEmpty $argument, array $metadata = [], array $options = []): object
+    public function Client(array $metadata = [], array $options = []): object
     {
-        return $this->_serverStreamRequest(
-            '/talkingbytes.Integration/SlowServer',
-            $argument,
-            [GPBEmpty::class, 'decode'],
+        return $this->invokeBase('_clientStreamRequest', [
+            '/talkingbytes.Integration/Client',
+            ['Google\\Protobuf\\GPBEmpty', 'decode'],
             $metadata,
             $options,
-        );
+        ]);
+    }
+
+    public function Server(mixed $argument, array $metadata = [], array $options = []): object
+    {
+        return $this->invokeBase('_serverStreamRequest', [
+            '/talkingbytes.Integration/Server',
+            $argument,
+            ['Google\\Protobuf\\GPBEmpty', 'decode'],
+            $metadata,
+            $options,
+        ]);
+    }
+
+    public function SlowServer(mixed $argument, array $metadata = [], array $options = []): object
+    {
+        return $this->invokeBase('_serverStreamRequest', [
+            '/talkingbytes.Integration/SlowServer',
+            $argument,
+            ['Google\\Protobuf\\GPBEmpty', 'decode'],
+            $metadata,
+            $options,
+        ]);
+    }
+
+    public function Unary(mixed $argument, array $metadata = [], array $options = []): object
+    {
+        return $this->invokeBase('_simpleRequest', [
+            '/talkingbytes.Integration/Unary',
+            $argument,
+            ['Google\\Protobuf\\GPBEmpty', 'decode'],
+            $metadata,
+            $options,
+        ]);
+    }
+
+    /**
+     * @param list<mixed> $arguments
+     */
+    private function invokeBase(string $method, array $arguments): object
+    {
+        $result = (new ReflectionMethod($this->stub, $method))->invokeArgs($this->stub, $arguments);
+        if (!is_object($result)) {
+            throw new RuntimeException(sprintf('Native gRPC stub method "%s" did not return a call object.', $method));
+        }
+
+        return $result;
     }
 }
 
@@ -77,6 +104,19 @@ final class TalkingBytesNativeGrpcServer
         private string $directory,
         public readonly int $port,
     ) {}
+
+    public function __destruct()
+    {
+        $this->stop();
+    }
+
+    public function client(?CancellationSignal $cancellation = null): GrpcClient
+    {
+        return GrpcClient::usingGeneratedStub(
+            new TalkingBytesNativeIntegrationStub('127.0.0.1:' . $this->port),
+            cancellation: $cancellation,
+        );
+    }
 
     public static function start(): self
     {
@@ -124,16 +164,6 @@ final class TalkingBytesNativeGrpcServer
         return new self($process, $pipes, $directory, $port);
     }
 
-    public function client(?CancellationSignal $cancellation = null): GrpcClient
-    {
-        $stub = new TalkingBytesNativeIntegrationStub(
-            '127.0.0.1:' . $this->port,
-            ['credentials' => \Grpc\ChannelCredentials::createInsecure()],
-        );
-
-        return GrpcClient::usingGeneratedStub($stub, cancellation: $cancellation);
-    }
-
     public function stop(): void
     {
         foreach ([1, 2] as $index) {
@@ -161,23 +191,27 @@ final class TalkingBytesNativeGrpcServer
             rmdir($this->directory);
         }
     }
+}
 
-    public function __destruct()
-    {
-        $this->stop();
-    }
+function talkingBytesNativeEmptyMessage(): object
+{
+    $class = 'Google\\Protobuf\\GPBEmpty';
+
+    return new $class();
 }
 
 it('interoperates with real grpc php call objects for all four call shapes', function (): void {
+    $emptyClass = 'Google\\Protobuf\\GPBEmpty';
+
     expect(extension_loaded('grpc'))->toBeTrue();
-    expect(class_exists(\Grpc\BaseStub::class))->toBeTrue();
-    expect(class_exists(GPBEmpty::class))->toBeTrue();
+    expect(class_exists('Grpc\\BaseStub'))->toBeTrue();
+    expect(class_exists($emptyClass))->toBeTrue();
 
     $server = TalkingBytesNativeGrpcServer::start();
 
     try {
         $client = $server->client();
-        $empty = new GPBEmpty();
+        $empty = talkingBytesNativeEmptyMessage();
 
         $unary = $client->send(new GrpcRequest(
             method: 'Integration/Unary',
@@ -186,7 +220,7 @@ it('interoperates with real grpc php call objects for all four call shapes', fun
         ));
         expect($unary->successful)->toBeTrue();
         expect($unary->response)->toBeInstanceOf(GrpcResponse::class);
-        expect($unary->response?->message)->toBeInstanceOf(GPBEmpty::class);
+        expect($unary->response?->message)->toBeInstanceOf($emptyClass);
         expect($unary->response?->trailers->first('x-trailer'))->toBe('unary-end');
 
         $serverMessages = [];
@@ -198,22 +232,22 @@ it('interoperates with real grpc php call objects for all four call shapes', fun
         );
         expect($serverResult->successful)->toBeTrue();
         expect($serverMessages)->toHaveCount(2);
-        expect($serverMessages[0])->toBeInstanceOf(GPBEmpty::class);
+        expect($serverMessages[0])->toBeInstanceOf($emptyClass);
         expect($serverResult->response?->trailers->first('x-trailer'))->toBe('server-end');
 
         $clientResult = $client->clientStream(
             method: 'Integration/Client',
-            messages: [new GPBEmpty(), new GPBEmpty()],
+            messages: [talkingBytesNativeEmptyMessage(), talkingBytesNativeEmptyMessage()],
             deadlineSeconds: 2.0,
         );
         expect($clientResult->successful)->toBeTrue();
-        expect($clientResult->response?->message)->toBeInstanceOf(GPBEmpty::class);
+        expect($clientResult->response?->message)->toBeInstanceOf($emptyClass);
         expect($clientResult->response?->trailers->first('x-count'))->toBe('2');
 
         $bidiMessages = [];
         $bidiResult = $client->bidiStream(
             method: 'Integration/Bidi',
-            messages: [new GPBEmpty(), new GPBEmpty()],
+            messages: [talkingBytesNativeEmptyMessage(), talkingBytesNativeEmptyMessage()],
             onMessage: static function (mixed $message) use (&$bidiMessages): void {
                 $bidiMessages[] = $message;
             },
@@ -221,7 +255,7 @@ it('interoperates with real grpc php call objects for all four call shapes', fun
         );
         expect($bidiResult->successful)->toBeTrue();
         expect($bidiMessages)->toHaveCount(2);
-        expect($bidiMessages[0])->toBeInstanceOf(GPBEmpty::class);
+        expect($bidiMessages[0])->toBeInstanceOf($emptyClass);
         expect($bidiResult->response?->trailers->first('x-count'))->toBe('2');
     } finally {
         $server->stop();
@@ -233,7 +267,7 @@ it('propagates real native grpc deadlines and cancellation cleanup', function ()
 
     try {
         $deadlineResult = $server->client()->serverStream(
-            new GrpcRequest('Integration/SlowServer', new GPBEmpty(), deadlineSeconds: 0.05),
+            new GrpcRequest('Integration/SlowServer', talkingBytesNativeEmptyMessage(), deadlineSeconds: 0.05),
             static function (mixed $message): void {
                 unset($message);
             },
@@ -247,7 +281,7 @@ it('propagates real native grpc deadlines and cancellation cleanup', function ()
             return $cancelled;
         });
         $cancelResult = $server->client($signal)->serverStream(
-            new GrpcRequest('Integration/Server', new GPBEmpty(), deadlineSeconds: 2.0),
+            new GrpcRequest('Integration/Server', talkingBytesNativeEmptyMessage(), deadlineSeconds: 2.0),
             static function (mixed $message) use (&$cancelled, &$messages): void {
                 unset($message);
                 $messages++;
