@@ -442,9 +442,10 @@ it('verifies the RFC 8463 Appendix A ed25519 example', function (): void {
     ]);
 
     $parsed = (new RawEmailParser())->parse($raw);
+    $publicKey = '11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=';
     $resolver = new StaticDkimPublicKeyResolver([
         'brisbane._domainkey.football.example.com'
-            => 'v=DKIM1; k=ed25519; p=11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=',
+            => 'v=DKIM1; k=ed25519; p=' . $publicKey,
     ]);
 
     $result = (new DkimVerifier($resolver))->verify($parsed);
@@ -452,6 +453,11 @@ it('verifies the RFC 8463 Appendix A ed25519 example', function (): void {
     expect($result->valid)->toBeTrue();
     expect($result->domain)->toBe('football.example.com');
     expect($result->selector)->toBe('brisbane');
+
+    $dnsResolver = new DnsDkimPublicKeyResolver(static fn(string $name, int $type): array => [
+        ['txt' => 'k=ed25519; p=' . $publicKey],
+    ]);
+    expect((new DkimVerifier($dnsResolver))->verify($parsed)->valid)->toBeTrue();
 });
 
 
@@ -495,7 +501,7 @@ it('verifyAll retains sibling dkim fields that are themselves signed', function 
 it('rejects ambiguous dkim dns key records and accepts an omitted key version tag', function (): void {
     $ambiguous = new DnsDkimPublicKeyResolver(static fn(): array => [
         ['txt' => 'v=DKIM1; k=rsa; p=abc'],
-        ['txt' => 'v=DKIM1; k=rsa; p=def'],
+        ['txt' => 'k=rsa; p=def'],
     ]);
     expect($ambiguous->resolve('example.com', 'selector'))->toBeNull();
 
