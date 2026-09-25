@@ -454,9 +454,12 @@ it('verifies the RFC 8463 Appendix A ed25519 example', function (): void {
     expect($result->domain)->toBe('football.example.com');
     expect($result->selector)->toBe('brisbane');
 
-    $dnsResolver = new DnsDkimPublicKeyResolver(static fn(string $name, int $type): array => [
-        ['txt' => 'k=ed25519; p=' . $publicKey],
-    ]);
+    $dnsResolver = new DnsDkimPublicKeyResolver(static function (string $name, int $type) use ($publicKey): array {
+        expect($name)->toBe('brisbane._domainkey.football.example.com');
+        expect($type)->toBe(DNS_TXT);
+
+        return [['txt' => 'k=ed25519; p=' . $publicKey]];
+    });
     expect((new DkimVerifier($dnsResolver))->verify($parsed)->valid)->toBeTrue();
 });
 
