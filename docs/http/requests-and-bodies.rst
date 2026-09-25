@@ -28,10 +28,11 @@ Query helpers
 Body types
 ----------
 
-- JSON: ``json($payload, $flags = 0)``
+- JSON: ``json($payload)`` or ``jsonWithFlags($payload, $flags)``
 - Form: ``form($payload)``
 - Raw: ``raw($body, $contentType)``
-- Multipart: ``multipart()->field()->file()->data()->stream()``
+- Multipart: ``multipart($body)`` with ``MultipartBody::addField()``,
+  ``addFile()``, ``addData()``, and ``addStream()``
 
 Auth helpers
 ------------
