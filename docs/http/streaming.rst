@@ -6,8 +6,10 @@ Download
 
 Two modes:
 
-- ``downloadTo($path)`` for straightforward writes
-- ``streamDownloadTo($path)`` for temp-file streaming + atomic finalize
+- ``downloadTo($path)`` buffers the response body in memory, then publishes it
+  through a temporary file and atomic rename.
+- ``streamDownloadTo($path)`` streams into a temporary file and publishes it
+  atomically after the complete request succeeds.
 
 Use response size bounds:
 
