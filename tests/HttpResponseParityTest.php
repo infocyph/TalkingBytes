@@ -166,6 +166,14 @@ it('publishes buffered downloads only after the redirect transaction succeeds', 
         expect($failed->successful)->toBeFalse()
             ->and(file_get_contents($target))->toBe('KEEP-ORIGINAL');
 
+        $truncated = $transport->send(
+            HttpRequest::get($base . '/download-redirect-truncated')
+                ->downloadTo($target)
+                ->followRedirects(),
+        );
+        expect($truncated->successful)->toBeFalse()
+            ->and(file_get_contents($target))->toBe('KEEP-ORIGINAL');
+
         $looped = $transport->send(
             HttpRequest::get($base . '/download-loop')
                 ->downloadTo($target)
