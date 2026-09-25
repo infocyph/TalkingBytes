@@ -293,7 +293,14 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
             throw new RuntimeException(sprintf('Spool email exceeds configured size limit (%d bytes).', $maxBytes));
         }
 
-        $handle = fopen($file, 'rb');
+        set_error_handler(static fn(): bool => true, E_WARNING);
+
+        try {
+            $handle = fopen($file, 'rb');
+        } finally {
+            restore_error_handler();
+        }
+
         if (!is_resource($handle)) {
             return false;
         }
