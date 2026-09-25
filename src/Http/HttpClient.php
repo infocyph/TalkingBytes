@@ -29,6 +29,7 @@ use Infocyph\TalkingBytes\Http\Retry\HttpRetryPolicy;
 use Infocyph\TalkingBytes\Http\Signing\RequestSigner;
 use Infocyph\TalkingBytes\Http\Testing\AssertableHttpTransport;
 use Infocyph\TalkingBytes\Http\Testing\FakeHttpTransport;
+use Infocyph\TalkingBytes\Http\Transport\CurlTransport;
 use Infocyph\TalkingBytes\Resilience\CircuitBreaker;
 use Infocyph\TalkingBytes\Resilience\RateLimiter;
 use Infocyph\TalkingBytes\Retry\RetryPolicy;
