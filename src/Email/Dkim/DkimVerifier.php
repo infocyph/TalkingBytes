@@ -58,91 +58,6 @@ final readonly class DkimVerifier
     }
 
     /**
-     * @param list<array{name:string,value:string}> $headers
-     * @param array{name:string,value:string,index:int} $dkimField
-     */
-    private function verifyField(array $headers, string $body, array $dkimField): DkimVerificationResult
-    {
-        $dkimHeader = $dkimField['value'];
-        if (strlen($dkimHeader) > 16_384) {
-            return new DkimVerificationResult(false, reason: 'DKIM-Signature header exceeds safe bounds.');
-        }
-
-        $tags = DkimTagValueParser::parse($dkimHeader);
-        $identity = $this->signatureValidator->validate($tags);
-        if ($identity instanceof DkimVerificationResult) {
-            return $identity;
-        }
-        [$domain, $selector] = $identity;
-
-        $modes = $this->signatureModes($tags, $domain, $selector);
-        if ($modes instanceof DkimVerificationResult) {
-            return $modes;
-        }
-        [$algorithm, $headerCanon, $bodyCanon] = $modes;
-
-        $bodyFailure = $this->bodyFailure($tags, $body, $bodyCanon, $domain, $selector);
-        if ($bodyFailure !== null) {
-            return $bodyFailure;
-        }
-
-        $signatureData = $this->signatureData($tags, $domain, $selector);
-        if ($signatureData instanceof DkimVerificationResult) {
-            return $signatureData;
-        }
-        [$signature, $h] = $signatureData;
-
-        $publicKey = $this->publicKey($tags, $domain, $selector, $algorithm);
-        if ($publicKey instanceof DkimVerificationResult) {
-            return $publicKey;
-        }
-
-        $signingInput = $this->buildSigningInput(
-            $headers,
-            $h,
-            $dkimField['name'],
-            $dkimHeader,
-            $headerCanon,
-            $dkimField['index'],
-        );
-        if ($signingInput === null) {
-            return new DkimVerificationResult(false, $domain, $selector, 'Signed header list could not be matched to message headers.');
-        }
-
-        if (!$this->verifySignature($algorithm, $signingInput, $signature, $publicKey)) {
-            return new DkimVerificationResult(false, $domain, $selector, 'DKIM signature verification failed.');
-        }
-
-        return new DkimVerificationResult(true, $domain, $selector);
-    }
-
-    /**
-     * @param array<string, string> $tags
-     * @return array{0:string,1:string,2:string}|DkimVerificationResult
-     */
-    private function signatureModes(array $tags, string $domain, string $selector): array|DkimVerificationResult
-    {
-        if (($tags['v'] ?? null) !== '1' || !isset($tags['a'])) {
-            return new DkimVerificationResult(false, $domain, $selector, 'DKIM version or algorithm tag is invalid.');
-        }
-
-        $algorithm = strtolower($tags['a']);
-        if (!in_array($algorithm, ['rsa-sha256', 'ed25519-sha256'], true)) {
-            return new DkimVerificationResult(false, $domain, $selector, 'Unsupported DKIM algorithm.');
-        }
-
-        $canon = strtolower((string) ($tags['c'] ?? 'simple/simple'));
-        [$headerCanon, $bodyCanon] = array_pad(explode('/', $canon, 2), 2, 'simple');
-        if (!in_array($headerCanon, ['simple', 'relaxed'], true)
-            || !in_array($bodyCanon, ['simple', 'relaxed'], true)
-        ) {
-            return new DkimVerificationResult(false, $domain, $selector, 'Unsupported DKIM canonicalization.');
-        }
-
-        return [$algorithm, $headerCanon, $bodyCanon];
-    }
-
-    /**
      * @param array<string, string> $tags
      */
     private function bodyFailure(
@@ -244,6 +159,16 @@ final readonly class DkimVerifier
         return null;
     }
 
+    private function identityMatchesDomainExactly(string $identity, string $domain): bool
+    {
+        $separator = strrpos($identity, '@');
+        if ($separator === false) {
+            return false;
+        }
+
+        return strtolower(substr($identity, $separator + 1)) === strtolower($domain);
+    }
+
     /**
      * @param list<array{name:string,value:string}> $headers
      * @return array{name:string,value:string,index:int}|null
@@ -259,16 +184,6 @@ final readonly class DkimVerifier
         }
 
         return null;
-    }
-
-    private function identityMatchesDomainExactly(string $identity, string $domain): bool
-    {
-        $separator = strrpos($identity, '@');
-        if ($separator === false) {
-            return false;
-        }
-
-        return strtolower(substr($identity, $separator + 1)) === strtolower($domain);
     }
 
     private function nullableString(?string $value): ?string
@@ -330,7 +245,6 @@ final readonly class DkimVerifier
         return $publicKey;
     }
 
-    /** @return list<string> */
     private function rawHeaderGroups(string $headers): array
     {
         $groups = [];
@@ -374,6 +288,32 @@ final readonly class DkimVerifier
     }
 
     /**
+     * @param array<string, string> $tags
+     * @return array{0:string,1:string,2:string}|DkimVerificationResult
+     */
+    private function signatureModes(array $tags, string $domain, string $selector): array|DkimVerificationResult
+    {
+        if (($tags['v'] ?? null) !== '1' || !isset($tags['a'])) {
+            return new DkimVerificationResult(false, $domain, $selector, 'DKIM version or algorithm tag is invalid.');
+        }
+
+        $algorithm = strtolower($tags['a']);
+        if (!in_array($algorithm, ['rsa-sha256', 'ed25519-sha256'], true)) {
+            return new DkimVerificationResult(false, $domain, $selector, 'Unsupported DKIM algorithm.');
+        }
+
+        $canon = strtolower((string) ($tags['c'] ?? 'simple/simple'));
+        [$headerCanon, $bodyCanon] = array_pad(explode('/', $canon, 2), 2, 'simple');
+        if (!in_array($headerCanon, ['simple', 'relaxed'], true)
+            || !in_array($bodyCanon, ['simple', 'relaxed'], true)
+        ) {
+            return new DkimVerificationResult(false, $domain, $selector, 'Unsupported DKIM canonicalization.');
+        }
+
+        return [$algorithm, $headerCanon, $bodyCanon];
+    }
+
+    /**
      * @return array{0:string,1:string}
      */
     private function splitRaw(string $raw): array
@@ -382,6 +322,65 @@ final readonly class DkimVerifier
         $parts = preg_split("/\r\n\r\n/", $normalized, 2) ?: [];
 
         return [$parts[0] ?? '', $parts[1] ?? ''];
+    }
+
+    /**
+     * @param list<array{name:string,value:string}> $headers
+     * @param array{name:string,value:string,index:int} $dkimField
+     */
+    private function verifyField(array $headers, string $body, array $dkimField): DkimVerificationResult
+    {
+        $dkimHeader = $dkimField['value'];
+        if (strlen($dkimHeader) > 16_384) {
+            return new DkimVerificationResult(false, reason: 'DKIM-Signature header exceeds safe bounds.');
+        }
+
+        $tags = DkimTagValueParser::parse($dkimHeader);
+        $identity = $this->signatureValidator->validate($tags);
+        if ($identity instanceof DkimVerificationResult) {
+            return $identity;
+        }
+        [$domain, $selector] = $identity;
+
+        $modes = $this->signatureModes($tags, $domain, $selector);
+        if ($modes instanceof DkimVerificationResult) {
+            return $modes;
+        }
+        [$algorithm, $headerCanon, $bodyCanon] = $modes;
+
+        $bodyFailure = $this->bodyFailure($tags, $body, $bodyCanon, $domain, $selector);
+        if ($bodyFailure !== null) {
+            return $bodyFailure;
+        }
+
+        $signatureData = $this->signatureData($tags, $domain, $selector);
+        if ($signatureData instanceof DkimVerificationResult) {
+            return $signatureData;
+        }
+        [$signature, $h] = $signatureData;
+
+        $publicKey = $this->publicKey($tags, $domain, $selector, $algorithm);
+        if ($publicKey instanceof DkimVerificationResult) {
+            return $publicKey;
+        }
+
+        $signingInput = $this->buildSigningInput(
+            $headers,
+            $h,
+            $dkimField['name'],
+            $dkimHeader,
+            $headerCanon,
+            $dkimField['index'],
+        );
+        if ($signingInput === null) {
+            return new DkimVerificationResult(false, $domain, $selector, 'Signed header list could not be matched to message headers.');
+        }
+
+        if (!$this->verifySignature($algorithm, $signingInput, $signature, $publicKey)) {
+            return new DkimVerificationResult(false, $domain, $selector, 'DKIM signature verification failed.');
+        }
+
+        return new DkimVerificationResult(true, $domain, $selector);
     }
 
     private function verifySignature(string $algorithm, string $input, string $signature, string $publicKey): bool
