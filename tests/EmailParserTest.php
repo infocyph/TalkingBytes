@@ -592,3 +592,43 @@ it('keeps attachment parts out of selected text and html body content', function
     expect($email->attachments)->toHaveCount(1);
     expect($email->attachments[0]->filename)->toBe('notes.txt');
 });
+
+
+it('prevents overlapping spool consumers from returning the same message', function (): void {
+    $directory = getcwd().'/tests/.tmp-spool-claim-'.bin2hex(random_bytes(4));
+    mkdir($directory, 0775, true);
+    file_put_contents(
+        $directory.'/20260101_000001_a.eml',
+        "From: sender@example.com\r\nTo: a@example.com\r\nSubject: A\r\n\r\nBody A",
+    );
+
+    $parser = new class($directory) implements EmailParser
+    {
+        public ?ParsedEmail $nested = null;
+
+        public function __construct(private string $directory) {}
+
+        public function parse(string $rawEmail, array $metadata = []): ParsedEmail
+        {
+            $this->nested = (new SpoolEmailReceiver(
+                new SpoolConfig($this->directory, lockBeforeRead: true),
+                deleteAfterRead: true,
+            ))->receiveParsed();
+
+            return (new RawEmailParser())->parse($rawEmail, $metadata);
+        }
+    };
+
+    $received = (new SpoolEmailReceiver(
+        new SpoolConfig($directory, lockBeforeRead: true),
+        parser: $parser,
+        deleteAfterRead: true,
+    ))->receiveParsed();
+
+    expect($received?->subject)->toBe('A');
+    expect($parser->nested)->toBeNull();
+    expect(glob($directory.'/*.eml') ?: [])->toBe([]);
+    expect(glob($directory.'/*.processing') ?: [])->toBe([]);
+
+    rmdir($directory);
+});
