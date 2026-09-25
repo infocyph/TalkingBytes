@@ -162,6 +162,6 @@ final readonly class DkimSigner
             throw new DkimException('Invalid Ed25519 DKIM private key length.');
         }
 
-        return base64_encode(sodium_crypto_sign_detached($input, $key));
+        return base64_encode(sodium_crypto_sign_detached(hash('sha256', $input, true), $key));
     }
 }
