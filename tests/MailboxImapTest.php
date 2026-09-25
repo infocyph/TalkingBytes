@@ -952,3 +952,72 @@ it('applies batch mailbox operations and stops on first failure', function (): v
     $folder->moveMany([2], 'Archive');
     expect($mailbox->folder('Archive')->status()->messages)->toBe(2);
 });
+
+
+it('uses uid-scoped expunge when MOVE is unavailable but UIDPLUS is available', function (): void {
+    $server = FakeImapServerProcess::start([
+        'expect' => [
+            ['regex' => '/^A\\d+ CAPABILITY$/', 'untagged' => ['* CAPABILITY IMAP4rev1 UIDPLUS']],
+            ['regex' => '/^A\\d+ LOGIN "user" "pass"$/'],
+            ['regex' => '/^A\\d+ SELECT "INBOX"$/'],
+            ['regex' => '/^A\\d+ UID COPY 2 "Archive"$/'],
+            ['regex' => '/^A\\d+ UID STORE 2 \+FLAGS \(\\\\Deleted\)$/'],
+            ['regex' => '/^A\\d+ UID EXPUNGE 2$/'],
+            ['regex' => '/^A\\d+ LOGOUT$/', 'untagged' => ['* BYE Logging out']],
+        ],
+    ]);
+
+    $transport = new ImapSocketTransport(new ImapConfig(
+        host: '127.0.0.1',
+        port: $server->port,
+        security: ImapSecurity::None,
+        username: 'user',
+        password: 'pass',
+    ));
+
+    $transport->move('INBOX', 2, 'Archive');
+    $transport->logout();
+
+    $transcript = $server->transcript();
+    $server->stop();
+
+    expect($transcript['mismatches'])->toBe([]);
+    expect(array_any(
+        $transcript['commands'],
+        static fn(string $command): bool => preg_match('/^A\\d+ EXPUNGE$/', $command) === 1,
+    ))->toBeFalse();
+});
+
+it('refuses unsafe imap move fallback before mutating messages', function (): void {
+    $server = FakeImapServerProcess::start([
+        'expect' => [
+            ['regex' => '/^A\\d+ CAPABILITY$/', 'untagged' => ['* CAPABILITY IMAP4rev1']],
+            ['regex' => '/^A\\d+ LOGIN "user" "pass"$/'],
+            ['regex' => '/^A\\d+ SELECT "INBOX"$/'],
+            ['regex' => '/^A\\d+ LOGOUT$/', 'untagged' => ['* BYE Logging out']],
+        ],
+    ]);
+
+    $transport = new ImapSocketTransport(new ImapConfig(
+        host: '127.0.0.1',
+        port: $server->port,
+        security: ImapSecurity::None,
+        username: 'user',
+        password: 'pass',
+    ));
+
+    expect(fn() => $transport->move('INBOX', 2, 'Archive'))
+        ->toThrow(MailboxProtocolException::class, 'requires MOVE or UIDPLUS');
+
+    $transport->logout();
+    $transcript = $server->transcript();
+    $server->stop();
+
+    expect($transcript['mismatches'])->toBe([]);
+    expect(array_any(
+        $transcript['commands'],
+        static fn(string $command): bool => str_contains($command, 'UID COPY')
+            || str_contains($command, 'UID STORE')
+            || str_contains($command, 'EXPUNGE'),
+    ))->toBeFalse();
+});
