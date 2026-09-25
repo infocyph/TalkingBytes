@@ -30,7 +30,12 @@ Generated stub adapter
 ----------------------
 
 ``GeneratedStubGrpcInvoker`` adapts generated ``grpc/grpc`` stub clients using
-duck-typed call objects (``wait()``, ``responses()``/``read()``, ``write()``).
+the native call shapes rather than one synthetic interface. Unary and
+client-streaming completion use ``wait()``; server-streaming and bidirectional
+completion use ``getStatus()``. Inbound stream messages are drained through
+``responses()`` or ``read()``. Client-streaming and bidirectional calls use
+``write()`` and close the write side through ``writesDone()`` or ``closeWrite()``
+when the native call exposes those methods.
 
 Stream call shape is resolved once from public method reflection when the
 adapter is constructed. TalkingBytes never invokes a stream method merely to
