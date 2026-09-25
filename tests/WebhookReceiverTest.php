@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Infocyph\TalkingBytes\Core\Support\Clock;
 use Infocyph\TalkingBytes\Webhook\Contracts\WebhookReplayStore;
 use Infocyph\TalkingBytes\Webhook\Replay\InMemoryWebhookReplayStore;
 use Infocyph\TalkingBytes\Webhook\Testing\WebhookTestFactory;
@@ -220,4 +221,69 @@ it('receives the signed request produced by the native sender', function (): voi
         $headers[$name] = (string) $request->headers->get($name);
     }
     expect(Webhook::receiver('secret')->receive('{"id":1}', $headers)->event)->toBe('order.created');
+});
+
+
+it('retains replay claims for the full remaining signature acceptance window', function (): void {
+    $now = 1_000_000.0;
+    $clock = new Clock(static function () use (&$now): float {
+        return $now;
+    });
+    $verifier = new \Infocyph\TalkingBytes\Webhook\WebhookVerifier(
+        'secret',
+        maxAgeSeconds: 300,
+        clock: $clock,
+    );
+    $store = new InMemoryWebhookReplayStore(clock: $clock);
+    $receiver = (new WebhookReceiver($verifier))->withReplayStore($store, 1);
+
+    [$payload, $headers] = WebhookTestFactory::signedJson(
+        'secret',
+        'order.created',
+        ['id' => 10],
+        'evt_short_ttl',
+        (int) $now,
+    );
+
+    expect($receiver->receive($payload, $headers)->deliveryId)->toBe('evt_short_ttl');
+
+    $now += 2.0;
+
+    expect(fn() => $receiver->receive($payload, $headers))
+        ->toThrow(RuntimeException::class, 'already been processed');
+});
+
+it('covers accepted future timestamps until they leave the verification window', function (): void {
+    $now = 2_000_000.0;
+    $clock = new Clock(static function () use (&$now): float {
+        return $now;
+    });
+    $verifier = new \Infocyph\TalkingBytes\Webhook\WebhookVerifier(
+        'secret',
+        maxAgeSeconds: 300,
+        clock: $clock,
+    );
+    $store = new InMemoryWebhookReplayStore(clock: $clock);
+    $receiver = (new WebhookReceiver($verifier))->withReplayStore($store, 1);
+    $futureTimestamp = (int) $now + 300;
+
+    [$payload, $headers] = WebhookTestFactory::signedJson(
+        'secret',
+        'order.created',
+        ['id' => 11],
+        'evt_future',
+        $futureTimestamp,
+    );
+
+    expect($receiver->receive($payload, $headers)->deliveryId)->toBe('evt_future');
+
+    $now += 301.0;
+
+    expect(fn() => $receiver->receive($payload, $headers))
+        ->toThrow(RuntimeException::class, 'already been processed');
+
+    $now += 300.0;
+
+    expect(fn() => $receiver->receive($payload, $headers))
+        ->toThrow(RuntimeException::class, 'expired_timestamp');
 });
