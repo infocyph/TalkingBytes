@@ -75,7 +75,8 @@ final readonly class WebhookReceiver
         }
 
         if ($this->replayStore !== null) {
-            if (!$this->replayStore->claim($this->replayNamespace, $deliveryId, $this->replayTtlSeconds)) {
+            $claimTtl = $this->effectiveReplayTtl($verification);
+            if (!$this->replayStore->claim($this->replayNamespace, $deliveryId, $claimTtl)) {
                 throw new RuntimeException(sprintf('Webhook delivery "%s" has already been processed.', $deliveryId));
             }
         }
@@ -111,6 +112,28 @@ final readonly class WebhookReceiver
         WebhookNameGuard::assertNamespace($namespace);
 
         return new self($this->verifier, $store, $ttlSeconds, $namespace, $this->maxPayloadBytes, $this->events);
+    }
+
+    private function effectiveReplayTtl(\Infocyph\TalkingBytes\Webhook\Model\WebhookVerificationResult $verification): int
+    {
+        $timestamp = $verification->timestamp;
+        $verifiedAt = $verification->metadata['verified_at'] ?? null;
+        $maxAge = $verification->metadata['max_age_seconds'] ?? null;
+
+        if (!is_int($timestamp) || !is_int($verifiedAt) || !is_int($maxAge) || $maxAge < 1) {
+            return $this->replayTtlSeconds;
+        }
+
+        if ($timestamp > PHP_INT_MAX - $maxAge) {
+            return PHP_INT_MAX;
+        }
+
+        $acceptedUntil = $timestamp + $maxAge;
+        $remaining = $acceptedUntil >= $verifiedAt
+            ? $acceptedUntil - $verifiedAt + 1
+            : 1;
+
+        return max($this->replayTtlSeconds, $remaining);
     }
 
     /**
