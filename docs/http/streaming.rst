@@ -44,3 +44,12 @@ Notes
 
 - Multipart stream/data parts are materialized into temporary files before cURL transfer.
 - Streamed download mode cleans temporary files on failure paths.
+
+Download publication semantics
+------------------------------
+
+Both buffered and streamed downloads publish through a temporary file and
+replace the requested target only after the HTTP transfer is accepted as a
+successful result. Transport failures, HTTP error responses, size-limit
+failures, cancellation and redirect failures discard temporary output and
+preserve an existing target.
