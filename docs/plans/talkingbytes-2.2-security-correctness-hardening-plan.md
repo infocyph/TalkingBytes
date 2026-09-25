@@ -191,9 +191,9 @@ Owners: `src/Email/Transport/SendmailTransport.php:64`, `src/Email/System/EmailH
 
 **Reproduction:** a fake sendmail captures argv and stdin for a message with To and Bcc. Arguments are `-t`, `-i`, `-fsender@example.com`; Bcc is absent from both argv and MIME input, yet `acceptedRecipients` includes the Bcc address. The fake sent no email. A recipient not supplied through either channel cannot be delivered by sendmail.
 
-- [ ] Pass validated envelope recipients, including Bcc, through sendmail's supported argument semantics without exposing Bcc in the delivered MIME message.
-- [ ] Avoid duplicate recipient derivation when combining explicit recipients with `-t`; define allowed extra-argument behavior and option termination.
-- [ ] Test To/Cc/Bcc-only/mixed messages, special-but-valid addresses, envelope sender, nonzero exit and cancellation. Add a real compatible sendmail integration fixture where available.
+- [x] Pass validated envelope recipients, including Bcc, through sendmail's supported argument semantics without exposing Bcc in the delivered MIME message.
+- [x] Avoid duplicate recipient derivation when combining explicit recipients with `-t`; define allowed extra-argument behavior and option termination.
+- [x] Test To/Cc/Bcc-only/mixed messages, special-but-valid addresses, envelope sender, nonzero exit and cancellation. Add a real compatible sendmail integration fixture where available.
 
 **Acceptance:** recipients marked submitted were actually supplied to the child; Bcc remains private. Do not interpret process acceptance as proof of final remote delivery.
 
@@ -205,9 +205,9 @@ Owner: `src/Email/Mailbox/ImapSocketTransport.php:192`.
 
 **Reproduction:** a local server advertises `IMAP4rev1 UIDPLUS` but no MOVE. Moving UID 2 produces `UID COPY 2`, `UID STORE 2 +FLAGS (\\Deleted)`, then bare `EXPUNGE`. The last command can permanently remove other messages already marked deleted; UIDPLUS was available but unused.
 
-- [ ] Use UID-scoped expunge when UIDPLUS is available, preserving native UID MOVE when supported.
-- [ ] Without a safe scoped mechanism, fail before destructive mutation or offer an explicitly documented copy/mark-only operation. Do not temporarily manipulate all other deleted flags as a supposedly atomic workaround.
-- [ ] Test unrelated deleted UIDs, concurrent flag changes, partial COPY/STORE failures and capability combinations; report partial outcomes honestly.
+- [x] Use UID-scoped expunge when UIDPLUS is available, preserving native UID MOVE when supported.
+- [x] Without a safe scoped mechanism, fail before destructive mutation or offer an explicitly documented copy/mark-only operation. Do not temporarily manipulate all other deleted flags as a supposedly atomic workaround.
+- [x] Test unrelated deleted UIDs, concurrent flag changes, partial COPY/STORE failures and capability combinations; report partial outcomes honestly.
 
 **Acceptance:** moving one UID never expunges another UID. Reference: [RFC 4315 UID EXPUNGE](https://www.rfc-editor.org/rfc/rfc4315.html#section-2.1).
 
@@ -219,8 +219,8 @@ Owner: `src/Email/Receiver/SpoolEmailReceiver.php:232`; `docs/email/spool-receiv
 
 **Reproduction:** configure `lockBeforeRead:true`, `deleteAfterRead:true`, no processing directory. A parser invokes a second receiver after the first has read the file but before finalization. Both return the same message. This deterministically models overlapping consumers: the lock is released before parse/finalize and cannot provide the documented worker safety by itself.
 
-- [ ] Define exclusive consume ownership separately from peek/read locks. Prefer an atomic claim before reading; retain ownership through success/failure handling.
-- [ ] Handle losing a claim as contention, not a malformed email; do not quarantine another worker's input.
+- [x] Define exclusive consume ownership separately from peek/read locks. Prefer an atomic claim before reading; retain ownership through success/failure handling.
+- [x] Handle losing a claim as contention, not a malformed email; do not quarantine another worker's input.
 - [ ] Test independent processes, crash after claim, parse failure and cleanup. State delivery semantics explicitly; do not promise exactly-once application processing.
 - [ ] Audit symlink acceptance, canonical directory overlap, target collisions and rename across filesystems while touching this lifecycle. These are source-review concerns needing dedicated tests, not all proven exploits.
 
@@ -263,7 +263,7 @@ Each batch is reviewable independently; add a failing regression before changing
 | --- | --- | --- |
 | 1 | HTTP trust boundaries — F01-F03 | Implemented; CI verification pending |
 | 2 | HTTP transfer correctness — F04-F05 | Implemented; CI verification pending |
-| 3 | Email data integrity — F09-F11 | Pending |
+| 3 | Email data integrity — F09-F11 | Implemented; extended process/CI verification pending |
 | 4 | Protocol interoperability — F06-F08 | Pending |
 | 5 | Replay policy — F12 | Pending |
 | 6 | Measurement/docs/release | Pending |
