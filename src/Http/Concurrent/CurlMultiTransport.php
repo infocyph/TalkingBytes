@@ -264,7 +264,7 @@ final readonly class CurlMultiTransport
     {
         $this->events->dispatch($result->successful ? 'http.request.finish' : 'http.request.failed', [
             'method' => $request->method->value,
-            'url' => HttpRedactor::redactUrl($request->buildUrl()),
+            'url' => HttpRedactor::redactUrl($request->buildUrl(), $request->sensitiveQueryNames()),
             'status' => $result->statusCode,
             'failure_category' => $result->successful ? null : (ObservabilitySanitizer::resultContext($result)['failure_category'] ?? 'transport_error'),
             'transport' => 'curl-multi',
@@ -478,8 +478,8 @@ final readonly class CurlMultiTransport
 
         $this->events->dispatch('http.request.start', [
             'method' => $prepared->method->value,
-            'url' => HttpRedactor::redactUrl($prepared->buildUrl()),
-            'headers' => HttpRedactor::redactHeaders($prepared->headers->all()),
+            'url' => HttpRedactor::redactUrl($prepared->buildUrl(), $prepared->sensitiveQueryNames()),
+            'headers' => HttpRedactor::redactHeaders($prepared->headers->all(), $prepared->sensitiveHeaderNames()),
             'transport' => 'curl-multi',
         ]);
 
