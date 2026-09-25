@@ -28,6 +28,6 @@ final readonly class HeaderAuth implements AuthenticatorInterface
 
     public function apply(HttpRequest $request): HttpRequest
     {
-        return $request->header($this->header, $this->value);
+        return $request->markSensitiveHeader($this->header)->header($this->header, $this->value);
     }
 }
