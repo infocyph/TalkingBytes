@@ -855,6 +855,8 @@ it('keeps spool peek non-destructive across oversized unreadable and parser fail
         {
             public function parse(string $rawEmail, array $metadata = []): ParsedEmail
             {
+                unset($rawEmail, $metadata);
+
                 throw new RuntimeException('Synthetic parser rejection.');
             }
         };
