@@ -120,7 +120,16 @@ final class CurlResultFactory
                 return sprintf('Failed to write download file: %s', $path);
             }
 
-            @chmod($tempPath, 0600);
+            set_error_handler(static fn(): bool => true, E_WARNING);
+            try {
+                $secured = chmod($tempPath, 0600);
+            } finally {
+                restore_error_handler();
+            }
+            if (!$secured) {
+                return sprintf('Failed to secure temporary download file: %s', $path);
+            }
+
             if (!rename($tempPath, $path)) {
                 return sprintf('Failed to finalize download file: %s', $path);
             }
