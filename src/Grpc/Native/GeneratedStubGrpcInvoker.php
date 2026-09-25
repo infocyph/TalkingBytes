@@ -345,19 +345,14 @@ final readonly class GeneratedStubGrpcInvoker implements NativeGrpcInvoker, Nati
 
     private function finalizeStreamingCall(mixed $call): NativeGrpcResult
     {
-        if (!is_object($call)) {
-            throw new RuntimeException('Unsupported gRPC stream call result.');
-        }
-
-        if (!method_exists($call, 'getStatus')) {
-            return $this->finalizeCall($call);
+        if (!is_object($call) || !method_exists($call, 'getStatus')) {
+            throw new RuntimeException('Unsupported gRPC stream call result: expected getStatus() method.');
         }
 
         $status = $call->getStatus();
 
         return new NativeGrpcResult(
             statusCode: $this->extractWaitStatusCode($status),
-            message: null,
             headers: $this->extractHeaders($call),
             trailers: $this->extractTrailers($call),
             metadata: $this->extractWaitStatusMetadata($status),
@@ -366,10 +361,6 @@ final readonly class GeneratedStubGrpcInvoker implements NativeGrpcInvoker, Nati
 
     private function finishClientWrites(mixed $call): void
     {
-        if (!is_object($call)) {
-            return;
-        }
-
         if (method_exists($call, 'writesDone')) {
             $call->writesDone();
 
