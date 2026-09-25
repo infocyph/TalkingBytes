@@ -40,3 +40,4 @@ It provides:
    extensions
    naming
    release-checklist
+   release-notes-2.2
