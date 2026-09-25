@@ -3,7 +3,10 @@
 declare(strict_types=1);
 
 use Infocyph\TalkingBytes\Http\Concurrent\CurlMultiTransport;
+use Infocyph\TalkingBytes\Http\Cookie\CookieJar;
+use Infocyph\TalkingBytes\Http\HttpClient;
 use Infocyph\TalkingBytes\Http\HttpRequest;
+use Infocyph\TalkingBytes\Http\Testing\SpyHttpTransport;
 use Infocyph\TalkingBytes\Http\Transport\CurlTransport;
 
 final class HttpResponseParityServer
@@ -139,6 +142,103 @@ it('preserves existing download targets on HTTP failure', function (): void {
         if (is_file($target)) {
             unlink($target);
         }
+        $server->stop();
+    }
+});
+
+
+it('publishes buffered downloads only after the redirect transaction succeeds', function (): void {
+    $server = HttpResponseParityServer::start();
+    $directory = sys_get_temp_dir() . '/tb-http-download-chain-' . bin2hex(random_bytes(6));
+    mkdir($directory, 0700, true);
+    $target = $directory . '/artifact.txt';
+
+    try {
+        $base = sprintf('http://127.0.0.1:%d', $server->port);
+        $transport = new CurlTransport();
+
+        file_put_contents($target, 'KEEP-ORIGINAL');
+        $failed = $transport->send(
+            HttpRequest::get($base . '/download-redirect-error')
+                ->downloadTo($target)
+                ->followRedirects(),
+        );
+        expect($failed->successful)->toBeFalse()
+            ->and(file_get_contents($target))->toBe('KEEP-ORIGINAL');
+
+        $looped = $transport->send(
+            HttpRequest::get($base . '/download-loop')
+                ->downloadTo($target)
+                ->followRedirects(),
+        );
+        expect($looped->successful)->toBeFalse()
+            ->and(file_get_contents($target))->toBe('KEEP-ORIGINAL');
+
+        $blocked = $transport->send(
+            HttpRequest::get($base . '/download-blocked')
+                ->blockHosts(['localhost'])
+                ->downloadTo($target)
+                ->followRedirects(),
+        );
+        expect($blocked->successful)->toBeFalse()
+            ->and(file_get_contents($target))->toBe('KEEP-ORIGINAL');
+
+        unlink($target);
+        $missingTarget = $transport->send(
+            HttpRequest::get($base . '/download-redirect-error')
+                ->downloadTo($target)
+                ->followRedirects(),
+        );
+        expect($missingTarget->successful)->toBeFalse()
+            ->and(is_file($target))->toBeFalse();
+
+        $success = $transport->send(
+            HttpRequest::get($base . '/download-redirect-success')
+                ->downloadTo($target)
+                ->followRedirects(),
+        );
+        expect($success->successful)->toBeTrue()
+            ->and(file_get_contents($target))->toBe('FINAL-BODY')
+            ->and(glob($directory . '/tb-http-download-*') ?: [])->toBe([]);
+    } finally {
+        foreach (glob($directory . '/*') ?: [] as $path) {
+            if (is_file($path)) {
+                unlink($path);
+            }
+        }
+        if (is_dir($directory)) {
+            rmdir($directory);
+        }
+        $server->stop();
+    }
+});
+
+it('preserves cookie provenance through supported native transport decoration', function (): void {
+    $server = HttpResponseParityServer::start();
+
+    try {
+        $base = sprintf('http://127.0.0.1:%d', $server->port);
+
+        foreach ([
+            new CurlTransport(),
+            new SpyHttpTransport(new CurlTransport()),
+        ] as $transport) {
+            $jar = new CookieJar();
+            $client = HttpClient::using($transport)->withCookieJar($jar);
+
+            $chain = $client->send(
+                HttpRequest::get($base . '/cookie-chain-start')->followRedirects(),
+            );
+            expect($chain->successful)->toBeTrue()
+                ->and($chain->response?->body)->toContain('origin_cookie=origin-value')
+                ->and($chain->response?->body)->not->toContain('target_cookie=target-value');
+
+            $targetEcho = $client->get(sprintf('http://localhost:%d/cookie-echo', $server->port));
+            expect($targetEcho->successful)->toBeTrue()
+                ->and($targetEcho->response?->body)->toContain('target_cookie=target-value')
+                ->and($targetEcho->response?->body)->not->toContain('origin_cookie=origin-value');
+        }
+    } finally {
         $server->stop();
     }
 });
