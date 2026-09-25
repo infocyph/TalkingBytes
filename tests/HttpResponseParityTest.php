@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Infocyph\TalkingBytes\Http\Concurrent\CurlMultiTransport;
 use Infocyph\TalkingBytes\Http\HttpRequest;
 use Infocyph\TalkingBytes\Http\Transport\CurlTransport;
 
@@ -95,6 +96,13 @@ it('accepts valid bodyless responses and follows empty redirects', function (): 
             expect($result->successful)->toBeTrue();
             expect($result->statusCode)->toBe($status);
             expect($result->response?->body)->toBe('');
+
+            $multi = (new CurlMultiTransport())->sendMany([
+                'request' => HttpRequest::get($base . $path),
+            ])->get('request');
+            expect($multi?->successful)->toBeTrue();
+            expect($multi?->statusCode)->toBe($status);
+            expect($multi?->response?->body)->toBe('');
         }
 
         $redirected = $transport->send(
