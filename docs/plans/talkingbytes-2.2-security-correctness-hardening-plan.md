@@ -2,7 +2,7 @@
 
 ## Status and decision
 
-**Audit date:** 2026-09-25. **State:** implementation in progress; Batch 1 HTTP trust-boundary work started.
+**Audit date:** 2026-09-25. **State:** implementation in progress; Batch 1 HTTP trust-boundary work implemented; CI verification pending.
 
 - Audited working revision: `bd2d198680e86cbac49425e898e591ed6194cbdb`.
 - Latest version tag: `2.1`, resolving to commit `29fe13043225bfcf477adfa1f4dd1dc11fa4723f`.
@@ -63,11 +63,11 @@ Owners: `src/Http/HttpRequest.php:433`, `src/Auth/ApiKeyAuth.php`, `src/Auth/Sig
 
 **Reproduction:** prepare a request with `ApiKeyAuth('X-API-Key', 'audit-secret')`, redirect to another origin with authentication preservation disabled, then inspect the prepared headers. The API key remains. A real localhost redirect from host `127.0.0.1` to host `localhost` delivered that key to both origins. Preparing `ApiKeyAuth('X-Vendor-Credential', 'audit-secret')` and passing its headers through the event redactor also retains the secret. Current code removes/redacts fixed header names, but built-in authenticators support arbitrary names.
 
-- [ ] Track the credential-bearing header/query fields supplied by native authenticators in the request's existing ownership flow; bound any added metadata.
-- [ ] Strip all native authentication outputs on an origin change and apply credential policy consistently before each hop. Account for custom signature-header names and explicit sensitive headers.
-- [ ] Use the same sensitivity information in request-start events, logging middleware, URL redaction and webhook HTTP events. Redact nested query credentials when the auth API can create them.
-- [ ] Add a documented extension route for caller-provided authenticators; do not guess that every custom header is harmless or remove every application header indiscriminately.
-- [ ] Test host/port/scheme changes, same-origin retention, API-key headers and queries, custom signature fields, failed requests, callbacks, and sentinel secrets in every emitted payload.
+- [x] Track the credential-bearing header/query fields supplied by native authenticators in the request's existing ownership flow; bound any added metadata.
+- [x] Strip all native authentication outputs on an origin change and apply credential policy consistently before each hop. Account for custom signature-header names and explicit sensitive headers.
+- [x] Use the same sensitivity information in request-start events, logging middleware, URL redaction and webhook HTTP events. Redact nested query credentials when the auth API can create them.
+- [x] Add a documented extension route for caller-provided authenticators; do not guess that every custom header is harmless or remove every application header indiscriminately.
+- [x] Test host/port/scheme changes, same-origin retention, API-key headers and queries, custom signature fields, failed requests, callbacks, and sentinel secrets in every emitted payload.
 
 **Acceptance:** the redirect target and observers never receive credentials outside their intended scope. Redirects remain disabled by default. No secret values appear in exceptions introduced by validation.
 
@@ -79,9 +79,9 @@ Owners: `src/Http/Internal/RequestSecurityGuard.php:35`, `src/Http/Internal/Curl
 
 **Reproduction:** start a fake HTTP proxy on loopback; set `http_proxy` to it and clear `no_proxy`; send `HttpRequest::get('http://8.8.8.8/')->blockPrivateNetworks()`. The request succeeds with cURL `primary_ip=127.0.0.1`. No connection to 8.8.8.8 is made: the local proxy answers the request. Explicit proxies are rejected, but inherited proxies are not disabled, so local DNS pinning does not establish the destination used by a remote-resolving proxy.
 
-- [ ] When strict network blocking is selected, explicitly disable inherited proxies on the handle or reject the combination before transport. Keep the non-strict proxy behavior deliberate and documented.
+- [x] When strict network blocking is selected, explicitly disable inherited proxies on the handle or reject the combination before transport. Keep the non-strict proxy behavior deliberate and documented.
 - [ ] Test `http_proxy`, `https_proxy`, `ALL_PROXY`, `NO_PROXY`, explicit proxies, single transport and multi transport in isolated child environments. Never change process-global proxy variables inside normal client code.
-- [ ] Extend the same security tests to public/private DNS answers, IPv4-mapped IPv6, literal IPv6, trailing-dot hosts, redirects and DNS changes. Treat these as coverage requirements, not additional proven bypasses.
+- [x] Extend the same security tests to public/private DNS answers, IPv4-mapped IPv6, literal IPv6, trailing-dot hosts, redirects and DNS changes. Treat these as coverage requirements, not additional proven bypasses.
 
 **Acceptance:** strict mode cannot delegate destination resolution to an unvalidated proxy. See [libcurl proxy behavior](https://curl.se/libcurl/c/CURLOPT_PROXY.html).
 
@@ -95,11 +95,11 @@ Owners: `src/Http/HttpClient.php:243`, `src/Http/Transport/CurlTransport.php`, `
 
 **Reproduction B:** with `allowDomainCookies:true`, a response from `attacker.co.uk` setting `Domain=co.uk` installs `session=injected`; the jar sends it to `victim.co.uk`. Default host-only mode avoids this second case.
 
-- [ ] Attribute each response's cookies to its actual origin. Prefer per-hop cookie storage/application so intermediate cookies and path/security rules remain correct.
-- [ ] Do not trust an unrelated result field or arbitrary caller metadata as authoritative provenance without a clear transport contract.
-- [ ] Re-evaluate Cookie headers at each redirect; test path changes, HTTPS downgrade policy, return-to-origin chains and intermediate responses.
-- [ ] Keep domain cookies disabled by default. For opt-in domain cookies, require an effective public-suffix policy or explicit allowed parent-domain policy; fail closed where policy cannot establish the boundary. Do not ship a short hard-coded suffix list as complete coverage.
-- [ ] Test public suffixes, private suffixes, IP hosts, host-only cookies and legitimate subdomain sharing.
+- [x] Attribute each response's cookies to its actual origin. Prefer per-hop cookie storage/application so intermediate cookies and path/security rules remain correct.
+- [x] Do not trust an unrelated result field or arbitrary caller metadata as authoritative provenance without a clear transport contract.
+- [x] Re-evaluate Cookie headers at each redirect; test path changes, HTTPS downgrade policy, return-to-origin chains and intermediate responses.
+- [x] Keep domain cookies disabled by default. For opt-in domain cookies, require an effective public-suffix policy or explicit allowed parent-domain policy; fail closed where policy cannot establish the boundary. Do not ship a short hard-coded suffix list as complete coverage.
+- [x] Test public suffixes, private suffixes, IP hosts, host-only cookies and legitimate subdomain sharing.
 
 **Acceptance:** a redirect target cannot set cookies for the starting origin, and an unrelated registrant cannot set shared cookies through a public suffix. [Cookie storage rules](https://www.rfc-editor.org/rfc/rfc6265#section-5.3) provide the protocol reference.
 
@@ -258,6 +258,15 @@ These do not excuse delaying P0 fixes and are not claims of additional proven vu
 ## Implementation batches
 
 Each batch is reviewable independently; add a failing regression before changing behavior. No batch is complete solely because the pre-existing suite stays green.
+
+| Batch | Scope | Status |
+| --- | --- | --- |
+| 1 | HTTP trust boundaries — F01-F03 | Implemented; CI verification pending |
+| 2 | HTTP transfer correctness — F04-F05 | Pending |
+| 3 | Email data integrity — F09-F11 | Pending |
+| 4 | Protocol interoperability — F06-F08 | Pending |
+| 5 | Replay policy — F12 | Pending |
+| 6 | Measurement/docs/release | Pending |
 
 1. **HTTP trust boundaries:** F01–F03. Establish provenance/sensitivity handling once in existing owners; verify redirect chains and environment isolation.
 2. **HTTP transfer correctness:** F04–F05. Shared commit/abort policy and single/multi response parity; include redirects and uploads in affected lifecycle tests.
