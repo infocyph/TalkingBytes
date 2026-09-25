@@ -80,7 +80,7 @@ Owners: `src/Http/Internal/RequestSecurityGuard.php:35`, `src/Http/Internal/Curl
 **Reproduction:** start a fake HTTP proxy on loopback; set `http_proxy` to it and clear `no_proxy`; send `HttpRequest::get('http://8.8.8.8/')->blockPrivateNetworks()`. The request succeeds with cURL `primary_ip=127.0.0.1`. No connection to 8.8.8.8 is made: the local proxy answers the request. Explicit proxies are rejected, but inherited proxies are not disabled, so local DNS pinning does not establish the destination used by a remote-resolving proxy.
 
 - [x] When strict network blocking is selected, explicitly disable inherited proxies on the handle or reject the combination before transport. Keep the non-strict proxy behavior deliberate and documented.
-- [ ] Test `http_proxy`, `https_proxy`, `ALL_PROXY`, `NO_PROXY`, explicit proxies, single transport and multi transport in isolated child environments. Never change process-global proxy variables inside normal client code.
+- [x] Test `http_proxy`, `https_proxy`, `ALL_PROXY`, `NO_PROXY`, explicit proxies, single transport and multi transport in isolated child environments. Never change process-global proxy variables inside normal client code.
 - [x] Extend the same security tests to public/private DNS answers, IPv4-mapped IPv6, literal IPv6, trailing-dot hosts, redirects and DNS changes. Treat these as coverage requirements, not additional proven bypasses.
 
 **Acceptance:** strict mode cannot delegate destination resolution to an unvalidated proxy. See [libcurl proxy behavior](https://curl.se/libcurl/c/CURLOPT_PROXY.html).
@@ -179,7 +179,7 @@ Independent RSA/Sodium probes and byte checks found:
 - [x] Implement absent-header and empty-body semantics without relaxing mandatory From coverage.
 - [x] Reuse the existing canonicalization owner where appropriate; avoid two subtly different implementations.
 - [x] Add independent vectors for all three cases and negative variants.
-- [ ] During the same focused review, cover `verifyAll()` retaining other signed DKIM fields, folded signature whitespace, optional key version tags, ambiguous DNS records and revoked keys. These additional cases are review targets, not all reproduced findings.
+- [x] During the same focused review, cover `verifyAll()` retaining other signed DKIM fields, folded signature whitespace, optional key version tags, ambiguous DNS records and revoked keys. These additional cases are review targets, not all reproduced findings.
 
 **Acceptance:** key policy is enforced and valid independent messages interoperate. Reference: [RFC 6376](https://www.rfc-editor.org/rfc/rfc6376), sections 3.4.4, 3.5 and 3.6.1.
 
@@ -221,8 +221,8 @@ Owner: `src/Email/Receiver/SpoolEmailReceiver.php:232`; `docs/email/spool-receiv
 
 - [x] Define exclusive consume ownership separately from peek/read locks. Prefer an atomic claim before reading; retain ownership through success/failure handling.
 - [x] Handle losing a claim as contention, not a malformed email; do not quarantine another worker's input.
-- [ ] Test independent processes, crash after claim, parse failure and cleanup. State delivery semantics explicitly; do not promise exactly-once application processing.
-- [ ] Audit symlink acceptance, canonical directory overlap, target collisions and rename across filesystems while touching this lifecycle. These are source-review concerns needing dedicated tests, not all proven exploits.
+- [x] Test independent processes, crash after claim, parse failure and cleanup. State delivery semantics explicitly; do not promise exactly-once application processing.
+- [x] Audit symlink acceptance, canonical directory overlap, target collisions and rename across filesystems while touching this lifecycle. These are source-review concerns needing dedicated tests, not all proven exploits.
 
 **Acceptance:** concurrent receive operations cannot return the same claimed source; failures are recoverable under the documented policy. Peek must remain non-consuming.
 
@@ -266,7 +266,7 @@ Each batch is reviewable independently; add a failing regression before changing
 | 3 | Email data integrity — F09-F11 | Implemented; extended process/CI verification pending |
 | 4 | Protocol interoperability — F06-F08 | Core implementation complete; live gRPC/duplex verification pending |
 | 5 | Replay policy — F12 | Implemented; CI verification pending |
-| 6 | Measurement/docs/release | Pending |
+| 6 | Measurement/docs/release | Implementation-gap sweep in progress |
 
 1. **HTTP trust boundaries:** F01–F03. Establish provenance/sensitivity handling once in existing owners; verify redirect chains and environment isolation.
 2. **HTTP transfer correctness:** F04–F05. Shared commit/abort policy and single/multi response parity; include redirects and uploads in affected lifecycle tests.
