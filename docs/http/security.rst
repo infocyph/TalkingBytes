@@ -45,3 +45,28 @@ Cookie safety
 not match the response origin, honors RFC path boundaries, and bounds retained
 state. The default capacity is 3,000 cookies and can be lowered with the
 ``maxCookies`` constructor argument for long-lived clients.
+
+
+Credential provenance
+---------------------
+
+Native HTTP authenticators mark the headers and query keys they create as
+sensitive. Redirects strip those credentials whenever the origin changes, and
+the same metadata is used by HTTP events and logging. Custom authenticators
+should call ``markSensitiveHeader()`` and/or ``markSensitiveQuery()`` before
+adding non-standard credential fields.
+
+Strict proxy isolation
+----------------------
+
+``blockPrivateNetworks()`` rejects explicit proxies and disables cURL proxies
+inherited from the process environment. This keeps validated DNS pinning
+authoritative for the connection destination.
+
+Domain-cookie sharing
+---------------------
+
+Domain cookies remain disabled by default. Enabling ``allowDomainCookies``
+still fails closed unless every accepted ``Domain`` scope is listed in
+``allowedParentDomains``. This explicit application policy avoids treating a
+short built-in public-suffix list as complete.
