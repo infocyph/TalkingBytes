@@ -151,7 +151,7 @@ jobs:
               exit(1);
           }
           fwrite(STDOUT, "ext-grpc " . phpversion("grpc") . "\n");
-          if (!class_exists(Grpc\\BaseStub::class) || !class_exists(Google\\Protobuf\\GPBEmpty::class)) {
+          if (!class_exists("Grpc\\BaseStub") || !class_exists("Google\\Protobuf\\GPBEmpty")) {
               fwrite(STDERR, "grpc/grpc or google/protobuf is unavailable\n");
               exit(1);
           }
