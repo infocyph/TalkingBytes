@@ -34,15 +34,16 @@ final readonly class GeneratedStubGrpcInvoker implements NativeGrpcInvoker, Nati
         $reflection = new ReflectionObject($this->stubClient);
         $this->methodMap = $this->normalizeMethodMap($reflection, $methodMap);
 
-        $streamOpenArity = [];
-        foreach ($reflection->getMethods(ReflectionMethod::IS_PUBLIC) as $method) {
-            if ($method->isStatic()) {
-                continue;
-            }
+        $methods = array_values(array_filter(
+            $reflection->getMethods(ReflectionMethod::IS_PUBLIC),
+            static fn(ReflectionMethod $method): bool => !$method->isStatic(),
+        ));
 
-            $streamOpenArity[$method->getName()] = self::resolveStreamOpenArity($method);
-        }
-
+        /** @var array<string, int> $streamOpenArity */
+        $streamOpenArity = array_combine(
+            array_map(static fn(ReflectionMethod $method): string => $method->getName(), $methods),
+            array_map(self::resolveStreamOpenArity(...), $methods),
+        );
         $this->streamOpenArity = $streamOpenArity;
     }
 
