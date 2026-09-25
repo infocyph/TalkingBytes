@@ -60,6 +60,7 @@ while ($handled < 32 && microtime(true) < $deadline) {
     $status = 200;
     $body = '';
     $headers = [];
+    $declaredLength = null;
     if ($path === '/204') {
         $status = 204;
     } elseif ($path === '/304') {
@@ -75,6 +76,13 @@ while ($handled < 32 && microtime(true) < $deadline) {
         $status = 302;
         $body = 'REDIRECT-BODY';
         $headers['Location'] = sprintf('http://127.0.0.1:%d/error', $port);
+    } elseif ($path === '/download-redirect-truncated') {
+        $status = 302;
+        $body = 'REDIRECT-BODY';
+        $headers['Location'] = sprintf('http://127.0.0.1:%d/truncated', $port);
+    } elseif ($path === '/truncated') {
+        $body = 'PART';
+        $declaredLength = 100;
     } elseif ($path === '/download-loop') {
         $status = 302;
         $body = 'REDIRECT-BODY';
@@ -114,7 +122,7 @@ while ($handled < 32 && microtime(true) < $deadline) {
     foreach ($headers as $name => $value) {
         $wire .= $name . ': ' . $value . "\r\n";
     }
-    $wire .= 'Content-Length: ' . strlen($body) . "\r\nConnection: close\r\n\r\n" . $body;
+    $wire .= 'Content-Length: ' . ($declaredLength ?? strlen($body)) . "\r\nConnection: close\r\n\r\n" . $body;
     fwrite($client, $wire);
     fclose($client);
     $handled++;
