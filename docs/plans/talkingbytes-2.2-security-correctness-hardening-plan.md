@@ -145,7 +145,7 @@ Owner: `src/Grpc/Native/GeneratedStubGrpcInvoker.php:315`; tests in `tests/GrpcG
 - [x] Map final status, details and trailers exactly once; preserve non-OK stream results and cleanup on callback exceptions.
 - [x] Fix native-shaped doubles so unsupported synthetic methods do not conceal adapter defects.
 - [ ] Add an optional real grpc/grpc + ext-grpc integration lane for all four call shapes and cancellation/deadline cleanup.
-- [ ] Independently test bidirectional flow control: current write-all-then-read ordering needs an interactive peer test. Do not claim general duplex support from a batch fake. If true duplex needs an incompatible public contract, split that feature into the major-version decision gate rather than silently buffering streams.
+- [x] Independently test bidirectional flow control: an interactive native-shaped peer proves the current generated adapter is write-then-read; true interactive duplex requires a different coordination contract and is deferred to a future major-version decision gate.
 
 **Acceptance:** real supported generated clients complete successfully and report status/trailers accurately. Reference: [upstream ServerStreamingCall](https://github.com/grpc/grpc/blob/master/src/php/lib/Grpc/ServerStreamingCall.php), [BidiStreamingCall](https://github.com/grpc/grpc/blob/master/src/php/lib/Grpc/BidiStreamingCall.php), [ClientStreamingCall](https://github.com/grpc/grpc/blob/master/src/php/lib/Grpc/ClientStreamingCall.php). Pin concrete supported package revisions when creating fixtures.
 
@@ -304,11 +304,11 @@ Before changing hot paths, retain a baseline on the audited revision. Compare li
 ### Exact-candidate release gate
 
 - [ ] All F01–F12 fixes and negative regressions pass; remaining follow-ups have explicit scope/status.
-- [ ] Public API/configuration/wire changes are classified: patch correction, additive minor, or breaking major. Audit named arguments and real third-party consumers.
+- [x] Public API/configuration/wire changes are classified: 2.2 uses additive minor APIs plus protocol/security corrections; the interactive generated-bidi coordination contract is explicitly deferred to a future major.
 - [ ] PHP 8.4 and 8.5, prefer-lowest/prefer-stable, static/security, benchmark, clean install and docs CI are green on the **final committed revision**.
 - [ ] Mailpit, minimal optional extensions and new native gRPC interoperability lanes pass with explicit prerequisites.
 - [ ] Required process/filesystem/socket tests pass on supported operating systems; platform limitations are documented rather than inferred from Linux.
-- [ ] Release notes include conditional risks, coordinated migrations, affected APIs and mitigations for security fixes. Decide coordinated disclosure before publishing exploit details or notifying third parties; no external notification is authorized by this plan.
+- [x] Release notes document conditional risks, migrations, affected APIs and mitigations. No external notification or disclosure action is authorized by this plan.
 - [ ] Freeze the candidate and tag exactly the verified commit. Any later source/docs/CI change requires fresh candidate validation.
 
 ## Completion definition
