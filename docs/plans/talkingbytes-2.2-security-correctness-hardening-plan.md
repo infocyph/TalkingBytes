@@ -141,9 +141,9 @@ Owner: `src/Grpc/Native/GeneratedStubGrpcInvoker.php:315`; tests in `tests/GrpcG
 
 **Reproduction:** a native-shaped server-stream call exposing `responses()`, `getStatus()`, metadata accessors and `cancel()`, but no `wait()`, delivers its messages and then throws `Unsupported gRPC call object: expected wait() method.` Real upstream server/bidirectional streaming calls use `getStatus()`. This audit used an upstream-shaped double; it did not run ext-grpc against a real server.
 
-- [ ] Resolve completion strategy for unary/client streaming versus server/bidirectional streaming without invocation-and-catch probing.
-- [ ] Map final status, details and trailers exactly once; preserve non-OK stream results and cleanup on callback exceptions.
-- [ ] Fix native-shaped doubles so unsupported synthetic methods do not conceal adapter defects.
+- [x] Resolve completion strategy for unary/client streaming versus server/bidirectional streaming without invocation-and-catch probing.
+- [x] Map final status, details and trailers exactly once; preserve non-OK stream results and cleanup on callback exceptions.
+- [x] Fix native-shaped doubles so unsupported synthetic methods do not conceal adapter defects.
 - [ ] Add an optional real grpc/grpc + ext-grpc integration lane for all four call shapes and cancellation/deadline cleanup.
 - [ ] Independently test bidirectional flow control: current write-all-then-read ordering needs an interactive peer test. Do not claim general duplex support from a batch fake. If true duplex needs an incompatible public contract, split that feature into the major-version decision gate rather than silently buffering streams.
 
@@ -157,9 +157,9 @@ Owners: `src/Email/Dkim/DkimSigner.php:151`, `src/Email/Dkim/DkimVerifier.php:34
 
 **Reproduction:** a generated Ed25519 signature verifies with Sodium over the raw canonical header input but fails over `hash('sha256', $input, true)`. Both library directions implement the same nonstandard operation, so a round-trip test misses it.
 
-- [ ] Sign and verify the binary SHA-256 digest using PureEd25519 as specified in [RFC 8463 section 3](https://www.rfc-editor.org/rfc/rfc8463.html#section-3).
-- [ ] Add the RFC's independent vectors and interoperability checks with another implementation; retain RSA coverage and cold Sodium behavior.
-- [ ] Reject the old nonstandard representation rather than silently trying multiple algorithms. Document the correction for consumers exchanging historical library-generated signatures.
+- [x] Sign and verify the binary SHA-256 digest using PureEd25519 as specified in [RFC 8463 section 3](https://www.rfc-editor.org/rfc/rfc8463.html#section-3).
+- [x] Add the RFC's independent vectors and interoperability checks with another implementation; retain RSA coverage and cold Sodium behavior.
+- [x] Reject the old nonstandard representation rather than silently trying multiple algorithms. Document the correction for consumers exchanging historical library-generated signatures.
 
 **Acceptance:** externally generated standards-compliant signatures verify, and library output verifies externally. This is not evidence of private-key exposure.
 
@@ -175,10 +175,10 @@ Independent RSA/Sodium probes and byte checks found:
 2. A correctly constructed `h=from:from` signature with one actual From header is rejected. An absent oversigned occurrence must contribute no bytes, not invalidate verification.
 3. Empty relaxed bodies canonicalize to hex `0d0a`; the required relaxed result is empty. Both signer and verifier repeat this error.
 
-- [ ] Preserve and enforce relevant key constraints at the verification boundary.
-- [ ] Implement absent-header and empty-body semantics without relaxing mandatory From coverage.
-- [ ] Reuse the existing canonicalization owner where appropriate; avoid two subtly different implementations.
-- [ ] Add independent vectors for all three cases and negative variants.
+- [x] Preserve and enforce relevant key constraints at the verification boundary.
+- [x] Implement absent-header and empty-body semantics without relaxing mandatory From coverage.
+- [x] Reuse the existing canonicalization owner where appropriate; avoid two subtly different implementations.
+- [x] Add independent vectors for all three cases and negative variants.
 - [ ] During the same focused review, cover `verifyAll()` retaining other signed DKIM fields, folded signature whitespace, optional key version tags, ambiguous DNS records and revoked keys. These additional cases are review targets, not all reproduced findings.
 
 **Acceptance:** key policy is enforced and valid independent messages interoperate. Reference: [RFC 6376](https://www.rfc-editor.org/rfc/rfc6376), sections 3.4.4, 3.5 and 3.6.1.
@@ -264,7 +264,7 @@ Each batch is reviewable independently; add a failing regression before changing
 | 1 | HTTP trust boundaries — F01-F03 | Implemented; CI verification pending |
 | 2 | HTTP transfer correctness — F04-F05 | Implemented; CI verification pending |
 | 3 | Email data integrity — F09-F11 | Implemented; extended process/CI verification pending |
-| 4 | Protocol interoperability — F06-F08 | Pending |
+| 4 | Protocol interoperability — F06-F08 | Core implementation complete; live gRPC/duplex verification pending |
 | 5 | Replay policy — F12 | Pending |
 | 6 | Measurement/docs/release | Pending |
 
