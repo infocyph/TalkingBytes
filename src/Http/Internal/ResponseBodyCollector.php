@@ -46,32 +46,6 @@ final class ResponseBodyCollector
         $this->cleanupTempFile();
     }
 
-    public function commit(): ?string
-    {
-        $error = $this->finalize();
-        if ($error !== null || $this->tempPath === null) {
-            return $error;
-        }
-
-        if ($this->targetPath === null) {
-            $this->error = 'Stream download destination was not initialized.';
-            $this->cleanupTempFile();
-
-            return $this->error;
-        }
-
-        if (!rename($this->tempPath, $this->targetPath)) {
-            $this->error = sprintf('Failed to finalize streamed download file: %s', $this->targetPath);
-            $this->cleanupTempFile();
-
-            return $this->error;
-        }
-
-        $this->tempPath = null;
-
-        return null;
-    }
-
     public function collect(string $chunk): int
     {
         if ($this->finalized) {
@@ -109,6 +83,32 @@ final class ResponseBodyCollector
         $this->body .= $chunk;
 
         return $length;
+    }
+
+    public function commit(): ?string
+    {
+        $error = $this->finalize();
+        if ($error !== null || $this->tempPath === null) {
+            return $error;
+        }
+
+        if ($this->targetPath === null) {
+            $this->error = 'Stream download destination was not initialized.';
+            $this->cleanupTempFile();
+
+            return $this->error;
+        }
+
+        if (!rename($this->tempPath, $this->targetPath)) {
+            $this->error = sprintf('Failed to finalize streamed download file: %s', $this->targetPath);
+            $this->cleanupTempFile();
+
+            return $this->error;
+        }
+
+        $this->tempPath = null;
+
+        return null;
     }
 
     public function error(): ?string
