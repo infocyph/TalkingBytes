@@ -18,6 +18,6 @@ final readonly class BearerTokenAuth implements AuthenticatorInterface
 
     public function apply(HttpRequest $request): HttpRequest
     {
-        return $request->header('Authorization', 'Bearer ' . $this->token);
+        return $request->markSensitiveHeader('Authorization')->header('Authorization', 'Bearer ' . $this->token);
     }
 }
