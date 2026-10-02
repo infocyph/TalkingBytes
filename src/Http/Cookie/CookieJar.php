@@ -125,7 +125,7 @@ final class CookieJar
                 continue;
             }
 
-            if ($this->isInsecureOverlay($cookie, $context)) {
+            if (CookieStoragePolicy::isInsecureOverlay($cookie, $context, $this->cookies)) {
                 continue;
             }
 
@@ -407,109 +407,6 @@ final class CookieJar
             && preg_match('/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/', $domain) === 1;
     }
 
-    private function domainsOverlap(Cookie $first, Cookie $second): bool
-    {
-        $firstDomain = strtolower(rtrim($first->domain, '.'));
-        $secondDomain = strtolower(rtrim($second->domain, '.'));
-
-        return $firstDomain === $secondDomain
-            || (!$first->hostOnly && str_ends_with($secondDomain, '.' . $firstDomain))
-            || (!$second->hostOnly && str_ends_with($firstDomain, '.' . $secondDomain));
-    }
-
-    /**
-     * @param array{host: string, path: string, secure: bool} $context
-     */
-    private function isInsecureOverlay(Cookie $cookie, array $context): bool
-    {
-        if ($context['secure']) {
-            return false;
-        }
-
-        foreach ($this->cookies as $existing) {
-            if (
-                $existing->secure
-                && $existing->name === $cookie->name
-                && $this->domainsOverlap($existing, $cookie)
-                && $this->pathsOverlap($existing->path, $cookie->path)
-            ) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private function pathsOverlap(string $first, string $second): bool
-    {
-        return $this->pathMatches($first, $second) || $this->pathMatches($second, $first);
-    }
-
-    private function pathMatches(string $requestPath, string $cookiePath): bool
-    {
-        if ($requestPath === $cookiePath) {
-            return true;
-        }
-        if (!str_starts_with($requestPath, $cookiePath)) {
-            return false;
-        }
-
-        return str_ends_with($cookiePath, '/') || ($requestPath[strlen($cookiePath)] ?? '') === '/';
-    }
-
-    /**
-     * @param array{
-     *   domain: string,
-     *   path: string,
-     *   expiresAt: ?DateTimeImmutable,
-     *   secure: bool,
-     *   httpOnly: bool,
-     *   hostOnly: bool,
-     *   maxAgeApplied: bool
-     * } $attributes
-     * @param list<string> $segments
-     * @param array{host: string, path: string, secure: bool} $context
-     */
-    private function prefixAndSecurePolicyAllows(
-        string $name,
-        array $attributes,
-        array $segments,
-        array $context,
-    ): bool {
-        if ($attributes['secure'] && !$context['secure']) {
-            return false;
-        }
-
-        if (str_starts_with($name, '__Secure-') && (!$context['secure'] || !$attributes['secure'])) {
-            return false;
-        }
-
-        if (!str_starts_with($name, '__Host-')) {
-            return true;
-        }
-
-        return $context['secure']
-            && $attributes['secure']
-            && $attributes['hostOnly']
-            && $attributes['path'] === '/'
-            && !$this->hasAttribute($segments, 'domain');
-    }
-
-    /**
-     * @param list<string> $segments
-     */
-    private function hasAttribute(array $segments, string $name): bool
-    {
-        foreach ($segments as $segment) {
-            $attributeName = strtolower(trim(explode('=', $segment, 2)[0]));
-            if ($attributeName === $name) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
     private function parseExpires(string $value): ?DateTimeImmutable
     {
         try {
@@ -565,12 +462,8 @@ final class CookieJar
             }
         }
 
-        if (!$this->prefixAndSecurePolicyAllows($name, $attributes, $segments, $context)) {
-            return null;
-        }
-
         try {
-            return new Cookie(
+            $cookie = new Cookie(
                 $name,
                 $value,
                 $attributes['domain'],
@@ -583,6 +476,8 @@ final class CookieJar
         } catch (InvalidArgumentException) {
             return null;
         }
+
+        return CookieStoragePolicy::accepts($cookie, $context, $segments) ? $cookie : null;
     }
 
     private function purgeExpired(): void
