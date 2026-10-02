@@ -15,6 +15,45 @@ use Throwable;
 final class SocketMailboxRuntime
 {
     /**
+     * @param resource $connection
+     */
+    private static function applyBlockingTimeout(
+        mixed $connection,
+        OperationDeadline $deadline,
+        string $protocol,
+    ): void {
+        $remainingMicros = $deadline->remainingMicroseconds();
+        if ($remainingMicros === 0) {
+            throw self::commandDeadlineExceeded($protocol);
+        }
+
+        if (!stream_set_timeout(
+            $connection,
+            intdiv($remainingMicros, 1_000_000),
+            $remainingMicros % 1_000_000,
+        )) {
+            throw new MailboxConnectionException(sprintf(
+                'Unable to bound %s socket write by the command deadline.',
+                strtoupper($protocol),
+            ));
+        }
+    }
+
+    /** @param array<string, mixed> $payload */
+    private static function dispatch(?EventDispatcher $events, string $event, array $payload): void
+    {
+        if ($events === null) {
+            return;
+        }
+
+        try {
+            $events->dispatch($event, $payload);
+        } catch (Throwable) {
+            // Observability must never affect mailbox protocol outcomes.
+        }
+    }
+
+    /**
      * @return resource
      */
     public static function connect(
@@ -82,305 +121,6 @@ final class SocketMailboxRuntime
         }
 
         return $connection;
-    }
-
-    /**
-     * @param array{host:string,port:int} $endpoint
-     */
-    public static function dispatchFinish(
-        string $protocol,
-        string $command,
-        string $status,
-        int $startedAtMs,
-        array $endpoint,
-        ?EventDispatcher $events = null,
-        ?Clock $clock = null,
-    ): void {
-        $runtimeClock = $clock ?? Clock::system();
-        self::dispatch($events, 'mailbox.command.finish', [
-            'protocol' => $protocol,
-            'host' => $endpoint['host'],
-            'port' => $endpoint['port'],
-            'command' => $command,
-            'status' => $status,
-            'duration_ms' => (int) round(($runtimeClock->monotonic() * 1000) - $startedAtMs),
-        ]);
-    }
-
-    /**
-     * @param array{host:string,port:int} $endpoint
-     * @return array{command:string,duration_ms:int}
-     */
-    public static function dispatchStart(
-        string $protocol,
-        string $command,
-        array $endpoint,
-        ?EventDispatcher $events = null,
-        ?Clock $clock = null,
-    ): array {
-        $redactedCommand = MailboxCommandRedactor::redact($protocol, $command);
-        $runtimeClock = $clock ?? Clock::system();
-        self::dispatch($events, 'mailbox.command.start', [
-            'protocol' => $protocol,
-            'host' => $endpoint['host'],
-            'port' => $endpoint['port'],
-            'command' => $redactedCommand,
-        ]);
-
-        return [
-            'command' => $redactedCommand,
-            'duration_ms' => (int) round($runtimeClock->monotonic() * 1000),
-        ];
-    }
-
-    /**
-     * @param resource $connection
-     */
-    public static function enableTls(
-        mixed $connection,
-        string $protocol,
-        ?StreamWaiter $streamWaiter = null,
-        ?OperationDeadline $deadline = null,
-    ): void {
-        if ($deadline?->expired() === true) {
-            throw new MailboxConnectionException(sprintf(
-                '%s TLS negotiation deadline exceeded.',
-                strtoupper($protocol),
-            ));
-        }
-
-        if ($deadline !== null) {
-            $remainingMicros = $deadline->remainingMicroseconds();
-            stream_set_timeout(
-                $connection,
-                intdiv($remainingMicros, 1_000_000),
-                $remainingMicros % 1_000_000,
-            );
-        }
-
-        if ($streamWaiter !== null && !stream_set_blocking($connection, true)) {
-            throw new MailboxConnectionException(sprintf(
-                'Unable to enter blocking mode for %s TLS negotiation.',
-                strtoupper($protocol),
-            ));
-        }
-
-        set_error_handler(
-            static fn(): bool => true,
-            E_WARNING,
-        );
-
-        try {
-            $enabled = stream_socket_enable_crypto($connection, true, STREAM_CRYPTO_METHOD_TLS_CLIENT);
-        } finally {
-            restore_error_handler();
-
-            if ($streamWaiter !== null && !stream_set_blocking($connection, false)) {
-                throw new MailboxConnectionException(sprintf(
-                    'Unable to restore cooperative %s socket mode after TLS negotiation.',
-                    strtoupper($protocol),
-                ));
-            }
-        }
-
-        if ($enabled !== true) {
-            throw new MailboxConnectionException(sprintf('Unable to enable TLS on %s socket.', strtoupper($protocol)));
-        }
-        if ($deadline?->expired() === true) {
-            throw new MailboxConnectionException(sprintf(
-                '%s TLS negotiation deadline exceeded.',
-                strtoupper($protocol),
-            ));
-        }
-    }
-
-    /**
-     * @param resource $connection
-     * @param positive-int $maxLength
-     */
-    public static function readLine(
-        mixed $connection,
-        string $protocol,
-        int $maxLength = 8192,
-        ?StreamWaiter $streamWaiter = null,
-        ?CancellationSignal $cancellation = null,
-        ?OperationDeadline $deadline = null,
-    ): string {
-        if ($streamWaiter === null) {
-            return self::readBlockingLine($connection, $protocol, $maxLength);
-        }
-
-        return self::readCooperativeLine(
-            $connection,
-            $protocol,
-            $maxLength,
-            $streamWaiter,
-            $cancellation,
-            $deadline,
-        );
-    }
-
-    public static function shouldStartTls(bool $required, bool $supported, string $protocol): bool
-    {
-        if ($supported) {
-            return true;
-        }
-
-        if ($required) {
-            throw new MailboxConnectionException(sprintf(
-                '%s STARTTLS is required but not supported by server.',
-                strtoupper($protocol),
-            ));
-        }
-
-        return false;
-    }
-
-    /**
-     * @param resource $connection
-     */
-    public static function write(
-        mixed $connection,
-        string $value,
-        string $protocol,
-        ?StreamWaiter $streamWaiter = null,
-        ?CancellationSignal $cancellation = null,
-        ?OperationDeadline $deadline = null,
-    ): void {
-        $remaining = $value;
-        while ($remaining !== '') {
-            self::prepareWrite($connection, $protocol, $streamWaiter, $cancellation, $deadline);
-
-            set_error_handler(
-                static fn(): bool => true,
-                E_NOTICE | E_WARNING,
-            );
-
-            try {
-                $written = fwrite($connection, $remaining);
-            } finally {
-                restore_error_handler();
-            }
-
-            self::assertWriteAllowed($protocol, $cancellation, $deadline);
-            if ($written === false) {
-                throw self::writeFailure($connection, $protocol, $deadline);
-            }
-            if ($written === 0) {
-                if ($streamWaiter !== null) {
-                    continue;
-                }
-
-                throw self::writeFailure($connection, $protocol, $deadline);
-            }
-
-            $remaining = substr($remaining, $written);
-        }
-    }
-
-    private static function assertWriteAllowed(
-        string $protocol,
-        ?CancellationSignal $cancellation,
-        ?OperationDeadline $deadline,
-    ): void {
-        if ($cancellation !== null && $cancellation->isRequested()) {
-            throw self::readinessFailure($protocol, 'write', $cancellation, $deadline);
-        }
-        if ($deadline !== null && $deadline->expired()) {
-            throw self::commandDeadlineExceeded($protocol);
-        }
-    }
-
-    private static function commandDeadlineExceeded(string $protocol): MailboxConnectionException
-    {
-        return new MailboxConnectionException(sprintf(
-            '%s command deadline exceeded.',
-            strtoupper($protocol),
-        ));
-    }
-
-    /**
-     * @param resource $connection
-     */
-    private static function prepareWrite(
-        mixed $connection,
-        string $protocol,
-        ?StreamWaiter $streamWaiter,
-        ?CancellationSignal $cancellation,
-        ?OperationDeadline $deadline,
-    ): void {
-        self::assertWriteAllowed($protocol, $cancellation, $deadline);
-
-        if ($streamWaiter !== null) {
-            if (!$streamWaiter->waitWritable($connection, $deadline)) {
-                throw self::readinessFailure($protocol, 'write', $cancellation, $deadline);
-            }
-
-            return;
-        }
-
-        if ($deadline !== null) {
-            self::applyBlockingTimeout($connection, $deadline, $protocol);
-        }
-    }
-
-    /**
-     * @param resource $connection
-     */
-    private static function writeFailure(
-        mixed $connection,
-        string $protocol,
-        ?OperationDeadline $deadline,
-    ): MailboxConnectionException {
-        /** @var array<string, mixed> $metadata */
-        $metadata = stream_get_meta_data($connection);
-        if ($deadline !== null && ($metadata['timed_out'] ?? false) === true) {
-            return self::commandDeadlineExceeded($protocol);
-        }
-
-        return new MailboxConnectionException(sprintf(
-            'Failed writing to %s socket.',
-            strtoupper($protocol),
-        ));
-    }
-
-    /**
-     * @param resource $connection
-     */
-    private static function applyBlockingTimeout(
-        mixed $connection,
-        OperationDeadline $deadline,
-        string $protocol,
-    ): void {
-        $remainingMicros = $deadline->remainingMicroseconds();
-        if ($remainingMicros === 0) {
-            throw self::commandDeadlineExceeded($protocol);
-        }
-
-        if (!stream_set_timeout(
-            $connection,
-            intdiv($remainingMicros, 1_000_000),
-            $remainingMicros % 1_000_000,
-        )) {
-            throw new MailboxConnectionException(sprintf(
-                'Unable to bound %s socket write by the command deadline.',
-                strtoupper($protocol),
-            ));
-        }
-    }
-
-    /** @param array<string, mixed> $payload */
-    private static function dispatch(?EventDispatcher $events, string $event, array $payload): void
-    {
-        if ($events === null) {
-            return;
-        }
-
-        try {
-            $events->dispatch($event, $payload);
-        } catch (Throwable) {
-            // Observability must never affect mailbox protocol outcomes.
-        }
     }
 
     /**
@@ -471,6 +211,26 @@ final class SocketMailboxRuntime
             '%s cooperative %s wait was interrupted.',
             strtoupper($protocol),
             $operation,
+        ));
+    }
+
+    /**
+     * @param resource $connection
+     */
+    private static function writeFailure(
+        mixed $connection,
+        string $protocol,
+        ?OperationDeadline $deadline,
+    ): MailboxConnectionException {
+        /** @var array<string, mixed> $metadata */
+        $metadata = stream_get_meta_data($connection);
+        if ($deadline !== null && ($metadata['timed_out'] ?? false) === true) {
+            return self::commandDeadlineExceeded($protocol);
+        }
+
+        return new MailboxConnectionException(sprintf(
+            'Failed writing to %s socket.',
+            strtoupper($protocol),
         ));
     }
 }
