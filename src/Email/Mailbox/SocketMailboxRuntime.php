@@ -278,7 +278,7 @@ final class SocketMailboxRuntime
         }
     }
 
-/**
+    /**
      * @param resource $connection
      */
     private static function applyBlockingTimeout(
@@ -303,7 +303,7 @@ final class SocketMailboxRuntime
         }
     }
 
-private static function assertWriteAllowed(
+    private static function assertWriteAllowed(
         string $protocol,
         ?CancellationSignal $cancellation,
         ?OperationDeadline $deadline,
@@ -316,7 +316,7 @@ private static function assertWriteAllowed(
         }
     }
 
-private static function commandDeadlineExceeded(string $protocol): MailboxConnectionException
+    private static function commandDeadlineExceeded(string $protocol): MailboxConnectionException
     {
         return new MailboxConnectionException(sprintf(
             '%s command deadline exceeded.',
@@ -324,7 +324,7 @@ private static function commandDeadlineExceeded(string $protocol): MailboxConnec
         ));
     }
 
-/** @param array<string, mixed> $payload */
+    /** @param array<string, mixed> $payload */
     private static function dispatch(?EventDispatcher $events, string $event, array $payload): void
     {
         if ($events === null) {
@@ -338,7 +338,7 @@ private static function commandDeadlineExceeded(string $protocol): MailboxConnec
         }
     }
 
-/**
+    /**
      * @param resource $connection
      */
     private static function prepareWrite(
@@ -363,7 +363,7 @@ private static function commandDeadlineExceeded(string $protocol): MailboxConnec
         }
     }
 
-/**
+    /**
      * @param resource $connection
      */
     private static function readBlockingLine(mixed $connection, string $protocol, int $maxLength): string
@@ -390,7 +390,7 @@ private static function commandDeadlineExceeded(string $protocol): MailboxConnec
         return $line;
     }
 
-/**
+    /**
      * @param resource $connection
      */
     private static function readCooperativeLine(
@@ -434,7 +434,7 @@ private static function commandDeadlineExceeded(string $protocol): MailboxConnec
         ));
     }
 
-private static function readinessFailure(
+    private static function readinessFailure(
         string $protocol,
         string $operation,
         ?CancellationSignal $cancellation,
@@ -454,7 +454,7 @@ private static function readinessFailure(
         ));
     }
 
-/**
+    /**
      * @param resource $connection
      */
     private static function writeFailure(
