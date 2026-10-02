@@ -609,7 +609,7 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
         int $receivedBytes,
         ?OperationDeadline $deadline,
     ): ?string {
-        $chunk = fread($connection, $remaining);
+        $chunk = fread($connection, max(1, $remaining));
         $this->assertExecutionAllowed();
         if ($deadline?->expired() === true) {
             throw new MailboxConnectionException('IMAP command deadline exceeded.');
