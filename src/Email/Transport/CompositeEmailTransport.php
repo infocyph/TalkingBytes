@@ -35,6 +35,9 @@ final readonly class CompositeEmailTransport implements EmailTransport
         if ($primaryResult->successful) {
             return $primaryResult;
         }
+        if ($this->isTerminalExecutionFailure($primaryResult)) {
+            return $this->terminalFailure($primaryResult, $attemptedTransports);
+        }
 
         foreach ($this->fallbackTransports as $transport) {
             $preflight = $this->preflightFailure($attemptedTransports);
@@ -58,6 +61,9 @@ final readonly class CompositeEmailTransport implements EmailTransport
                     $metadata,
                 );
             }
+            if ($this->isTerminalExecutionFailure($result)) {
+                return $this->terminalFailure($result, $attemptedTransports);
+            }
 
             $primaryResult = $result;
         }
@@ -70,6 +76,30 @@ final readonly class CompositeEmailTransport implements EmailTransport
             statusCode: $primaryResult->statusCode,
             response: $primaryResult->response,
             metadata: $metadata,
+        );
+    }
+
+    private function isTerminalExecutionFailure(CommunicationResult $result): bool
+    {
+        return ($result->metadata['cancelled'] ?? false) === true
+            || ($result->metadata['deadline_exceeded'] ?? false) === true;
+    }
+
+    /**
+     * @param list<class-string<EmailTransport>> $attemptedTransports
+     */
+    private function terminalFailure(
+        CommunicationResult $result,
+        array $attemptedTransports,
+    ): CommunicationResult {
+        return CommunicationResult::failure(
+            $result->error ?? 'Email operation terminated.',
+            statusCode: $result->statusCode,
+            response: $result->response,
+            metadata: [
+                ...$result->metadata,
+                'attempted_transports' => $attemptedTransports,
+            ],
         );
     }
 
