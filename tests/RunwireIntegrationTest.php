@@ -269,8 +269,7 @@ it('maps host cancellation during cooperative backoff to the normal cancellation
     $request = talkingBytesRunwireRequest($runtime);
     $attempts = 0;
 
-    $result = (new CoroutineRuntime())->runRequest(
-        $request,
+    $result = (new CoroutineRuntime())->run(
         static function (CoroutineScope $scope) use ($runtime, $request, &$attempts): CommunicationResult {
             $scope->spawn(static function () use ($request): void {
                 $request->cancel(CancellationReason::HOST_CANCELLED);
