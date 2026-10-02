@@ -87,33 +87,40 @@ and ownership evidence, not a substitute for sustained throughput evidence.
 Sustained HTTP release gate
 ---------------------------
 
-The 2.3 release workflow also runs a same-runner sustained local HTTP fan-out
-comparison. It checks out tag ``2.2`` and the candidate head separately, drives
-the same delayed local HTTP fixture with 20-way concurrency in repeated
-40-request batches, and records five trials per mode. The gate records successful
-RPM, p50/p95/p99 **batch** latency, errors, timeouts, CPU, peak memory, resource
-count and resource delta. The JSON reports are retained as the
+The 2.3 release workflow runs a same-runner sustained local HTTP fan-out
+comparison. It checks out tag ``2.2`` and the candidate head separately and
+drives the same delayed local HTTP fixture at concurrency ``5``, ``20``, and
+``50``. Each level uses a one-second warm-up followed by three measured
+five-second steady-state trials. The gate records successful RPM, p50/p95/p99
+**batch** latency, errors, timeouts, CPU, peak memory, resource count, and
+resource delta. The JSON reports are retained as the
 ``sustained-http-performance`` workflow artifact.
 
-Source-acceptance run ``37038089876`` compared 2.2 revision
-``ed7873c033498132a169b792e63f601aef98d1ca`` with 2.3 source revision
-``97308689c639befe02c337a236dc69a3ef712bd9``:
+Implementation-acceptance run ``37043405571`` compared 2.2 revision
+``ed7873c033498132a169b792e63f601aef98d1ca`` with 2.3 revision
+``cfb59a1995fb7e84e5cc5726f689b1f5021b9765``:
 
-- 2.2 unbound: ``92,180.56 RPM``
-- 2.3 unbound: ``93,299.04 RPM`` (``+1.21%`` versus 2.2)
-- 2.3 Runwire-bound: ``90,244.69 RPM`` (``-3.27%`` versus 2.3 unbound)
-- 2.3 unbound p50/p95/p99 batch latency: ``25.50 / 26.03 / 27.74 ms``
-- all three modes: zero errors and zero timeouts
-- 2.3 unbound: max CPU ``22.20%``, max memory ``8 MiB``, max resource
-  count ``8``, resource delta ``0``
-- 2.3 Runwire-bound: max CPU ``24.77%``, max memory ``10 MiB``, max
-  resource count ``8``, resource delta ``0``
+- concurrency 5: 2.2 ``27,059.92 RPM``; 2.3 unbound ``27,099.24 RPM``
+  (``+0.15%``); Runwire-bound ``26,772.98 RPM`` (``-1.20%`` versus 2.3
+  unbound)
+- concurrency 20: 2.2 ``91,990.37 RPM``; 2.3 unbound ``92,489.02 RPM``
+  (``+0.54%``); Runwire-bound ``91,636.85 RPM`` (``-0.92%`` versus 2.3
+  unbound)
+- concurrency 50: 2.2 ``179,151.79 RPM``; 2.3 unbound ``176,790.43 RPM``
+  (``-1.32%``); Runwire-bound ``177,472.56 RPM`` (``+0.39%`` versus 2.3
+  unbound)
+- all warm-up and measured windows recorded zero errors and zero timeouts
+- all three candidate levels recorded resource delta ``0`` and max resource
+  count ``8``
+- candidate unbound max CPU across the three levels was ``40.72%`` and peak
+  memory was ``8 MiB``; Runwire-bound max CPU was ``40.93%`` and peak memory
+  was ``10 MiB``
 
-The release regression threshold applies to the directly comparable 2.2
-unbound → 2.3 unbound path. The candidate improved by 1.21%, so the 2% regression
-gate passed. Runwire-bound throughput is reported separately because 2.2 has no
-equivalent Runwire mode; the ``-3.27%`` measurement is not presented as passing
-a 2% before/after Runwire threshold.
+The 2% release regression threshold is enforced independently at every
+concurrency level for the directly comparable 2.2 unbound → 2.3 unbound path.
+All three levels passed. Runwire-bound throughput is characterized separately
+because 2.2 has no equivalent Runwire mode; those measurements are not
+misrepresented as a before/after Runwire threshold.
 
 Production RPM is host-owned
 ----------------------------
