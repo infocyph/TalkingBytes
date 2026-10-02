@@ -93,7 +93,9 @@ final readonly class EmailSenderFactory
             $emailer = $emailer->withDkim(DkimConfig::fromArray($dkim));
         }
 
-        return $emailer;
+        return $cancellation === null
+            ? $emailer
+            : $emailer->withCancellation($cancellation);
     }
 
     public function usingLog(LogEmailConfig $config): Emailer
