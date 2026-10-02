@@ -132,7 +132,7 @@ final readonly class SmtpTransport implements EmailTransport
         }
     }
 
-/**
+    /**
      * @param resource $connection
      */
     private function applyReadDeadline(mixed $connection, OperationDeadline $deadline): void
@@ -353,7 +353,7 @@ final readonly class SmtpTransport implements EmailTransport
         return $connection;
     }
 
-            /**
+    /**
      * @param resource $connection
      * @param list<string> $transcript
      * @return array{0:int,1:string,2:list<string>}
