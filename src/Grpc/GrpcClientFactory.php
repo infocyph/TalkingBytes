@@ -173,6 +173,10 @@ final readonly class GrpcClientFactory
      */
     private function applyResolvedConfig(GrpcClient $client, array $config): GrpcClient
     {
+        if ($this->cancellation !== null) {
+            $client = $client->withCancellation($this->cancellation);
+        }
+
         $retry = self::section($config, 'retry');
         if (!self::bool($retry, 'enabled', false)) {
             return $client;
