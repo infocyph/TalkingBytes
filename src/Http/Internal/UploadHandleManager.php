@@ -8,6 +8,28 @@ use Infocyph\TalkingBytes\Http\HttpRequest;
 
 final class UploadHandleManager
 {
+    public static function cleanup(HttpRequest $request): void
+    {
+        $paths = $request->metadata['_multipart_temp_paths'] ?? [];
+        if (is_array($paths)) {
+            foreach ($paths as $path) {
+                if (is_string($path) && is_file($path)) {
+                    unlink($path);
+                }
+            }
+        }
+
+        $openedByConfigurator = $request->metadata['_upload_opened_by_configurator'] ?? false;
+        $ownedByRequest = $request->metadata['_upload_handle_owned'] ?? false;
+        $resource = $request->metadata['_upload_handle'] ?? null;
+
+        if (($openedByConfigurator !== true && $ownedByRequest !== true) || !is_resource($resource)) {
+            return;
+        }
+
+        fclose($resource);
+    }
+
     /**
      * @param array<string, mixed> $metadata
      * @return array<string, mixed>
@@ -51,27 +73,5 @@ final class UploadHandleManager
         }
 
         return $prepared;
-    }
-
-    public static function cleanup(HttpRequest $request): void
-    {
-        $paths = $request->metadata['_multipart_temp_paths'] ?? [];
-        if (is_array($paths)) {
-            foreach ($paths as $path) {
-                if (is_string($path) && is_file($path)) {
-                    unlink($path);
-                }
-            }
-        }
-
-        $openedByConfigurator = $request->metadata['_upload_opened_by_configurator'] ?? false;
-        $ownedByRequest = $request->metadata['_upload_handle_owned'] ?? false;
-        $resource = $request->metadata['_upload_handle'] ?? null;
-
-        if (($openedByConfigurator !== true && $ownedByRequest !== true) || !is_resource($resource)) {
-            return;
-        }
-
-        fclose($resource);
     }
 }
