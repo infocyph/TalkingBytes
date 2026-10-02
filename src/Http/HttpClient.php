@@ -522,5 +522,4 @@ final readonly class HttpClient
 
         return $request;
     }
-
 }
