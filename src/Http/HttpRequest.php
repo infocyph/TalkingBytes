@@ -383,7 +383,7 @@ final readonly class HttpRequest
             return $this;
         }
 
-        $request = $this;
+        $request = $this->prepareUploadForTransport();
         if ($request->body !== null && !$request->headers->has('Content-Type')) {
             $request = $request->header('Content-Type', $request->body->contentType());
         }
@@ -455,7 +455,12 @@ final readonly class HttpRequest
         $headers = $this->headers;
         $authenticators = $this->authenticators;
         $metadata = $this->metadata;
-        unset($metadata['_transport_prepared']);
+        unset(
+            $metadata['_transport_prepared'],
+            $metadata['_upload_handle'],
+            $metadata['_upload_handle_owned'],
+            $metadata['_upload_opened_by_configurator'],
+        );
         if (!$preserveAuthentication) {
             foreach (array_unique([
                 'Authorization',
@@ -482,7 +487,17 @@ final readonly class HttpRequest
         if ($switchToGet) {
             $method = HttpMethod::Get;
             $body = null;
-            $headers = $headers->without('Content-Type')->without('Content-Length');
+            unset(
+                $metadata['upload_file_path'],
+                $metadata['upload_stream'],
+                $metadata['upload_size'],
+                $metadata['upload_offset'],
+            );
+            $headers = $headers
+                ->without('Content-Type')
+                ->without('Content-Length')
+                ->without('Transfer-Encoding')
+                ->without('Expect');
         }
 
         return new self(
@@ -655,6 +670,53 @@ final readonly class HttpRequest
     public function withSigner(RequestSigner $signer): self
     {
         return $this->withAuthenticator(new SignedRequestAuth($signer));
+    }
+
+    private function prepareUploadForTransport(): self
+    {
+        $uploadPath = $this->metadata['upload_file_path'] ?? null;
+        $uploadStream = $this->metadata['upload_stream'] ?? null;
+        if (!is_string($uploadPath) && !is_resource($uploadStream)) {
+            return $this;
+        }
+
+        $size = $this->metadata['upload_size'] ?? null;
+        if (!is_int($size) || $size < 0) {
+            throw new InvalidArgumentException('Upload size metadata is missing or invalid.');
+        }
+
+        if (is_resource($uploadStream)) {
+            $offset = $this->metadata['upload_offset'] ?? null;
+            if (!is_int($offset) || fseek($uploadStream, $offset) !== 0) {
+                throw new InvalidArgumentException('Unable to rewind HTTP upload stream to its starting position.');
+            }
+
+            return $this->metadata([
+                ...$this->metadata,
+                '_upload_handle' => $uploadStream,
+                '_upload_handle_owned' => false,
+            ]);
+        }
+
+        $resource = fopen($uploadPath, 'rb');
+        if ($resource === false) {
+            throw new InvalidArgumentException(sprintf('Failed to open upload file: %s', $uploadPath));
+        }
+
+        $stat = fstat($resource);
+        $currentSize = is_array($stat) ? ($stat['size'] ?? null) : null;
+        if (!is_int($currentSize) || $currentSize !== $size) {
+            fclose($resource);
+
+            throw new InvalidArgumentException('HTTP upload file changed after it was selected.');
+        }
+
+        return $this->metadata([
+            ...$this->metadata,
+            '_upload_handle' => $resource,
+            '_upload_handle_owned' => true,
+            'upload_offset' => 0,
+        ]);
     }
 
     private function assertValidUrl(string $url): void
