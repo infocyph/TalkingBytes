@@ -19,7 +19,6 @@ use Infocyph\TalkingBytes\Grpc\Retry\GrpcRetryPolicy;
 use Infocyph\TalkingBytes\Grpc\Sender\GrpcRequest;
 use Infocyph\TalkingBytes\Grpc\Sender\GrpcResponse;
 use Infocyph\TalkingBytes\Integration\Runwire\RunwireBinding;
-use InvalidArgumentException;
 
 final readonly class GrpcClientFactory
 {
