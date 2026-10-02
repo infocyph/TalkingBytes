@@ -14,6 +14,7 @@ use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
 use Infocyph\TalkingBytes\Core\Support\Clock;
 use Infocyph\TalkingBytes\Core\Support\OperationDeadline;
 use Infocyph\TalkingBytes\Core\Support\Sleeper;
+use Infocyph\TalkingBytes\Core\Support\StreamWaiter;
 use Infocyph\TalkingBytes\Email\Config\ImapConfig;
 use Infocyph\TalkingBytes\Email\Config\Pop3Config;
 use Infocyph\TalkingBytes\Email\Mailbox\Mailbox;
@@ -34,6 +35,7 @@ final readonly class EmailMailboxFactory
         ?Sleeper $sleeper = null,
         private ?CancellationSignal $cancellation = null,
         private ?OperationDeadline $operationDeadline = null,
+        private ?StreamWaiter $streamWaiter = null,
     ) {
         $this->events = new BestEffortEventDispatcher($events ?? new NullEventDispatcher());
         $this->clock = $clock ?? Clock::system();
@@ -49,6 +51,7 @@ final readonly class EmailMailboxFactory
             $this->sleeper,
             $this->cancellation,
             $this->operationDeadline,
+            $this->streamWaiter,
         );
     }
 
@@ -61,6 +64,7 @@ final readonly class EmailMailboxFactory
             $this->sleeper,
             $this->cancellation,
             $this->operationDeadline,
+            $this->streamWaiter,
         );
     }
 
@@ -83,6 +87,7 @@ final readonly class EmailMailboxFactory
             $binding->sleeper($this->sleeper),
             $binding->cancellation($this->cancellation),
             $deadline,
+            $this->streamWaiter ?? $binding->streamWaiter(),
         );
     }
 }
