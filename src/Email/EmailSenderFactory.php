@@ -64,7 +64,7 @@ final readonly class EmailSenderFactory
             $fallbackTransports[] = $this->usingResolvedTransport($fallback, $cancellation)->transport();
         }
         if ($fallbackTransports !== []) {
-            $emailer = $emailer->withFallback($fallbackTransports);
+            $emailer = $emailer->withFallback($fallbackTransports, $cancellation);
         }
 
         $retry = self::section($config, 'retry');
