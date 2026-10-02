@@ -75,5 +75,4 @@ final readonly class EmailReceiverFactory
             $deadline,
         );
     }
-
 }
