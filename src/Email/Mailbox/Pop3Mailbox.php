@@ -7,6 +7,7 @@ namespace Infocyph\TalkingBytes\Email\Mailbox;
 use Infocyph\TalkingBytes\Core\Event\EventDispatcher;
 use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
 use Infocyph\TalkingBytes\Core\Support\Clock;
+use Infocyph\TalkingBytes\Core\Support\OperationDeadline;
 use Infocyph\TalkingBytes\Core\Support\Sleeper;
 use Infocyph\TalkingBytes\Email\Config\Pop3Config;
 use Infocyph\TalkingBytes\Email\Parser\EmailParser;
@@ -25,8 +26,17 @@ final readonly class Pop3Mailbox
         ?EventDispatcher $events = null,
         ?Clock $clock = null,
         ?Sleeper $sleeper = null,
+        ?CancellationSignal $cancellation = null,
+        ?OperationDeadline $operationDeadline = null,
     ): self {
-        return new self(new Pop3SocketTransport($config, $events, $clock, $sleeper));
+        return new self(new Pop3SocketTransport(
+            $config,
+            $events,
+            $clock,
+            $sleeper,
+            $cancellation,
+            $operationDeadline,
+        ));
     }
 
     public function connect(): void
