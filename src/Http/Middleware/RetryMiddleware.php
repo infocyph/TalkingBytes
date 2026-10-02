@@ -49,6 +49,7 @@ final readonly class RetryMiddleware implements HttpMiddleware
             static fn(): CommunicationResult => $next($request),
             sleeper: $this->sleeper,
             cancellation: $this->cancellation,
+            deadline: $request->operationDeadline(),
         );
     }
 
