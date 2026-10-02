@@ -22,7 +22,7 @@ final class SustainedHttpPerformance
 
     private const STEADY_STATE_SECONDS = 5.0;
 
-    private const TRIALS = 2;
+    private const TRIALS = 3;
 
     private const WARMUP_SECONDS = 1.0;
 
