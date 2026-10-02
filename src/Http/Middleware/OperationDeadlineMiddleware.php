@@ -29,12 +29,28 @@ final readonly class OperationDeadlineMiddleware implements HttpMiddleware
 
     public function handle(HttpRequest $request, Closure $next): CommunicationResult
     {
-        if ($request->operationDeadline() !== null) {
-            return $next($request);
+        $deadline = $request->operationDeadline()
+            ?? OperationDeadline::after($this->timeoutSeconds, $this->clock);
+        if ($deadline->expired()) {
+            return $this->deadlineExceeded();
         }
 
-        return $next($request->withOperationDeadline(
-            OperationDeadline::after($this->timeoutSeconds, $this->clock),
-        ));
+        $result = $next($request->withOperationDeadline($deadline));
+        if ($deadline->expired() && ($result->metadata['deadline_exceeded'] ?? false) !== true) {
+            return $this->deadlineExceeded();
+        }
+
+        return $result;
+    }
+
+    private function deadlineExceeded(): CommunicationResult
+    {
+        return CommunicationResult::failure(
+            'HTTP operation deadline exceeded.',
+            metadata: [
+                'deadline_exceeded' => true,
+                'transport' => 'http',
+            ],
+        );
     }
 }
