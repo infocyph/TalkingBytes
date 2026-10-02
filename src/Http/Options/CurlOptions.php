@@ -22,6 +22,8 @@ namespace Infocyph\TalkingBytes\Http\Options;
  *   downloadPath?: ?string,
  *   streamDownloadPath?: ?string,
  *   maxResponseBytes?: ?int,
+ *   maxResponseHeaderBytes?: ?int,
+ *   maxResponseHeaderCount?: ?int,
  *   maxDownloadBytes?: ?int,
  *   maxUploadBytes?: ?int,
  *   httpVersion?: ?int,
@@ -44,6 +46,8 @@ namespace Infocyph\TalkingBytes\Http\Options;
  *   downloadPath: ?string,
  *   streamDownloadPath: ?string,
  *   maxResponseBytes: ?int,
+ *   maxResponseHeaderBytes: ?int,
+ *   maxResponseHeaderCount: ?int,
  *   maxDownloadBytes: ?int,
  *   maxUploadBytes: ?int,
  *   httpVersion: ?int,
@@ -72,6 +76,8 @@ final readonly class CurlOptions
         public ?string $downloadPath = null,
         public ?string $streamDownloadPath = null,
         public ?int $maxResponseBytes = null,
+        public ?int $maxResponseHeaderBytes = null,
+        public ?int $maxResponseHeaderCount = null,
         public ?int $maxDownloadBytes = null,
         public ?int $maxUploadBytes = null,
         public ?int $httpVersion = null,
@@ -90,6 +96,8 @@ final readonly class CurlOptions
         }
 
         self::assertPositiveLimit($this->maxResponseBytes, 'maxResponseBytes');
+        self::assertPositiveLimit($this->maxResponseHeaderBytes, 'maxResponseHeaderBytes');
+        self::assertPositiveLimit($this->maxResponseHeaderCount, 'maxResponseHeaderCount');
         self::assertPositiveLimit($this->maxDownloadBytes, 'maxDownloadBytes');
         self::assertPositiveLimit($this->maxUploadBytes, 'maxUploadBytes');
 
@@ -149,6 +157,16 @@ final readonly class CurlOptions
     public function withMaxResponseBytes(?int $bytes): self
     {
         return $this->with(['maxResponseBytes' => $bytes]);
+    }
+
+    public function withMaxResponseHeaderBytes(?int $bytes): self
+    {
+        return $this->with(['maxResponseHeaderBytes' => $bytes]);
+    }
+
+    public function withMaxResponseHeaderCount(?int $count): self
+    {
+        return $this->with(['maxResponseHeaderCount' => $count]);
     }
 
     public function withMaxUploadBytes(?int $bytes): self
@@ -278,6 +296,8 @@ final readonly class CurlOptions
             'downloadPath' => $this->downloadPath,
             'streamDownloadPath' => $this->streamDownloadPath,
             'maxResponseBytes' => $this->maxResponseBytes,
+            'maxResponseHeaderBytes' => $this->maxResponseHeaderBytes,
+            'maxResponseHeaderCount' => $this->maxResponseHeaderCount,
             'maxDownloadBytes' => $this->maxDownloadBytes,
             'maxUploadBytes' => $this->maxUploadBytes,
             'httpVersion' => $this->httpVersion,
