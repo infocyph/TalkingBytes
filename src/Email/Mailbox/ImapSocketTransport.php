@@ -7,6 +7,7 @@ namespace Infocyph\TalkingBytes\Email\Mailbox;
 use Infocyph\TalkingBytes\Core\Event\BestEffortEventDispatcher;
 use Infocyph\TalkingBytes\Core\Event\EventDispatcher;
 use Infocyph\TalkingBytes\Core\Event\NullEventDispatcher;
+use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
 use Infocyph\TalkingBytes\Core\Support\Clock;
 use Infocyph\TalkingBytes\Core\Support\OperationDeadline;
 use Infocyph\TalkingBytes\Core\Support\Sleeper;
@@ -44,6 +45,8 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
         ?EventDispatcher $events = null,
         ?Clock $clock = null,
         ?Sleeper $sleeper = null,
+        private readonly ?CancellationSignal $cancellation = null,
+        private readonly ?OperationDeadline $operationDeadline = null,
     ) {
         $this->events = new BestEffortEventDispatcher($events ?? new NullEventDispatcher());
         $this->clock = $clock ?? Clock::system();
@@ -76,6 +79,8 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
 
     public function connect(): void
     {
+        $this->assertExecutionAllowed();
+
         if (is_resource($this->connection)) {
             return;
         }
@@ -350,8 +355,10 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
      */
     public function watch(string $folder, callable $onEvent, int $timeoutSeconds = 30, ?callable $shouldStop = null): void
     {
+        $this->assertExecutionAllowed();
         $this->selectFolder($folder);
-        $stop = $shouldStop ?? static fn(): bool => false;
+        $callerStop = $shouldStop ?? static fn(): bool => false;
+        $stop = fn(): bool => $callerStop() || $this->executionStopRequested();
 
         if (!$this->hasCapability('IDLE')) {
             $this->watchWithNoopFallback($onEvent, $timeoutSeconds, $stop);
@@ -360,6 +367,17 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
         }
 
         $this->watchWithIdle($onEvent, $timeoutSeconds, $stop);
+    }
+
+    private function assertExecutionAllowed(): void
+    {
+        if ($this->cancellation?->isRequested() === true) {
+            throw new MailboxConnectionException('IMAP operation cancelled.');
+        }
+
+        if ($this->operationDeadline?->expired() === true) {
+            throw new MailboxConnectionException('IMAP operation deadline exceeded.');
+        }
     }
 
     /**
@@ -395,6 +413,20 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
         $this->connection = null;
         $this->capabilities = [];
         $this->selectedFolder = null;
+    }
+
+    private function commandDeadline(): OperationDeadline
+    {
+        $deadline = OperationDeadline::after((float) $this->config->timeoutSeconds, $this->clock);
+
+        return $this->operationDeadline?->earliest($deadline) ?? $deadline;
+    }
+
+    /** @phpstan-impure */
+    private function executionStopRequested(): bool
+    {
+        return $this->cancellation?->isRequested() === true
+            || $this->operationDeadline?->expired() === true;
     }
 
     private function expectOk(ImapResponse $response, string $stage): ImapResponse
@@ -485,12 +517,15 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
         $connection = $this->requireConnection();
 
         while (strlen($buffer) < $bytes) {
+            $this->assertExecutionAllowed();
+
             if ($deadline !== null) {
                 $this->applyReadDeadline($connection, $deadline);
             }
 
             $remaining = max(1, $bytes - strlen($buffer));
             $chunk = fread($connection, $remaining);
+            $this->assertExecutionAllowed();
             if ($deadline?->expired() === true) {
                 throw new MailboxConnectionException('IMAP command deadline exceeded.');
             }
@@ -521,9 +556,11 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
 
     private function readLineUntil(OperationDeadline $deadline): string
     {
+        $this->assertExecutionAllowed();
         $connection = $this->requireConnection();
         $this->applyReadDeadline($connection, $deadline);
         $line = SocketMailboxRuntime::readLine($connection, 'imap');
+        $this->assertExecutionAllowed();
         if ($deadline->expired()) {
             throw new MailboxConnectionException('IMAP command deadline exceeded.');
         }
@@ -537,7 +574,7 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
         $literals = [];
         $status = 'NO';
         $totalBytes = 0;
-        $deadline = OperationDeadline::after((float) $this->config->timeoutSeconds, $this->clock);
+        $deadline = $this->commandDeadline();
 
         try {
             while (true) {
@@ -605,6 +642,7 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
 
     private function runCommand(string $command): ImapResponse
     {
+        $this->assertExecutionAllowed();
         $this->requireConnection();
         $start = SocketMailboxRuntime::dispatchStart('imap', $command, [
             'host' => $this->config->host,
@@ -711,6 +749,12 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
             if (str_starts_with($line, '* ')) {
                 $onEvent($line);
             }
+        }
+
+        if ($this->executionStopRequested()) {
+            $this->closeConnection();
+
+            return;
         }
 
         $this->write("DONE\r\n");
