@@ -146,6 +146,7 @@ final readonly class EmailSenderFactory
                 $this->clock,
                 $cancellation,
                 $this->sleeper,
+                $this->operationDeadline,
             ),
             $cancellation,
         );
