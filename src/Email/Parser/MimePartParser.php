@@ -125,7 +125,6 @@ final readonly class MimePartParser
     }
 
     /** @return array{0:string,1:list<ParsedEmailPart>} */
-
     private function parseBody(
         string $body,
         string $contentType,
