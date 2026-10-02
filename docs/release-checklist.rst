@@ -17,6 +17,10 @@ Pre-release gates
   version describe the same supported documentation toolchain
 - verify the supported PHP and dependency-version matrix is green in CI
 - verify the Mailpit integration job is green
+- verify the Runwire-absent production install and Runwire-present direct/transitive
+  integration gates are green
+- verify the reusable PHPForge workflow and Mailpit service use reviewed pinned
+  revisions/digests rather than moving branch/image tags
 - verify the optional-capability coldness job is green with unloadable gRPC,
   IMAP, and POSIX extensions disabled
 - verify PCNTL has no runtime references and Sodium remains confined to the
@@ -63,6 +67,9 @@ Versioning
 - update changelog or release notes
 - review the public API snapshot before accepting any breaking change
 - compare native component benchmarks with the accepted baseline
+- compare unbound, Runwire-bound, and bound-resolved construction benchmarks;
+  treat repository component/fairness evidence separately from host-owned
+  production RPM and latency measurements
 - record PHP version, extension set, OPcache state, operating system, hardware,
   peak memory where meaningful, and benchmark class/methods used
 - freeze the exact release head before the final supported matrix
