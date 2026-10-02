@@ -103,14 +103,12 @@ if (is_string($summaryPath) && $summaryPath !== '') {
 }
 
 if ($errors > 0 || $timeouts > 0) {
-    fwrite(STDERR, "Sustained HTTP performance run contained failures or timeouts.\n");
-    exit(1);
+    throw new RuntimeException('Sustained HTTP performance run contained failures or timeouts.');
 }
 if ($regressionPercent > $maxRegression) {
-    fwrite(STDERR, sprintf(
-        "Sustained HTTP RPM regression %.2f%% exceeds %.2f%% limit.\n",
+    throw new RuntimeException(sprintf(
+        'Sustained HTTP RPM regression %.2f%% exceeds %.2f%% limit.',
         $regressionPercent,
         $maxRegression,
     ));
-    exit(1);
 }
