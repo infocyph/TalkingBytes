@@ -79,6 +79,15 @@ final readonly class SignedRequestAuth implements AuthenticatorInterface
 
     private function payloadHash(HttpRequest $request): string
     {
+        $upload = $request->metadata['_upload_handle'] ?? null;
+        if (is_resource($upload)) {
+            return $this->uploadHash($request, $upload);
+        }
+
+        if (isset($request->metadata['upload_file_path']) || isset($request->metadata['upload_stream'])) {
+            throw new InvalidArgumentException('HTTP upload must be prepared before request signing.');
+        }
+
         if ($request->body === null) {
             return hash('sha256', '');
         }
@@ -95,5 +104,43 @@ final readonly class SignedRequestAuth implements AuthenticatorInterface
         }
 
         return 'UNSIGNED-PAYLOAD';
+    }
+
+    /**
+     * @param resource $upload
+     */
+    private function uploadHash(HttpRequest $request, mixed $upload): string
+    {
+        $size = $request->metadata['upload_size'] ?? null;
+        $offset = $request->metadata['upload_offset'] ?? null;
+        if (!is_int($size) || $size < 0 || !is_int($offset) || $offset < 0) {
+            throw new InvalidArgumentException('Prepared HTTP upload metadata is invalid.');
+        }
+
+        $originalOffset = ftell($upload);
+        if (!is_int($originalOffset) || fseek($upload, $offset) !== 0) {
+            throw new InvalidArgumentException('Unable to position HTTP upload stream for signing.');
+        }
+
+        $context = hash_init('sha256');
+        $remaining = $size;
+
+        try {
+            while ($remaining > 0) {
+                $chunk = fread($upload, min(8192, $remaining));
+                if ($chunk === false || $chunk === '') {
+                    throw new InvalidArgumentException('HTTP upload ended before the declared upload size.');
+                }
+
+                hash_update($context, $chunk);
+                $remaining -= strlen($chunk);
+            }
+        } finally {
+            if (fseek($upload, $originalOffset) !== 0) {
+                throw new InvalidArgumentException('Unable to restore HTTP upload stream after signing.');
+            }
+        }
+
+        return hash_final($context);
     }
 }
