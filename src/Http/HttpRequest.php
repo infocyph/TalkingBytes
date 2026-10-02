@@ -680,49 +680,38 @@ final readonly class HttpRequest
         return $this->withAuthenticator(new SignedRequestAuth($signer));
     }
 
-    private function releasePreparedUploadHandle(): void
+    private function assertValidUrl(string $url): void
     {
-        $resource = $this->metadata['_upload_handle'] ?? null;
-        if (($this->metadata['_upload_handle_owned'] ?? false) === true && is_resource($resource)) {
-            fclose($resource);
-        }
-    }
+        $trimmed = trim($url);
 
-    private function prepareUploadForTransport(): self
-    {
-        $uploadPath = $this->metadata['upload_file_path'] ?? null;
-        $uploadStream = $this->metadata['upload_stream'] ?? null;
-        if (
-            (!is_string($uploadPath) && !is_resource($uploadStream))
-            || !$this->hasSignedAuthenticator()
-        ) {
-            return $this;
+        if ($trimmed === '') {
+            throw new InvalidArgumentException('HTTP URL must not be empty.');
         }
 
-        $size = $this->metadata['upload_size'] ?? null;
-        if (!is_int($size) || $size < 0) {
-            throw new InvalidArgumentException('Upload size metadata is missing or invalid.');
+        if ($trimmed !== $url) {
+            throw new InvalidArgumentException('HTTP URL must not contain surrounding whitespace.');
         }
 
-        $snapshot = tmpfile();
-        if ($snapshot === false) {
-            throw new InvalidArgumentException('Unable to create a temporary HTTP upload snapshot.');
+        if (preg_match('/[\x00-\x1F\x7F]/', $trimmed) === 1) {
+            throw new InvalidArgumentException('HTTP URL contains control characters.');
         }
 
-        try {
-            $this->copyUploadToSnapshot($snapshot, $uploadPath, $uploadStream, $size);
-            rewind($snapshot);
+        if (filter_var($trimmed, FILTER_VALIDATE_URL) === false) {
+            throw new InvalidArgumentException(sprintf('Invalid HTTP URL: %s', $url));
+        }
 
-            return $this->metadata([
-                ...$this->metadata,
-                '_upload_handle' => $snapshot,
-                '_upload_handle_owned' => true,
-                'upload_offset' => 0,
-            ]);
-        } catch (Throwable $throwable) {
-            fclose($snapshot);
+        $scheme = parse_url($trimmed, PHP_URL_SCHEME);
+        if (!is_string($scheme) || !in_array(strtolower($scheme), ['http', 'https'], true)) {
+            throw new InvalidArgumentException('HTTP URL scheme must be http or https.');
+        }
 
-            throw $throwable;
+        $host = parse_url($trimmed, PHP_URL_HOST);
+        if (!is_string($host) || $host === '') {
+            throw new InvalidArgumentException('HTTP URL host is required.');
+        }
+
+        if (parse_url($trimmed, PHP_URL_USER) !== null || parse_url($trimmed, PHP_URL_PASS) !== null) {
+            throw new InvalidArgumentException('HTTP URL userinfo is not allowed; use an authentication API.');
         }
     }
 
@@ -796,41 +785,6 @@ final readonly class HttpRequest
         );
     }
 
-    private function assertValidUrl(string $url): void
-    {
-        $trimmed = trim($url);
-
-        if ($trimmed === '') {
-            throw new InvalidArgumentException('HTTP URL must not be empty.');
-        }
-
-        if ($trimmed !== $url) {
-            throw new InvalidArgumentException('HTTP URL must not contain surrounding whitespace.');
-        }
-
-        if (preg_match('/[\x00-\x1F\x7F]/', $trimmed) === 1) {
-            throw new InvalidArgumentException('HTTP URL contains control characters.');
-        }
-
-        if (filter_var($trimmed, FILTER_VALIDATE_URL) === false) {
-            throw new InvalidArgumentException(sprintf('Invalid HTTP URL: %s', $url));
-        }
-
-        $scheme = parse_url($trimmed, PHP_URL_SCHEME);
-        if (!is_string($scheme) || !in_array(strtolower($scheme), ['http', 'https'], true)) {
-            throw new InvalidArgumentException('HTTP URL scheme must be http or https.');
-        }
-
-        $host = parse_url($trimmed, PHP_URL_HOST);
-        if (!is_string($host) || $host === '') {
-            throw new InvalidArgumentException('HTTP URL host is required.');
-        }
-
-        if (parse_url($trimmed, PHP_URL_USER) !== null || parse_url($trimmed, PHP_URL_PASS) !== null) {
-            throw new InvalidArgumentException('HTTP URL userinfo is not allowed; use an authentication API.');
-        }
-    }
-
     /**
      * @param string|array<int, mixed> $value
      * @return string|list<string>
@@ -877,6 +831,52 @@ final readonly class HttpRequest
         }
 
         return $normalized;
+    }
+
+    private function prepareUploadForTransport(): self
+    {
+        $uploadPath = $this->metadata['upload_file_path'] ?? null;
+        $uploadStream = $this->metadata['upload_stream'] ?? null;
+        if (
+            (!is_string($uploadPath) && !is_resource($uploadStream))
+            || !$this->hasSignedAuthenticator()
+        ) {
+            return $this;
+        }
+
+        $size = $this->metadata['upload_size'] ?? null;
+        if (!is_int($size) || $size < 0) {
+            throw new InvalidArgumentException('Upload size metadata is missing or invalid.');
+        }
+
+        $snapshot = tmpfile();
+        if ($snapshot === false) {
+            throw new InvalidArgumentException('Unable to create a temporary HTTP upload snapshot.');
+        }
+
+        try {
+            $this->copyUploadToSnapshot($snapshot, $uploadPath, $uploadStream, $size);
+            rewind($snapshot);
+
+            return $this->metadata([
+                ...$this->metadata,
+                '_upload_handle' => $snapshot,
+                '_upload_handle_owned' => true,
+                'upload_offset' => 0,
+            ]);
+        } catch (Throwable $throwable) {
+            fclose($snapshot);
+
+            throw $throwable;
+        }
+    }
+
+    private function releasePreparedUploadHandle(): void
+    {
+        $resource = $this->metadata['_upload_handle'] ?? null;
+        if (($this->metadata['_upload_handle_owned'] ?? false) === true && is_resource($resource)) {
+            fclose($resource);
+        }
     }
 
     /**
