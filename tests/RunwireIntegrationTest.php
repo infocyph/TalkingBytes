@@ -25,6 +25,7 @@ use Infocyph\TalkingBytes\Grpc\GrpcStatus;
 use Infocyph\TalkingBytes\Grpc\Sender\GrpcRequest;
 use Infocyph\TalkingBytes\Grpc\Sender\GrpcResponse;
 use Infocyph\TalkingBytes\Http\Contract\HttpTransport;
+use Infocyph\TalkingBytes\Http\HttpClient;
 use Infocyph\TalkingBytes\Http\HttpClientFactory;
 use Infocyph\TalkingBytes\Http\HttpRequest;
 use Infocyph\TalkingBytes\Http\HttpResponse;
@@ -142,6 +143,40 @@ it('supports repeated intermediary Runwire binding without taking host lifecycle
         ->and($request->completed())->toBeFalse();
 
     $request->complete();
+});
+
+it('rejects rebinding a bound graph to a different Runwire request context', function (): void {
+    $runtime = talkingBytesRunwireContext();
+    $requestA = talkingBytesRunwireRequest($runtime);
+    $requestB = talkingBytesRunwireRequest($runtime);
+
+    expect(fn() => (new HttpClientFactory())
+        ->withRunwire($runtime, $requestA)
+        ->withRunwire($runtime, $requestB))
+        ->toThrow(LogicException::class, 'cannot be rebound')
+        ->and(fn() => (new EmailSenderFactory())
+            ->withRunwire($runtime, $requestA)
+            ->withRunwire($runtime, $requestB))
+        ->toThrow(LogicException::class, 'cannot be rebound')
+        ->and(fn() => (new EmailMailboxFactory())
+            ->withRunwire($runtime, $requestA)
+            ->withRunwire($runtime, $requestB))
+        ->toThrow(LogicException::class, 'cannot be rebound')
+        ->and(fn() => (new EmailReceiverFactory())
+            ->withRunwire($runtime, $requestA)
+            ->withRunwire($runtime, $requestB))
+        ->toThrow(LogicException::class, 'cannot be rebound')
+        ->and(fn() => (new GrpcClientFactory())
+            ->withRunwire($runtime, $requestA)
+            ->withRunwire($runtime, $requestB))
+        ->toThrow(LogicException::class, 'cannot be rebound')
+        ->and(fn() => HttpClient::multi()
+            ->withRunwire($runtime, $requestA)
+            ->withRunwire($runtime, $requestB))
+        ->toThrow(LogicException::class, 'cannot be rebound');
+
+    $requestA->complete();
+    $requestB->complete();
 });
 
 it('keeps sequential Runwire request bindings isolated when reusing an unbound factory', function (): void {
