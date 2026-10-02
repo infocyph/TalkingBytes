@@ -20,6 +20,7 @@ use Infocyph\TalkingBytes\Http\Signing\RequestSigner;
 use Infocyph\TalkingBytes\Http\Support\HeaderBag;
 use Infocyph\TalkingBytes\Http\Support\QueryParams;
 use InvalidArgumentException;
+use Throwable;
 
 final readonly class HttpRequest
 {
@@ -384,11 +385,18 @@ final readonly class HttpRequest
         }
 
         $request = $this->prepareUploadForTransport();
-        if ($request->body !== null && !$request->headers->has('Content-Type')) {
-            $request = $request->header('Content-Type', $request->body->contentType());
-        }
 
-        $request = $request->applyAuthenticators();
+        try {
+            if ($request->body !== null && !$request->headers->has('Content-Type')) {
+                $request = $request->header('Content-Type', $request->body->contentType());
+            }
+
+            $request = $request->applyAuthenticators();
+        } catch (Throwable $throwable) {
+            $request->releasePreparedUploadHandle();
+
+            throw $throwable;
+        }
 
         return $request->metadata([...$request->metadata, '_transport_prepared' => true]);
     }
@@ -670,6 +678,14 @@ final readonly class HttpRequest
     public function withSigner(RequestSigner $signer): self
     {
         return $this->withAuthenticator(new SignedRequestAuth($signer));
+    }
+
+    private function releasePreparedUploadHandle(): void
+    {
+        $resource = $this->metadata['_upload_handle'] ?? null;
+        if (($this->metadata['_upload_handle_owned'] ?? false) === true && is_resource($resource)) {
+            fclose($resource);
+        }
     }
 
     private function prepareUploadForTransport(): self
