@@ -39,7 +39,6 @@ final class SendmailProcess
         private array $pipes,
         private readonly OperationDeadline $deadline,
         private readonly int $timeoutSeconds,
-        private readonly Clock $clock,
         private readonly Sleeper $sleeper,
         private readonly ?CancellationSignal $cancellation,
         private readonly ?int $processGroupId,
@@ -100,7 +99,6 @@ final class SendmailProcess
             $pipes,
             $deadline,
             $timeoutSeconds,
-            $runtimeClock,
             $runtimeSleeper,
             $cancellation,
             self::tryCreateProcessGroup($process),
@@ -264,7 +262,7 @@ final class SendmailProcess
             $this->terminate();
 
             throw new RuntimeException(sprintf(
-                'Sendmail process timed out after %d seconds.',
+                'Sendmail process timed out or operation deadline exceeded (configured timeout: %d seconds).',
                 $this->timeoutSeconds,
             ));
         }
