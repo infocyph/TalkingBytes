@@ -6,6 +6,7 @@ namespace Infocyph\TalkingBytes\Email\Transport;
 
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
 use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
+use Infocyph\TalkingBytes\Core\Support\OperationDeadline;
 use Infocyph\TalkingBytes\Email\EmailMessage;
 
 final readonly class FallbackEmailTransport implements EmailTransport
@@ -19,8 +20,14 @@ final readonly class FallbackEmailTransport implements EmailTransport
         EmailTransport $primaryTransport,
         array $fallbackTransports = [],
         ?CancellationSignal $cancellation = null,
+        ?OperationDeadline $deadline = null,
     ) {
-        $this->composite = new CompositeEmailTransport($primaryTransport, $fallbackTransports, $cancellation);
+        $this->composite = new CompositeEmailTransport(
+            $primaryTransport,
+            $fallbackTransports,
+            $cancellation,
+            $deadline,
+        );
     }
 
     public function send(EmailMessage $message): CommunicationResult
