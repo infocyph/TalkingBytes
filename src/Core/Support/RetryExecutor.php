@@ -25,11 +25,9 @@ final class RetryExecutor
         $count = 1;
 
         while (true) {
-            if ($cancellation?->isRequested() === true) {
-                return self::cancelled($count - 1);
-            }
-            if ($deadline?->expired() === true) {
-                return self::deadlineExceeded($count - 1);
+            $failure = self::preflightFailure($cancellation, $deadline, $count - 1);
+            if ($failure !== null) {
+                return $failure;
             }
 
             try {
@@ -40,16 +38,17 @@ final class RetryExecutor
                     throw $throwable;
                 }
 
-                $wait = self::boundedWaitMs($decision->delayMs, $deadline);
-                if ($wait === null) {
-                    return self::deadlineExceeded($count);
+                $failure = self::retryWaitFailure(
+                    $sleeper,
+                    $decision->delayMs,
+                    $cancellation,
+                    $deadline,
+                    $count,
+                );
+                if ($failure !== null) {
+                    return $failure;
                 }
-                if (!self::wait($sleeper, $wait['delay_ms'], $cancellation)) {
-                    return self::cancelled($count);
-                }
-                if ($wait['deadline_limited'] || $deadline?->expired() === true) {
-                    return self::deadlineExceeded($count);
-                }
+
                 $count++;
 
                 continue;
@@ -60,16 +59,17 @@ final class RetryExecutor
                 return $result;
             }
 
-            $wait = self::boundedWaitMs($decision->delayMs, $deadline);
-            if ($wait === null) {
-                return self::deadlineExceeded($count);
+            $failure = self::retryWaitFailure(
+                $sleeper,
+                $decision->delayMs,
+                $cancellation,
+                $deadline,
+                $count,
+            );
+            if ($failure !== null) {
+                return $failure;
             }
-            if (!self::wait($sleeper, $wait['delay_ms'], $cancellation)) {
-                return self::cancelled($count);
-            }
-            if ($wait['deadline_limited'] || $deadline?->expired() === true) {
-                return self::deadlineExceeded($count);
-            }
+
             $count++;
         }
     }
@@ -111,6 +111,45 @@ final class RetryExecutor
                 'attempts' => max(0, $attempts),
             ],
         );
+    }
+
+    private static function preflightFailure(
+        ?CancellationSignal $cancellation,
+        ?OperationDeadline $deadline,
+        int $attempts,
+    ): ?CommunicationResult {
+        if ($cancellation?->isRequested() === true) {
+            return self::cancelled($attempts);
+        }
+
+        if ($deadline?->expired() === true) {
+            return self::deadlineExceeded($attempts);
+        }
+
+        return null;
+    }
+
+    private static function retryWaitFailure(
+        Sleeper $sleeper,
+        int $delayMs,
+        ?CancellationSignal $cancellation,
+        ?OperationDeadline $deadline,
+        int $attempts,
+    ): ?CommunicationResult {
+        $wait = self::boundedWaitMs($delayMs, $deadline);
+        if ($wait === null) {
+            return self::deadlineExceeded($attempts);
+        }
+
+        if (!self::wait($sleeper, $wait['delay_ms'], $cancellation)) {
+            return self::cancelled($attempts);
+        }
+
+        if ($wait['deadline_limited'] || $deadline?->expired() === true) {
+            return self::deadlineExceeded($attempts);
+        }
+
+        return null;
     }
 
     private static function wait(
