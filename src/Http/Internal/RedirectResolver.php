@@ -64,11 +64,15 @@ final class RedirectResolver
     }
 
     /**
-     * @param array{scheme:string, authority:string, path:string, query?:string, fragment?:string} $target
+     * @param array{scheme:string, authority?:string, path:string, query?:string, fragment?:string} $target
      */
     private static function buildUrl(array $target): string
     {
-        $url = $target['scheme'] . '://' . $target['authority'] . $target['path'];
+        $url = $target['scheme'] . ':';
+        if (array_key_exists('authority', $target)) {
+            $url .= '//' . $target['authority'];
+        }
+        $url .= $target['path'];
         if (array_key_exists('query', $target)) {
             $url .= '?' . $target['query'];
         }
@@ -167,16 +171,18 @@ final class RedirectResolver
     /**
      * @param array<string, int|string> $base
      * @param array<string, int|string> $reference
-     * @return array{scheme:string, authority:string, path:string, query?:string, fragment?:string}
+     * @return array{scheme:string, authority?:string, path:string, query?:string, fragment?:string}
      */
     private static function resolveComponents(array $base, array $reference): array
     {
         if (isset($reference['scheme'])) {
             $target = [
                 'scheme' => (string) $reference['scheme'],
-                'authority' => self::authority($reference),
                 'path' => self::removeDotSegments((string) ($reference['path'] ?? '')),
             ];
+            if (isset($reference['host'])) {
+                $target['authority'] = self::authority($reference);
+            }
             if (array_key_exists('query', $reference)) {
                 $target['query'] = (string) $reference['query'];
             }
@@ -238,9 +244,9 @@ final class RedirectResolver
     }
 
     /**
-     * @param array{scheme:string, authority:string, path:string, query?:string, fragment?:string} $target
+     * @param array{scheme:string, authority?:string, path:string, query?:string, fragment?:string} $target
      * @param array<string, int|string> $reference
-     * @return array{scheme:string, authority:string, path:string, query?:string, fragment?:string}
+     * @return array{scheme:string, authority?:string, path:string, query?:string, fragment?:string}
      */
     private static function withFragment(array $target, array $reference): array
     {
