@@ -7,22 +7,20 @@ $delayMicroseconds = (int) ($argv[2] ?? 0);
 $readyPath = $argv[3] ?? '';
 
 if ($expectedRequests < 1 || $delayMicroseconds < 0 || $readyPath === '') {
-    fwrite(STDERR, "Invalid sustained HTTP server arguments.\n");
-    exit(2);
+    throw new InvalidArgumentException('Invalid sustained HTTP server arguments.');
 }
 
 $server = stream_socket_server('tcp://127.0.0.1:0', $errno, $errstr);
 if ($server === false) {
-    fwrite(STDERR, sprintf("Unable to bind sustained HTTP server: %s (%d)\n", $errstr, $errno));
-    exit(3);
+    throw new RuntimeException(sprintf('Unable to bind sustained HTTP server: %s (%d)', $errstr, $errno));
 }
 
 stream_set_blocking($server, false);
 $address = stream_socket_get_name($server, false);
 if (!is_string($address) || !str_contains($address, ':')) {
     fclose($server);
-    fwrite(STDERR, "Unable to resolve sustained HTTP server address.\n");
-    exit(4);
+
+    throw new RuntimeException('Unable to resolve sustained HTTP server address.');
 }
 
 $port = (int) substr(strrchr($address, ':'), 1);
@@ -43,11 +41,11 @@ while ($completed < $expectedRequests && microtime(true) < $deadline) {
 
     $write = [];
     $except = [];
-    @stream_select($read, $write, $except, 0, 5_000);
+    stream_select($read, $write, $except, 0, 5_000);
 
     foreach ($read as $stream) {
         if ($stream === $server) {
-            while (($client = @stream_socket_accept($server, 0)) !== false) {
+            while (($client = stream_socket_accept($server, 0)) !== false) {
                 stream_set_blocking($client, false);
                 $clients[(int) $client] = [
                     'stream' => $client,
@@ -64,7 +62,7 @@ while ($completed < $expectedRequests && microtime(true) < $deadline) {
             continue;
         }
 
-        $chunk = @fread($stream, 8192);
+        $chunk = fread($stream, 8192);
         if (!is_string($chunk) || $chunk === '') {
             continue;
         }
@@ -88,7 +86,7 @@ while ($completed < $expectedRequests && microtime(true) < $deadline) {
             . "Connection: close\r\n\r\n"
             . $body;
 
-        @fwrite($client['stream'], $response);
+        fwrite($client['stream'], $response);
         fclose($client['stream']);
         unset($clients[$id]);
         $completed++;
@@ -100,4 +98,10 @@ foreach ($clients as $client) {
 }
 fclose($server);
 
-exit($completed === $expectedRequests ? 0 : 5);
+if ($completed !== $expectedRequests) {
+    throw new RuntimeException(sprintf(
+        'Sustained HTTP server completed %d of %d expected requests.',
+        $completed,
+        $expectedRequests,
+    ));
+}
