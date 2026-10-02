@@ -850,7 +850,6 @@ final readonly class HttpRequest
         $rawUploadPath = $this->metadata['upload_file_path'] ?? null;
         $rawUploadStream = $this->metadata['upload_stream'] ?? null;
         $uploadPath = is_string($rawUploadPath) ? $rawUploadPath : null;
-        /** @var resource|null $uploadStream */
         $uploadStream = is_resource($rawUploadStream) ? $rawUploadStream : null;
         if (($uploadPath === null && $uploadStream === null) || !$this->hasSignedAuthenticator()) {
             return $this;
