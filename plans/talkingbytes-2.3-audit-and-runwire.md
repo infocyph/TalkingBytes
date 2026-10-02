@@ -231,8 +231,8 @@ Do not automatically fan out stateful mailbox commands over one connection, shar
 | Batch | Scope | Status | PR QA evidence |
 | --- | --- | --- | --- |
 | 1 | F1 upload redirect leakage + F2 exact-byte signed uploads | ✅ Complete | PR #16 run 36958385505: PHP 8.4/8.5 stable+lowest QA, analysis, benchmarks, clean install, Mailpit, native gRPC, docs and optional-capability coldness passed. |
-| 2 | F3 MIME child-header limits + F6 RFC redirect/IPv6 correctness + cookie/resource hardening | ✅ Complete | PR #16 run 36959906575: PHP 8.4/8.5 stable+lowest QA, analysis, benchmarks, clean install, Mailpit, native gRPC, docs and optional-capability coldness passed. |
-| 3 | F4 cancellation + F5 total deadlines + F7 collaborator propagation | 🔄 Active | Pending |
+| 2 | F3 MIME child-header limits + F6 RFC redirect/IPv6 correctness + cookie/resource hardening | 🧪 QA repair | Implementation passed PR #16 run 36959906575; exact tracker head later exposed a PHP 8.5 prefer-lowest fixture-startup flake in run 36960036677. Revalidation pending after bounded fixture hardening. |
+| 3 | F4 cancellation + F5 total deadlines + F7 collaborator propagation | ⏳ Pending | Starts only after Batch 2 exact-head PR QA is green. |
 | 4 | Optional Runwire 2.1 binding and lifecycle propagation | ⏳ Pending | Pending |
 | 5 | Supported cooperative HTTP/socket/process I/O and lifecycle matrix | ⏳ Pending | Pending |
 | 6 | Duplicate/architecture/reproducibility/docs/performance/final release gates | ⏳ Pending | Pending |
