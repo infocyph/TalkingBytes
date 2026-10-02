@@ -249,8 +249,15 @@ final class SocketMailboxRuntime
     ): void {
         $remaining = $value;
         while ($remaining !== '') {
-            if ($streamWaiter !== null && !$streamWaiter->waitWritable($connection, $deadline)) {
+            if ($cancellation?->isRequested() === true || $deadline?->expired() === true) {
                 throw self::readinessFailure($protocol, 'write', $cancellation, $deadline);
+            }
+            if ($streamWaiter !== null) {
+                if (!$streamWaiter->waitWritable($connection, $deadline)) {
+                    throw self::readinessFailure($protocol, 'write', $cancellation, $deadline);
+                }
+            } elseif ($deadline !== null) {
+                self::applyBlockingTimeout($connection, $deadline, $protocol);
             }
 
             set_error_handler(
@@ -264,6 +271,9 @@ final class SocketMailboxRuntime
                 restore_error_handler();
             }
 
+            if ($cancellation?->isRequested() === true || $deadline?->expired() === true) {
+                throw self::readinessFailure($protocol, 'write', $cancellation, $deadline);
+            }
             if ($written === false) {
                 throw new MailboxConnectionException(sprintf('Failed writing to %s socket.', strtoupper($protocol)));
             }
@@ -276,6 +286,34 @@ final class SocketMailboxRuntime
             }
 
             $remaining = substr($remaining, $written);
+        }
+    }
+
+    /**
+     * @param resource $connection
+     */
+    private static function applyBlockingTimeout(
+        mixed $connection,
+        OperationDeadline $deadline,
+        string $protocol,
+    ): void {
+        $remainingMicros = $deadline->remainingMicroseconds();
+        if ($remainingMicros === 0) {
+            throw new MailboxConnectionException(sprintf(
+                '%s command deadline exceeded.',
+                strtoupper($protocol),
+            ));
+        }
+
+        if (!stream_set_timeout(
+            $connection,
+            intdiv($remainingMicros, 1_000_000),
+            $remainingMicros % 1_000_000,
+        )) {
+            throw new MailboxConnectionException(sprintf(
+                'Unable to bound %s socket write by the command deadline.',
+                strtoupper($protocol),
+            ));
         }
     }
 
