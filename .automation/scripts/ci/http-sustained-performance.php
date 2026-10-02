@@ -171,7 +171,9 @@ final class SustainedHttpPerformance
     private function startServer(int $trial): array
     {
         $readyPath = sys_get_temp_dir() . '/tb-throughput-' . getmypid() . '-' . $trial . '.json';
-        @unlink($readyPath);
+        if (is_file($readyPath)) {
+            unlink($readyPath);
+        }
 
         $process = proc_open(
             [
@@ -240,7 +242,9 @@ final class SustainedHttpPerformance
             proc_close($process);
         }
 
-        @unlink($readyPath);
+        if (is_file($readyPath)) {
+            unlink($readyPath);
+        }
     }
 
     /** @param array<string, int> $usage */
@@ -271,8 +275,9 @@ $mode = $argv[4] ?? '';
 $revision = $argv[5] ?? '';
 
 if ($autoloadPath === '' || $serverScript === '' || $outputPath === '' || $revision === '') {
-    fwrite(STDERR, "Usage: php HttpSustainedPerformance.php <autoload> <server> <output> <mode> <revision>\n");
-    exit(2);
+    throw new InvalidArgumentException(
+        'Usage: php http-sustained-performance.php <autoload> <server> <output> <mode> <revision>',
+    );
 }
 
 require $autoloadPath;
