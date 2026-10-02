@@ -2,6 +2,13 @@
 
 declare(strict_types=1);
 
+use Infocyph\Runwire\Coroutine\CoroutineRuntime;
+use Infocyph\Runwire\Coroutine\CoroutineScope;
+use Infocyph\Runwire\RequestContext;
+use Infocyph\Runwire\Runtime\Enum\RuntimeDriver;
+use Infocyph\Runwire\Runtime\RequestExecutionPolicy;
+use Infocyph\Runwire\RuntimeCapabilities;
+use Infocyph\Runwire\RuntimeContext;
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
 use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
 use Infocyph\TalkingBytes\Http\Concurrent\CurlMultiTransport;
@@ -311,6 +318,85 @@ it('cancels active curl handles cooperatively', function (): void {
         expect($cancelled?->metadata['started'] ?? null)->toBeTrue();
         expect($result->metadata['cancelled'] ?? null)->toBeTrue();
     } finally {
+        $server->stop();
+    }
+});
+
+
+function concurrentHttpRunwireContext(): RuntimeContext
+{
+    return RuntimeContext::fromCapabilities(
+        new RuntimeCapabilities(
+            driver: RuntimeDriver::NATIVE,
+            persistentProcess: true,
+            persistentApplication: true,
+            ownsEventLoop: true,
+            runwireLoopAvailable: true,
+            supportsAsyncIo: true,
+            supportsRunwireCoroutines: true,
+        ),
+        mode: 'native',
+        concurrent: true,
+    );
+}
+
+it('lets Runwire peers progress while the concurrent curl driver waits', function (): void {
+    $server = ConcurrentHttpTestServer::start(['/slow' => 150]);
+    $runtime = concurrentHttpRunwireContext();
+    $events = [];
+
+    try {
+        $result = (new CoroutineRuntime())->run(
+            static function (CoroutineScope $scope) use ($runtime, $server, &$events): PoolResult {
+                $scope->spawn(static function () use ($scope, &$events): void {
+                    $scope->sleep(0.02);
+                    $events[] = 'peer';
+                });
+
+                $pool = HttpClient::multi(maxConcurrency: 1)
+                    ->withRunwire($runtime, scope: $scope);
+
+                $result = $pool->sendMany([
+                    'slow' => HttpRequest::get(sprintf('http://127.0.0.1:%d/slow', $server->port)),
+                ]);
+                $events[] = 'pool';
+
+                return $result;
+            },
+        );
+
+        expect($result->successfulCount())->toBe(1)
+            ->and($events)->toBe(['peer', 'pool']);
+    } finally {
+        $server->stop();
+    }
+});
+
+it('stops a concurrent pool at the bound Runwire request deadline', function (): void {
+    $server = ConcurrentHttpTestServer::start(['/slow' => 500]);
+    $runtime = concurrentHttpRunwireContext();
+    $request = RequestContext::create(
+        $runtime,
+        new RequestExecutionPolicy(maxExecutionSeconds: 0.05),
+    );
+
+    try {
+        $startedAt = microtime(true);
+        $result = HttpClient::multi(maxConcurrency: 1)
+            ->withRunwire($runtime, $request)
+            ->sendMany([
+                'slow' => HttpRequest::get(sprintf('http://127.0.0.1:%d/slow', $server->port)),
+            ]);
+        $elapsed = microtime(true) - $startedAt;
+
+        $slow = $result->get('slow');
+        expect($slow)->toBeInstanceOf(CommunicationResult::class)
+            ->and($slow?->successful)->toBeFalse()
+            ->and($slow?->metadata['deadline_exceeded'] ?? false)->toBeTrue()
+            ->and($result->metadata['deadline_exceeded'] ?? false)->toBeTrue()
+            ->and($elapsed)->toBeLessThan(0.4);
+    } finally {
+        $request->complete();
         $server->stop();
     }
 });
