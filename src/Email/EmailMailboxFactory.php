@@ -85,5 +85,4 @@ final readonly class EmailMailboxFactory
             $deadline,
         );
     }
-
 }
