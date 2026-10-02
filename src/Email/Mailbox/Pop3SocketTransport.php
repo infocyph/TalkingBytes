@@ -145,6 +145,7 @@ final class Pop3SocketTransport implements Pop3Transport
     public function rawMessage(int $messageNumber): string
     {
         Pop3MessageNumberGuard::assertValid($messageNumber);
+
         return implode(
             "\r\n",
             $this->runMultilineCommand(sprintf('RETR %d', $messageNumber), 'RETR'),
