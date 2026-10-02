@@ -97,6 +97,7 @@ final readonly class Emailer
         ?Clock $clock = null,
         ?CancellationSignal $cancellation = null,
         ?Sleeper $sleeper = null,
+        ?OperationDeadline $operationDeadline = null,
     ): self {
         return new self(
             new SendmailTransport(
@@ -104,6 +105,7 @@ final readonly class Emailer
                 cancellation: $cancellation,
                 clock: $clock,
                 sleeper: $sleeper,
+                operationDeadline: $operationDeadline,
             ),
             $events,
             $clock,
