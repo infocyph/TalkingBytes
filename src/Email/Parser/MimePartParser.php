@@ -269,6 +269,26 @@ final readonly class MimePartParser
     }
 
     /**
+     * @param list<string> $parts
+     * @param list<string> $buffer
+     */
+    private function appendMultipartPart(array &$parts, array &$buffer, int $maxParts): void
+    {
+        if ($buffer === []) {
+            return;
+        }
+        if (count($parts) >= $maxParts) {
+            throw new EmailParseException(sprintf(
+                'MIME part count exceeds limit (%d).',
+                $this->limits->maxMimeParts,
+            ));
+        }
+
+        $parts[] = implode("\r\n", $buffer);
+        $buffer = [];
+    }
+
+    /**
      * @return list<string>
      */
     private function splitMultipartBody(string $body, string $boundary, int $maxParts): array
@@ -283,18 +303,9 @@ final readonly class MimePartParser
 
         foreach ($lines as $line) {
             if ($line === $startDelimiter || $line === $endDelimiter) {
-                if ($inPart && $buffer !== []) {
-                    if (count($parts) >= $maxParts) {
-                        throw new EmailParseException(sprintf(
-                            'MIME part count exceeds limit (%d).',
-                            $this->limits->maxMimeParts,
-                        ));
-                    }
-
-                    $parts[] = implode("\r\n", $buffer);
-                    $buffer = [];
+                if ($inPart) {
+                    $this->appendMultipartPart($parts, $buffer, $maxParts);
                 }
-
                 if ($line === $endDelimiter) {
                     break;
                 }
@@ -304,23 +315,12 @@ final readonly class MimePartParser
                 continue;
             }
 
-            if (!$inPart) {
-                continue;
+            if ($inPart) {
+                $buffer[] = $line;
             }
-
-            $buffer[] = $line;
         }
 
-        if ($buffer !== []) {
-            if (count($parts) >= $maxParts) {
-                throw new EmailParseException(sprintf(
-                    'MIME part count exceeds limit (%d).',
-                    $this->limits->maxMimeParts,
-                ));
-            }
-
-            $parts[] = implode("\r\n", $buffer);
-        }
+        $this->appendMultipartPart($parts, $buffer, $maxParts);
 
         return $parts;
     }
