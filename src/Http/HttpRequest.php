@@ -215,16 +215,16 @@ final readonly class HttpRequest
         return $base;
     }
 
+    public function caBundle(string $path): self
+    {
+        return $this->withOptions($this->options->withCaBundle($path));
+    }
+
     public function cancellationSignal(): ?CancellationSignal
     {
         $cancellation = $this->metadata['_cancellation_signal'] ?? null;
 
         return $cancellation instanceof CancellationSignal ? $cancellation : null;
-    }
-
-    public function caBundle(string $path): self
-    {
-        return $this->withOptions($this->options->withCaBundle($path));
     }
 
     public function connectTimeout(int $seconds): self
@@ -387,13 +387,6 @@ final readonly class HttpRequest
         );
     }
 
-    public function operationDeadline(): ?OperationDeadline
-    {
-        $deadline = $this->metadata['_operation_deadline'] ?? null;
-
-        return $deadline instanceof OperationDeadline ? $deadline : null;
-    }
-
     public function mtls(string $certificatePath, string $keyPath, #[\SensitiveParameter] ?string $passphrase = null): self
     {
         return $this->withOptions($this->options->withMtls($certificatePath, $keyPath, $passphrase));
@@ -402,6 +395,13 @@ final readonly class HttpRequest
     public function multipart(?MultipartBody $multipartBody = null): self
     {
         return $this->body($multipartBody ?? MultipartBody::new());
+    }
+
+    public function operationDeadline(): ?OperationDeadline
+    {
+        $deadline = $this->metadata['_operation_deadline'] ?? null;
+
+        return $deadline instanceof OperationDeadline ? $deadline : null;
     }
 
     public function prepareForTransport(): self
@@ -658,14 +658,6 @@ final readonly class HttpRequest
         );
     }
 
-    public function withCancellationSignal(CancellationSignal $cancellation): self
-    {
-        return $this->metadata([
-            ...$this->metadata,
-            '_cancellation_signal' => $cancellation,
-        ]);
-    }
-
     public function withBasicAuth(#[\SensitiveParameter] string $username, #[\SensitiveParameter] string $password): self
     {
         return $this->withAuthenticator(new BasicAuth(username: $username, password: $password));
@@ -674,6 +666,22 @@ final readonly class HttpRequest
     public function withBearerToken(#[\SensitiveParameter] string $token): self
     {
         return $this->withAuthenticator(new BearerTokenAuth(token: $token));
+    }
+
+    public function withCancellationSignal(CancellationSignal $cancellation): self
+    {
+        return $this->metadata([
+            ...$this->metadata,
+            '_cancellation_signal' => $cancellation,
+        ]);
+    }
+
+    public function withOperationDeadline(OperationDeadline $deadline): self
+    {
+        return $this->metadata([
+            ...$this->metadata,
+            '_operation_deadline' => $deadline,
+        ]);
     }
 
     public function withoutHeader(string $name): self
@@ -702,14 +710,6 @@ final readonly class HttpRequest
             $this->authenticators,
             $this->metadata,
         );
-    }
-
-    public function withOperationDeadline(OperationDeadline $deadline): self
-    {
-        return $this->metadata([
-            ...$this->metadata,
-            '_operation_deadline' => $deadline,
-        ]);
     }
 
     public function withoutTlsVerification(): self
