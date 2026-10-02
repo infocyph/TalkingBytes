@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
+use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
 use Infocyph\TalkingBytes\Grpc\GrpcClient;
 use Infocyph\TalkingBytes\Grpc\Sender\GrpcRequest;
 use Infocyph\TalkingBytes\Grpc\Sender\GrpcResponse;
@@ -73,4 +74,23 @@ it('supports grpc retry delay cap and optional jitter', function (): void {
 
     expect(fn() => GrpcRetryPolicy::standard(maxDelayMs: 86_400_001))
         ->toThrow(InvalidArgumentException::class, 'maxDelayMs');
+});
+
+
+it('checks grpc retry cancellation before retry-safety bypass', function (): void {
+    $attempts = 0;
+    $client = GrpcClient::using(static function () use (&$attempts): GrpcResponse {
+        $attempts++;
+
+        return new GrpcResponse(GrpcStatus::Ok);
+    })->withGrpcRetry(
+        GrpcRetryPolicy::standard(attempts: 2, baseDelayMs: 0),
+        CancellationSignal::fromCallable(static fn(): bool => true),
+    );
+
+    $result = $client->send(new GrpcRequest('Orders/Create', ['id' => 1]));
+
+    expect($result->successful)->toBeFalse()
+        ->and($result->metadata['cancelled'] ?? false)->toBeTrue()
+        ->and($attempts)->toBe(0);
 });
