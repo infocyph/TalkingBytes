@@ -51,7 +51,12 @@ final class RequestSecurityGuard
         }
 
         $host = parse_url($url, PHP_URL_HOST);
-        if (!is_string($host) || filter_var($host, FILTER_VALIDATE_IP) !== false) {
+        if (!is_string($host)) {
+            return null;
+        }
+
+        $host = self::normalizeHost($host);
+        if (filter_var($host, FILTER_VALIDATE_IP) !== false) {
             return null;
         }
 
@@ -74,7 +79,19 @@ final class RequestSecurityGuard
             $port = strtolower((string) parse_url($url, PHP_URL_SCHEME)) === 'https' ? 443 : 80;
         }
 
-        return sprintf('%s:%d:%s', $host, $port, implode(',', $addresses));
+        return sprintf(
+            '%s:%d:%s',
+            $host,
+            $port,
+            implode(',', array_map(self::formatResolveAddress(...), $addresses)),
+        );
+    }
+
+    private static function formatResolveAddress(string $address): string
+    {
+        return filter_var($address, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) !== false
+            ? '[' . $address . ']'
+            : $address;
     }
 
     private static function inCidr(string $ip, string $cidr): bool
@@ -120,8 +137,9 @@ final class RequestSecurityGuard
 
     private static function isPrivateOrReservedIp(string $ip): bool
     {
-        if (preg_match('/^::ffff:(\d+\.\d+\.\d+\.\d+)$/i', $ip, $mapped) === 1) {
-            return self::isPrivateOrReservedIp($mapped[1]);
+        $mappedIpv4 = self::mappedIpv4($ip);
+        if ($mappedIpv4 !== null) {
+            return self::isPrivateOrReservedIp($mappedIpv4);
         }
 
         if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) === false) {
@@ -161,6 +179,23 @@ final class RequestSecurityGuard
         }
 
         return true;
+    }
+
+    private static function mappedIpv4(string $ip): ?string
+    {
+        $packed = inet_pton($ip);
+        if (
+            $packed === false
+            || strlen($packed) !== 16
+            || substr($packed, 0, 10) !== str_repeat("\0", 10)
+            || substr($packed, 10, 2) !== "\xff\xff"
+        ) {
+            return null;
+        }
+
+        $mapped = inet_ntop(substr($packed, 12));
+
+        return is_string($mapped) ? $mapped : null;
     }
 
     private static function normalizeHost(string $host): string
