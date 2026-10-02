@@ -4,11 +4,15 @@ declare(strict_types=1);
 
 namespace Infocyph\TalkingBytes\Email;
 
+use Infocyph\Runwire\Coroutine\CoroutineScope;
+use Infocyph\Runwire\RequestContext;
+use Infocyph\Runwire\RuntimeContext;
 use Infocyph\TalkingBytes\Core\Event\BestEffortEventDispatcher;
 use Infocyph\TalkingBytes\Core\Event\EventDispatcher;
 use Infocyph\TalkingBytes\Core\Event\NullEventDispatcher;
 use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
 use Infocyph\TalkingBytes\Core\Support\Clock;
+use Infocyph\TalkingBytes\Core\Support\OperationDeadline;
 use Infocyph\TalkingBytes\Core\Support\Sleeper;
 use Infocyph\TalkingBytes\Email\Config\ConfigValue;
 use Infocyph\TalkingBytes\Email\Config\DkimConfig;
@@ -16,6 +20,7 @@ use Infocyph\TalkingBytes\Email\Config\LogEmailConfig;
 use Infocyph\TalkingBytes\Email\Config\SendmailConfig;
 use Infocyph\TalkingBytes\Email\Config\SmtpConfig;
 use Infocyph\TalkingBytes\Email\Config\SpoolConfig;
+use Infocyph\TalkingBytes\Integration\Runwire\RunwireBinding;
 use Infocyph\TalkingBytes\Resilience\RateLimiter;
 use Infocyph\TalkingBytes\Retry\ExponentialBackoffRetryPolicy;
 use Infocyph\TalkingBytes\Retry\FixedDelayRetryPolicy;
@@ -33,6 +38,8 @@ final readonly class EmailSenderFactory
         ?EventDispatcher $events = null,
         ?Clock $clock = null,
         ?Sleeper $sleeper = null,
+        private ?CancellationSignal $cancellation = null,
+        private ?OperationDeadline $operationDeadline = null,
     ) {
         $this->events = new BestEffortEventDispatcher($events ?? new NullEventDispatcher());
         $this->clock = $clock ?? Clock::system();
@@ -41,7 +48,9 @@ final readonly class EmailSenderFactory
 
     public function fake(): Emailer
     {
-        return Emailer::fake($this->events, $this->clock, $this->sleeper);
+        return $this->bindExecution(
+            Emailer::fake($this->events, $this->clock, $this->sleeper),
+        );
     }
 
     /**
@@ -56,6 +65,7 @@ final readonly class EmailSenderFactory
         array $config,
         ?CancellationSignal $cancellation = null,
     ): Emailer {
+        $cancellation = $this->combinedCancellation($cancellation);
         $transport = self::section($config, 'transport', required: true);
         $emailer = $this->usingResolvedTransport($transport, $cancellation);
 
@@ -64,7 +74,11 @@ final readonly class EmailSenderFactory
             $fallbackTransports[] = $this->usingResolvedTransport($fallback, $cancellation)->transport();
         }
         if ($fallbackTransports !== []) {
-            $emailer = $emailer->withFallback($fallbackTransports, $cancellation);
+            $emailer = $emailer->withFallback(
+                $fallbackTransports,
+                $cancellation,
+                $this->operationDeadline,
+            );
         }
 
         $retry = self::section($config, 'retry');
@@ -76,7 +90,7 @@ final readonly class EmailSenderFactory
                 'fixed' => new FixedDelayRetryPolicy($attempts, $delayMs),
                 default => throw new InvalidArgumentException('Unsupported email retry policy.'),
             };
-            $emailer = $emailer->withRetry($policy, $cancellation);
+            $emailer = $emailer->withRetry($policy, $cancellation, $this->operationDeadline);
         }
 
         $rateLimit = self::section($config, 'rate_limit');
@@ -93,47 +107,82 @@ final readonly class EmailSenderFactory
             $emailer = $emailer->withDkim(DkimConfig::fromArray($dkim));
         }
 
-        return $cancellation === null
-            ? $emailer
-            : $emailer->withCancellation($cancellation);
+        return $this->bindExecution($emailer, $cancellation);
     }
 
     public function usingLog(LogEmailConfig $config): Emailer
     {
-        return Emailer::usingLog($config, $this->events, $this->clock, $this->sleeper);
+        return $this->bindExecution(
+            Emailer::usingLog($config, $this->events, $this->clock, $this->sleeper),
+        );
     }
 
     public function usingMailFunction(): Emailer
     {
-        return Emailer::usingMailFunction($this->events, $this->clock, $this->sleeper);
+        return $this->bindExecution(
+            Emailer::usingMailFunction($this->events, $this->clock, $this->sleeper),
+        );
     }
 
     public function usingNull(): Emailer
     {
-        return Emailer::usingNull($this->events, $this->clock, $this->sleeper);
+        return $this->bindExecution(
+            Emailer::usingNull($this->events, $this->clock, $this->sleeper),
+        );
     }
 
     public function usingSendmail(
         SendmailConfig $config = new SendmailConfig(),
         ?CancellationSignal $cancellation = null,
     ): Emailer {
-        return Emailer::usingSendmail(
-            $config,
-            $this->events,
-            $this->clock,
+        $cancellation = $this->combinedCancellation($cancellation);
+
+        return $this->bindExecution(
+            Emailer::usingSendmail(
+                $config,
+                $this->events,
+                $this->clock,
+                $cancellation,
+                $this->sleeper,
+            ),
             $cancellation,
-            $this->sleeper,
         );
     }
 
     public function usingSmtp(SmtpConfig $config): Emailer
     {
-        return Emailer::usingSmtp($config, $this->events, $this->clock, $this->sleeper);
+        return $this->bindExecution(
+            Emailer::usingSmtp($config, $this->events, $this->clock, $this->sleeper),
+        );
     }
 
     public function usingSpool(SpoolConfig $config): Emailer
     {
-        return Emailer::usingSpool($config, $this->events, $this->clock, $this->sleeper);
+        return $this->bindExecution(
+            Emailer::usingSpool($config, $this->events, $this->clock, $this->sleeper),
+        );
+    }
+
+    public function withRunwire(
+        RuntimeContext $runtime,
+        ?RequestContext $request = null,
+        ?CoroutineScope $scope = null,
+    ): self {
+        $binding = new RunwireBinding($runtime, $request, $scope);
+        $deadline = $binding->deadline();
+        if ($deadline !== null && $this->operationDeadline !== null) {
+            $deadline = $this->operationDeadline->earliest($deadline);
+        } elseif ($deadline === null) {
+            $deadline = $this->operationDeadline;
+        }
+
+        return new self(
+            $this->events,
+            $this->clock,
+            $binding->sleeper($this->sleeper),
+            $binding->cancellation($this->cancellation),
+            $deadline,
+        );
     }
 
     /**
@@ -192,6 +241,39 @@ final readonly class EmailSenderFactory
         }
 
         return $sections;
+    }
+
+    private function bindExecution(
+        Emailer $emailer,
+        ?CancellationSignal $cancellation = null,
+    ): Emailer {
+        if ($this->operationDeadline !== null) {
+            $emailer = $emailer->withOperationDeadline($this->operationDeadline);
+        }
+
+        $cancellation = $this->combinedCancellation($cancellation);
+        if ($cancellation !== null) {
+            $emailer = $emailer->withCancellation($cancellation);
+        }
+
+        return $emailer;
+    }
+
+    private function combinedCancellation(?CancellationSignal $explicit): ?CancellationSignal
+    {
+        if ($this->cancellation === null) {
+            return $explicit;
+        }
+
+        if ($explicit === null || $explicit === $this->cancellation) {
+            return $this->cancellation;
+        }
+
+        $factory = $this->cancellation;
+
+        return CancellationSignal::fromCallable(
+            static fn(): bool => $factory->isRequested() || $explicit->isRequested(),
+        );
     }
 
     /**
