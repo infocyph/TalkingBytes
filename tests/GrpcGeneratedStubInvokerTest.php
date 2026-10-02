@@ -619,3 +619,59 @@ it('does not invoke a generated unary stub when cancellation is already requeste
         ->and($result->metadata['cancelled'] ?? false)->toBeTrue()
         ->and($stub->calls)->toBe(0);
 });
+
+
+it('does not open generated grpc streams when cancellation is already requested', function (): void {
+    $stub = new class {
+        public int $calls = 0;
+
+        public function Chat(array $metadata = [], array $options = []): never
+        {
+            unset($metadata, $options);
+            $this->calls++;
+
+            throw new RuntimeException('bidi stream should not open');
+        }
+
+        public function List(mixed $message, array $metadata = [], array $options = []): never
+        {
+            unset($message, $metadata, $options);
+            $this->calls++;
+
+            throw new RuntimeException('server stream should not open');
+        }
+
+        public function Upload(array $metadata = [], array $options = []): never
+        {
+            unset($metadata, $options);
+            $this->calls++;
+
+            throw new RuntimeException('client stream should not open');
+        }
+    };
+
+    $client = GrpcClient::usingGeneratedStub(
+        $stub,
+        cancellation: CancellationSignal::fromCallable(static fn(): bool => true),
+    );
+
+    $server = $client->serverStream(
+        new GrpcRequest('Orders/List', []),
+        static function (mixed $message): void {
+            unset($message);
+        },
+    );
+    $clientStream = $client->clientStream('Orders/Upload', [['id' => 1]]);
+    $bidi = $client->bidiStream(
+        'Orders/Chat',
+        [['id' => 1]],
+        static function (mixed $message): void {
+            unset($message);
+        },
+    );
+
+    expect($server->metadata['cancelled'] ?? false)->toBeTrue()
+        ->and($clientStream->metadata['cancelled'] ?? false)->toBeTrue()
+        ->and($bidi->metadata['cancelled'] ?? false)->toBeTrue()
+        ->and($stub->calls)->toBe(0);
+});
