@@ -34,10 +34,10 @@ final class HttpBench
 
     private HttpRequest $request;
 
-    private RuntimeContext $runwireRuntime;
-
     /** @var array<string, mixed> */
     private array $resolvedConfig;
+
+    private RuntimeContext $runwireRuntime;
 
     private HttpClientConfig $typedResolvedConfig;
 
@@ -153,33 +153,6 @@ final class HttpBench
 
     #[Iterations(5)]
     #[Revs(1000)]
-    public function benchUnboundFactoryConstruction(): void
-    {
-        new HttpClientFactory();
-    }
-
-    #[Iterations(5)]
-    #[Revs(1000)]
-    public function benchRunwireBoundFactoryConstruction(): void
-    {
-        (new HttpClientFactory())->withRunwire($this->runwireRuntime);
-    }
-
-    #[Iterations(5)]
-    #[Revs(250)]
-    public function benchRunwireBoundResolvedFactoryConstruction(): void
-    {
-        (new HttpClientFactory())
-            ->withRunwire($this->runwireRuntime)
-            ->fromConfig(
-                $this->typedResolvedConfig,
-                $this->resolvedConfig,
-                new FakeHttpTransport(),
-            );
-    }
-
-    #[Iterations(5)]
-    #[Revs(1000)]
     public function benchMiddlewarePipeline(): void
     {
         $this->client->send($this->request);
@@ -215,5 +188,32 @@ final class HttpBench
             $this->resolvedConfig,
             new FakeHttpTransport(),
         );
+    }
+
+    #[Iterations(5)]
+    #[Revs(1000)]
+    public function benchRunwireBoundFactoryConstruction(): void
+    {
+        (new HttpClientFactory())->withRunwire($this->runwireRuntime);
+    }
+
+    #[Iterations(5)]
+    #[Revs(250)]
+    public function benchRunwireBoundResolvedFactoryConstruction(): void
+    {
+        (new HttpClientFactory())
+            ->withRunwire($this->runwireRuntime)
+            ->fromConfig(
+                $this->typedResolvedConfig,
+                $this->resolvedConfig,
+                new FakeHttpTransport(),
+            );
+    }
+
+    #[Iterations(5)]
+    #[Revs(1000)]
+    public function benchUnboundFactoryConstruction(): void
+    {
+        new HttpClientFactory();
     }
 }
