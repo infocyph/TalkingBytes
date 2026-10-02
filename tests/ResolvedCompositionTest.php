@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
+use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
 use Infocyph\TalkingBytes\Core\Support\Clock;
 use Infocyph\TalkingBytes\Core\Support\Sleeper;
 use Infocyph\TalkingBytes\Email\Config\EmailLimits;
@@ -454,4 +455,49 @@ it('propagates the injected clock to resolved email rate limiting', function ():
     expect($emailer->send($message)->successful)->toBeTrue();
     $now += 1.0;
     expect($emailer->send($message)->successful)->toBeTrue();
+});
+
+
+it('honors resolved cancellation before http email and grpc side effects when retry is disabled', function (): void {
+    $cancellation = CancellationSignal::fromCallable(static fn(): bool => true);
+
+    $httpTransport = new FakeHttpTransport();
+    $http = HttpClient::fromResolvedConfig(
+        [],
+        cancellation: $cancellation,
+        transport: $httpTransport,
+    );
+    $httpResult = $http->send(HttpRequest::post('https://example.test/orders')->raw('payload'));
+
+    $email = (new EmailSenderFactory())->fromResolvedConfig(
+        ['transport' => ['driver' => 'null']],
+        $cancellation,
+    );
+    $emailResult = $email->send(
+        EmailMessage::new()
+            ->from('sender@example.test')
+            ->to('recipient@example.test')
+            ->subject('Cancelled')
+            ->text('payload'),
+    );
+
+    $grpcCalls = 0;
+    $grpc = (new GrpcClientFactory(cancellation: $cancellation))->using(
+        static function (GrpcRequest $request) use (&$grpcCalls): GrpcResponse {
+            unset($request);
+            $grpcCalls++;
+
+            return new GrpcResponse(GrpcStatus::Ok);
+        },
+    );
+    $grpcResult = $grpc->send(new GrpcRequest('/example.Service/Create', []));
+
+    expect($httpResult->successful)->toBeFalse()
+        ->and($httpResult->metadata['cancelled'] ?? false)->toBeTrue()
+        ->and($httpTransport->sentRequests())->toBe([])
+        ->and($emailResult->successful)->toBeFalse()
+        ->and($emailResult->metadata['cancelled'] ?? false)->toBeTrue()
+        ->and($grpcResult->successful)->toBeFalse()
+        ->and($grpcResult->metadata['cancelled'] ?? false)->toBeTrue()
+        ->and($grpcCalls)->toBe(0);
 });
