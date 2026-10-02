@@ -70,6 +70,33 @@ tests that prove a freed concurrency slot is refilled before a slow peer
 completes. Treat end-to-end network/process benchmarks separately from CPU
 microbenchmarks.
 
+Runwire 2.3 evidence
+--------------------
+
+The HTTP benchmark suite records three additional composition costs:
+``benchUnboundFactoryConstruction``, ``benchRunwireBoundFactoryConstruction``
+and ``benchRunwireBoundResolvedFactoryConstruction``. Keep these results beside
+the existing resolved-factory and transport benchmarks when reviewing a 2.3
+candidate.
+
+The Runwire integration tests use real coroutine scheduling around local
+HTTP/SMTP/IMAP/POP3/process fixtures to verify that a host peer continues to
+progress during every wait documented as cooperative. Those tests are fairness
+and ownership evidence, not a substitute for application throughput testing.
+
+Production RPM is host-owned
+----------------------------
+
+TalkingBytes cannot publish one meaningful production RPM or latency percentile
+for every framework, downstream service, network, TLS/DNS environment, worker
+count, and host scheduler. The repository release gate therefore requires
+component-regression, resource-cleanup, fairness, and protocol-correctness
+evidence on the candidate. Integrating applications that require capacity
+numbers should additionally record successful RPM, p50/p95/p99, failures,
+timeouts, CPU, memory, queue growth, active handles, downstream concurrency, and
+the exact runtime/extension/OPcache/hardware revisions on their
+production-equivalent host. Do not count failed or timed-out work as throughput.
+
 Soak evidence
 -------------
 
