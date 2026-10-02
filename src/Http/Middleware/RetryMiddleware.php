@@ -25,6 +25,17 @@ final readonly class RetryMiddleware implements HttpMiddleware
 
     public function handle(HttpRequest $request, Closure $next): CommunicationResult
     {
+        if ($this->cancellation?->isRequested() === true) {
+            return CommunicationResult::failure(
+                'HTTP operation cancelled.',
+                metadata: [
+                    'cancelled' => true,
+                    'attempts' => 0,
+                    'transport' => 'http',
+                ],
+            );
+        }
+
         if (!$this->isRetrySafe($request)) {
             return $next($request);
         }
