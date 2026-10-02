@@ -30,8 +30,7 @@ final class CurlHandleConfigurator
 
             $this->setOption($handle, CURLOPT_RETURNTRANSFER, true, 'Unable to configure cURL response handling.');
             $this->setOption($handle, CURLOPT_FOLLOWLOCATION, false, 'Unable to disable automatic cURL redirects.');
-            $this->setOption($handle, CURLOPT_TIMEOUT, $resolvedRequest->options->timeoutSeconds, 'Unable to configure cURL timeout.');
-            $this->setOption($handle, CURLOPT_CONNECTTIMEOUT, $resolvedRequest->options->connectTimeoutSeconds, 'Unable to configure cURL connection timeout.');
+            $this->applyTimeouts($handle, $resolvedRequest);
             $this->setOption($handle, CURLOPT_SSL_VERIFYPEER, $resolvedRequest->options->verifyPeer, 'Unable to configure cURL TLS peer verification.');
             $this->setOption($handle, CURLOPT_SSL_VERIFYHOST, $resolvedRequest->options->verifyHost ? 2 : 0, 'Unable to configure cURL TLS host verification.');
             if ($pinnedResolution !== null) {
@@ -153,6 +152,27 @@ final class CurlHandleConfigurator
         ]);
     }
 
+    private function applyTimeouts(\CurlHandle $handle, HttpRequest $request): void
+    {
+        $deadline = $request->operationDeadline();
+        if ($deadline === null) {
+            $this->setOption($handle, CURLOPT_TIMEOUT, $request->options->timeoutSeconds, 'Unable to configure cURL timeout.');
+            $this->setOption($handle, CURLOPT_CONNECTTIMEOUT, $request->options->connectTimeoutSeconds, 'Unable to configure cURL connection timeout.');
+
+            return;
+        }
+
+        $remainingMs = $deadline->remainingMilliseconds();
+        if ($remainingMs === 0) {
+            throw new InvalidArgumentException('HTTP operation deadline exceeded.');
+        }
+
+        $timeoutMs = min(self::secondsToMilliseconds($request->options->timeoutSeconds), $remainingMs);
+        $connectTimeoutMs = min(self::secondsToMilliseconds($request->options->connectTimeoutSeconds), $remainingMs);
+        $this->setOption($handle, CURLOPT_TIMEOUT_MS, $timeoutMs, 'Unable to configure cURL operation timeout.');
+        $this->setOption($handle, CURLOPT_CONNECTTIMEOUT_MS, $connectTimeoutMs, 'Unable to configure cURL connection timeout.');
+    }
+
     private function applyUpload(HttpRequest $request, \CurlHandle $handle): HttpRequest
     {
         $uploadPath = $request->metadata['upload_file_path'] ?? null;
@@ -232,6 +252,15 @@ final class CurlHandleConfigurator
         }
 
         return $resource;
+    }
+
+    private static function secondsToMilliseconds(int $seconds): int
+    {
+        if ($seconds > intdiv(PHP_INT_MAX, 1000)) {
+            return PHP_INT_MAX;
+        }
+
+        return $seconds * 1000;
     }
 
     private function setOption(\CurlHandle $handle, int $option, mixed $value, string $error): void
