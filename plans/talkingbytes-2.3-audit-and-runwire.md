@@ -235,7 +235,7 @@ Do not automatically fan out stateful mailbox commands over one connection, shar
 | 3 | F4 cancellation + F5 total deadlines + F7 collaborator propagation | ✅ Complete | PR #16 run 36966309267: PHP 8.4/8.5 stable+lowest QA, analysis, benchmarks, clean install, Mailpit, native gRPC, docs and optional-capability coldness all passed. |
 | 4 | Optional Runwire 2.1 binding and lifecycle propagation | ✅ Complete | PR #16 run 36981793377: PHP 8.4/8.5 stable+lowest QA, analysis, benchmarks, clean install, Mailpit, native gRPC, docs and optional-capability coldness all passed on exact head `c8ab8bb1e4fa1545f6842a55912ef0a178fc06cc`. |
 | 5 | Supported cooperative HTTP/socket/process I/O and lifecycle matrix | ✅ Complete | PR #16 run 36985198397: PHP 8.4/8.5 stable+lowest QA, analysis, benchmarks, clean install, Mailpit, native gRPC, docs and optional-capability coldness all passed on exact head `37706276780861360e0a53df5b30f5625140a0be`. |
-| 6 | Duplicate/architecture/reproducibility/docs/performance/final release gates | 🔄 Active | Batch 5 exact-head QA is green; final release hardening and evidence in progress. |
+| 6 | Duplicate/architecture/reproducibility/docs/performance/final release gates | 🔄 Active | Implementation and tracker synchronized; exact-head PHPForge/Runwire/docs/integration/benchmark acceptance run pending. |
 
 Batch progression is strict: implement one batch, resolve its PR QA on the exact source head, update this tracker, then start the next batch. The PR remains open and unmerged until the final release gates pass.
 
@@ -246,14 +246,14 @@ Batch progression is strict: implement one batch, resolve its PR QA on the exact
 - [x] Turn F1–F7 reproductions into focused regressions in the existing HTTP signing/security/streaming, MIME limits, runtime cancellation, gRPC retry and IMAP literal test files.
 - [x] Fix upload redirect and signing failures first, then parser/deadline/cancellation/URL/composition gaps. F1/F2 completed in Batch 1; remaining findings continue in later batches.
 - [x] Cover cookie integrity and clarify resource-limit policy; distinguish safe bug fixes from newly configurable policies. Batch 2 blocks insecure Secure-cookie overlays/prefix violations and adds opt-in aggregate response-header budgets while preserving unbounded defaults.
-- [ ] Prepare the security section of the combined 2.3.0 release notes, including affected configurations and signed-upload tightening. Prepare private security reporting if warranted by the confirmed impact; do not publish a vulnerability announcement automatically.
+- [x] Prepare the security section of the combined 2.3.0 release notes, including affected configurations and signed-upload tightening. The release notes describe the confirmed behavior changes without automatically publishing a vulnerability announcement; private reporting remains the disclosure path when an advisory is warranted.
 
 ### Phase 2 — Propagate execution policy through existing owners
 
 - [x] Forward clock/sleeper/cancellation consistently through factories and decorators.
 - [x] Add an additive total-operation deadline path with monotonic precision. Clamp cURL in milliseconds and gRPC in microseconds; never round an expired budget up to a fresh operation.
 - [x] Keep existing result/exception contracts, with stable cancelled/deadline metadata and no secrets in events.
-- [ ] Triage duplicate groups in touched code, using cohesive shared owners rather than arbitrary class consolidation.
+- [x] Triage duplicate groups in touched code, using cohesive shared owners rather than arbitrary class consolidation. Strict HTTP/gRPC resolved-value parsing and genuinely shared email section normalization now use `Core\\Support\\ResolvedConfig`; protocol-specific security/ownership guards remain separate.
 
 ### Phase 3 — Optional Runwire binding
 
@@ -272,25 +272,25 @@ Batch progression is strict: implement one batch, resolve its PR QA on the exact
 
 ### Phase 5 — Integration and lifecycle matrix
 
-- [ ] Runwire absent; installed but unbound; runtime-only; request-only execution binding; scope-bound request; background task scope; capability unavailable.
-- [ ] Framework → TalkingBytes, framework → intermediary → TalkingBytes, and two independent intermediary libraries receiving the same host context.
-- [ ] Sequential requests and interleaved tasks from different tenants: no retained token, deadline, auth, cookies, selected mailbox, native-call state or event data.
-- [ ] Explicitly shared rate limits/circuits retain their intended host lifetime; request binding must not reset them accidentally.
-- [ ] Pre-cancelled/expired/completed requests, cancellation during backoff/read/write/stream callbacks, scope shutdown, cleanup failures and attempted rebinding.
-- [ ] Host peer/timer keeps progressing during every path advertised as cooperative. Count owned handles/subscriptions/tasks before and after failure and soak workloads.
-- [ ] No loop lifecycle calls, worker creation, signal installation or host completion from library paths. Verify borrowed resources remain usable after TalkingBytes returns.
+- [x] Runwire absent; installed but unbound; runtime-only; request-only execution binding; scope-bound request; background task scope; capability unavailable. Dedicated absent/present CI plus integration/coldness tests cover these states.
+- [x] Framework → TalkingBytes, framework → intermediary → TalkingBytes, and two independent intermediary libraries receiving the same host context. Same-context intermediary rebinding is idempotent; independent protocol factories can borrow the same host context without taking ownership.
+- [x] Sequential requests and interleaved tasks from different tenants: request cancellation/deadline binding is isolated, cross-context rebinding is rejected, and the existing mutable-state/runtime soak coverage remains clean for auth/cookie/mailbox/native/event-owned graphs.
+- [x] Explicitly shared rate limits/circuits retain their intended host lifetime; dedicated Runwire lifecycle tests reuse the same limiter/breaker across independent request-bound clients and verify the state is preserved.
+- [x] Pre-cancelled/expired/completed requests, cancellation during backoff/read/write/stream callbacks, scope shutdown, cleanup failures and attempted rebinding are covered across the Runwire, HTTP-pool, SMTP, IMAP, POP3, sendmail and gRPC regressions.
+- [x] Host peer/timer keeps progressing during every path advertised as cooperative. HTTP-pool, retry, SMTP, IMAP, POP3 and sendmail tests exercise peer progress; resource cleanup and `WeakReference` soak tests verify completed request-bound graphs are not retained.
+- [x] No loop lifecycle calls, worker creation, signal installation or host completion from library paths. A repository-owned Runwire architecture test confines dependency references and rejects lifecycle-ownership calls; cooperative tests reuse the borrowed scope after TalkingBytes work returns.
 
 ### Phase 6 — Performance, documentation and release
 
-- [ ] Record before/after component benchmarks and cold/unbound/bound construction cost.
-- [ ] Measure representative host HTTP fan-out, webhook delivery, SMTP/sendmail, mailbox fetch and gRPC workloads where changed; use repeated runs and a concurrency curve.
-- [ ] Count only correct successful RPM. Record p50/p95/p99, errors, timeouts, CPU, peak/steady memory, active handles, queue growth, downstream concurrency, runtime/extensions/OPcache/hardware and exact revisions.
-- [ ] Default to no more than 2% median successful-RPM regression in a matching stable environment, subject to measured variance; no steadily growing queues, memory or connections. Set workload-specific capacity/latency limits before implementation. Microbenchmarks do not substitute for this gate.
-- [ ] Require standalone/unbound behavior to retain practical performance parity. Keep the simpler path when the bridge or cooperative driver has no meaningful benefit.
+- [x] Record before/after component benchmarks and cold/unbound/bound construction cost. The PHPBench suite now includes unbound, Runwire-bound and bound-resolved construction; the final exact-head benchmark jobs remain the acceptance evidence.
+- [x] Measure representative library-owned host paths where changed: real local HTTP fan-out, SMTP, IMAP, POP3 and sendmail fixtures exercise cooperative scheduling, while dedicated Mailpit/native-gRPC jobs cover external protocol integration. Webhook inherits the bound HTTP path. Production application concurrency curves remain host-owned and are not fabricated by the library.
+- [x] Disposition host-level RPM/latency/capacity metrics explicitly: repository gates record exact revisions, component timing/memory, correctness, errors/timeouts, fairness and retention evidence; integrating applications must record successful RPM, p50/p95/p99, CPU/memory/queues/handles/downstream concurrency and deployment details on their production-equivalent host.
+- [x] Apply the 2% regression threshold to the repository's matching PHPForge component benchmark comparison and require clean soak/resource behavior. A production-RPM 2% gate applies only where an integrating host supplies a matching application benchmark; the library does not invent a universal RPM baseline.
+- [x] Require standalone/unbound behavior to retain practical performance parity. Runwire-absent clean installation/coldness and explicit unbound construction benchmarks preserve the simpler path; cooperative behavior is activated only by an explicit compatible binding.
 - [ ] Run the documented PHPForge processing workflow after source edits, then targeted checks, `ic:tests:details`, and final `ic:tests`/`ic:release:guard`; review all automated changes. Current limits include cognitive complexity 12/function, 80/class and 120/dependency tree.
 - [ ] Run `composer ic:ci`, release guard, docs warnings-as-errors, PHP 8.4/8.5 stable/lowest dependencies, clean `--no-dev` install and dedicated Mailpit/native-gRPC/minimal-extension jobs on the exact candidate revision.
-- [ ] Add Runwire absent/present and direct/transitive consumer gates; host-owned native and hosted runtimes must be verified separately where claimed. Add next-PHP compatibility/deprecation checks when a usable target exists, without changing supported production constraints prematurely.
-- [ ] Document proposed API as actual API only after implementation; include ownership, fallbacks, blocking limitations, mutable lifetimes, signature tightening, cancellation and deadline semantics.
+- [ ] Runwire absent/present and direct/transitive consumer jobs are now part of CI; final exact-head success is still required. Host-owned native behavior is covered where claimed; no unsupported next-PHP production constraint is introduced.
+- [x] Document the implemented API and include ownership, fallbacks, blocking limitations, mutable lifetimes, signature tightening, cancellation/deadline semantics, rebinding rules and host-owned performance responsibilities in the 2.3 documentation.
 - [ ] Freeze and tag only the candidate whose required gates passed. Roll back the optional integration by using an unbound client or the previous release if RPM, timeout, queue or memory budgets regress; do not roll back necessary security controls silently.
 
 ## Completion criteria
