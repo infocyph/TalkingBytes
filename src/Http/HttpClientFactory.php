@@ -61,6 +61,10 @@ final readonly class HttpClientFactory
 
         $client = $this->applyAuth($client, self::section($config, 'auth'));
 
+        if ($this->cancellation !== null) {
+            $client = $client->withCancellation($this->cancellation);
+        }
+
         if (self::enabled(self::section($config, 'cookies'))) {
             $client = $client->withCookieJar(new CookieJar());
         }
