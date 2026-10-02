@@ -113,6 +113,21 @@ final readonly class SustainedHttpPerformance
             + (($usage['ru_utime.tv_usec'] ?? 0) + ($usage['ru_stime.tv_usec'] ?? 0)) / 1_000_000;
     }
 
+    /**
+     * @param list<float|int> $values
+     */
+    private static function percentile(array $values, int $percentile): float
+    {
+        if ($values === []) {
+            return 0.0;
+        }
+
+        sort($values, SORT_NUMERIC);
+        $index = (int) ceil(($percentile / 100) * count($values)) - 1;
+
+        return (float) $values[max(0, min(count($values) - 1, $index))];
+    }
+
     /** @return TrialResult */
     private function executePoolTrial(RequestPool $pool, int $port, int $concurrency): array
     {
@@ -254,21 +269,6 @@ final readonly class SustainedHttpPerformance
             'batch_latency_ms' => $latencies,
             'max_resource_count' => $maxResourceCount,
         ];
-    }
-
-    /**
-     * @param list<float|int> $values
-     */
-    private static function percentile(array $values, int $percentile): float
-    {
-        if ($values === []) {
-            return 0.0;
-        }
-
-        sort($values, SORT_NUMERIC);
-        $index = (int) ceil(($percentile / 100) * count($values)) - 1;
-
-        return (float) $values[max(0, min(count($values) - 1, $index))];
     }
 
     /** @return LevelResult */
