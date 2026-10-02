@@ -129,7 +129,8 @@ final readonly class MimePartParser
         }
 
         $children = [];
-        foreach ($this->splitMultipartBody($body, $boundary) as $index => $partBody) {
+        $remainingParts = max(0, $this->limits->maxMimeParts - $partCount);
+        foreach ($this->splitMultipartBody($body, $boundary, $remainingParts) as $index => $partBody) {
             $childNumber = $partNumber === null
                 ? (string) ($index + 1)
                 : sprintf('%s.%d', $partNumber, $index + 1);
@@ -229,6 +230,7 @@ final readonly class MimePartParser
         int &$decodedBytes,
     ): ParsedEmailPart {
         [$rawHeaders, $rawBody] = $this->splitRawMessage($rawPart);
+        HeaderLimitValidator::assertWithin($rawHeaders, $this->limits);
         $headers = $this->headerParser->parse($rawHeaders);
 
         return $this->parsePart($headers, $rawBody, $partNumber, $depth, $partCount, $decodedBytes);
@@ -269,7 +271,7 @@ final readonly class MimePartParser
     /**
      * @return list<string>
      */
-    private function splitMultipartBody(string $body, string $boundary): array
+    private function splitMultipartBody(string $body, string $boundary, int $maxParts): array
     {
         $normalized = str_replace("\n", "\r\n", str_replace(["\r\n", "\r"], "\n", $body));
         $startDelimiter = '--' . $boundary;
@@ -282,6 +284,13 @@ final readonly class MimePartParser
         foreach ($lines as $line) {
             if ($line === $startDelimiter || $line === $endDelimiter) {
                 if ($inPart && $buffer !== []) {
+                    if (count($parts) >= $maxParts) {
+                        throw new EmailParseException(sprintf(
+                            'MIME part count exceeds limit (%d).',
+                            $this->limits->maxMimeParts,
+                        ));
+                    }
+
                     $parts[] = implode("\r\n", $buffer);
                     $buffer = [];
                 }
@@ -303,6 +312,13 @@ final readonly class MimePartParser
         }
 
         if ($buffer !== []) {
+            if (count($parts) >= $maxParts) {
+                throw new EmailParseException(sprintf(
+                    'MIME part count exceeds limit (%d).',
+                    $this->limits->maxMimeParts,
+                ));
+            }
+
             $parts[] = implode("\r\n", $buffer);
         }
 
