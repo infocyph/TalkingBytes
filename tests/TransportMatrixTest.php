@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
+use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
 use Infocyph\TalkingBytes\Email\Config\LogEmailConfig;
 use Infocyph\TalkingBytes\Email\Config\SendmailConfig;
 use Infocyph\TalkingBytes\Email\Config\SpoolConfig;
@@ -193,4 +194,46 @@ it('blocks when rate limited transport exceeds quota', function (): void {
 
     expect($first->successful)->toBeTrue();
     expect(fn () => $transport->send(baselineEmail()))->toThrow(RuntimeException::class, 'Rate limit exceeded');
+});
+
+
+it('does not enter an email fallback after cancellation is requested', function (): void {
+    $state = (object) ['cancelled' => false, 'fallback_calls' => 0];
+
+    $primary = new class($state) implements EmailTransport
+    {
+        public function __construct(private object $state) {}
+
+        public function send(EmailMessage $message): CommunicationResult
+        {
+            unset($message);
+            $this->state->cancelled = true;
+
+            return CommunicationResult::failure('primary failed');
+        }
+    };
+
+    $fallback = new class($state) implements EmailTransport
+    {
+        public function __construct(private object $state) {}
+
+        public function send(EmailMessage $message): CommunicationResult
+        {
+            unset($message);
+            $this->state->fallback_calls++;
+
+            return CommunicationResult::success();
+        }
+    };
+
+    $result = (new FallbackEmailTransport(
+        $primary,
+        [$fallback],
+        CancellationSignal::fromCallable(static fn(): bool => $state->cancelled),
+    ))->send(baselineEmail());
+
+    expect($result->successful)->toBeFalse()
+        ->and($result->metadata['cancelled'] ?? false)->toBeTrue()
+        ->and($result->metadata['attempts'] ?? null)->toBe(1)
+        ->and($state->fallback_calls)->toBe(0);
 });
