@@ -7,6 +7,7 @@ namespace Infocyph\TalkingBytes\Grpc;
 use Infocyph\TalkingBytes\Core\Event\EventDispatcher;
 use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
 use Infocyph\TalkingBytes\Core\Support\Clock;
+use Infocyph\TalkingBytes\Core\Support\Sleeper;
 use Infocyph\TalkingBytes\Grpc\Native\NativeGrpcInvoker;
 use Infocyph\TalkingBytes\Grpc\Native\NativeGrpcStreamingInvoker;
 use Infocyph\TalkingBytes\Grpc\Retry\GrpcRetryPolicy;
@@ -20,6 +21,7 @@ final readonly class GrpcClientFactory
         private ?EventDispatcher $events = null,
         private ?CancellationSignal $cancellation = null,
         private ?Clock $clock = null,
+        private ?Sleeper $sleeper = null,
     ) {}
 
     /**
@@ -186,6 +188,7 @@ final readonly class GrpcClientFactory
                 self::float($retry, 'jitter_ratio', 0.0),
             ),
             $this->cancellation,
+            $this->sleeper,
         );
     }
 }
