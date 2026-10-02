@@ -14,6 +14,7 @@ use Infocyph\TalkingBytes\Core\Event\EventDispatcher;
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
 use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
 use Infocyph\TalkingBytes\Core\Support\Clock;
+use Infocyph\TalkingBytes\Core\Support\Sleeper;
 use Infocyph\TalkingBytes\Http\Body\MultipartBody;
 use Infocyph\TalkingBytes\Http\Contract\HttpMiddleware;
 use Infocyph\TalkingBytes\Http\Contract\HttpTransport;
@@ -104,8 +105,9 @@ final readonly class HttpClient
         ?HttpTransport $transport = null,
         ?Clock $clock = null,
         ?HttpClientConfig $baseConfig = null,
+        ?Sleeper $sleeper = null,
     ): self {
-        $factory = new HttpClientFactory($events, $cancellation, $clock);
+        $factory = new HttpClientFactory($events, $cancellation, $clock, $sleeper);
 
         return $baseConfig === null
             ? $factory->fromArray($config, $transport)
@@ -345,8 +347,9 @@ final readonly class HttpClient
     public function withHttpRetry(
         ?HttpRetryPolicy $policy = null,
         ?CancellationSignal $cancellation = null,
+        ?Sleeper $sleeper = null,
     ): self {
-        return $this->withRetry($policy ?? HttpRetryPolicy::standard(), $cancellation);
+        return $this->withRetry($policy ?? HttpRetryPolicy::standard(), $cancellation, $sleeper);
     }
 
     public function withIdempotency(string $headerName = 'Idempotency-Key'): self
@@ -380,9 +383,12 @@ final readonly class HttpClient
         return $this->withMiddleware(new RateLimitMiddleware($rateLimiter));
     }
 
-    public function withRetry(RetryPolicy $policy, ?CancellationSignal $cancellation = null): self
-    {
-        return $this->withMiddleware(new RetryMiddleware($policy, $cancellation));
+    public function withRetry(
+        RetryPolicy $policy,
+        ?CancellationSignal $cancellation = null,
+        ?Sleeper $sleeper = null,
+    ): self {
+        return $this->withMiddleware(new RetryMiddleware($policy, $cancellation, $sleeper));
     }
 
     public function withSigner(RequestSigner $signer): self
