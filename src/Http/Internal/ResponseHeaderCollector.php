@@ -8,18 +8,14 @@ use InvalidArgumentException;
 
 final class ResponseHeaderCollector
 {
-    /**
-     * @var array<string, string|list<string>>
-     */
+    /** @var array<string, string|list<string>> */
     private array $activeHeaders = [];
 
     private ?string $error = null;
 
     private int $fieldCount = 0;
 
-    /**
-     * @var array<string, string|list<string>>
-     */
+    /** @var array<string, string|list<string>> */
     private array $headers = [];
 
     private int $receivedBytes = 0;
@@ -41,35 +37,43 @@ final class ResponseHeaderCollector
     public function collect(string $line): int
     {
         $length = strlen($line);
-        $this->receivedBytes += $length;
-        if ($this->maxBytes !== null && $this->receivedBytes > $this->maxBytes) {
-            $this->error = sprintf(
-                'HTTP response headers exceeded max allowed bytes (%d).',
-                $this->maxBytes,
-            );
-
+        if (!$this->withinByteBudget($length)) {
             return 0;
         }
 
         $trimmed = trim($line);
-
         if ($trimmed === '') {
-            if ($this->activeHeaders !== []) {
-                $this->headers = $this->activeHeaders;
-            }
+            $this->finishHeaderBlock();
 
             return $length;
         }
-
         if (str_starts_with($trimmed, 'HTTP/')) {
-            $this->activeHeaders = [];
-            if (preg_match('/^HTTP\/\S+\s+(\d{3})/', $trimmed, $matches) === 1) {
-                $this->statusCode = (int) $matches[1];
-            }
+            $this->collectStatusLine($trimmed);
 
             return $length;
         }
 
+        return $this->collectField($line, $length);
+    }
+
+    public function error(): ?string
+    {
+        return $this->error;
+    }
+
+    /** @return array<string, string|list<string>> */
+    public function headers(): array
+    {
+        return $this->headers;
+    }
+
+    public function statusCode(): ?int
+    {
+        return $this->statusCode;
+    }
+
+    private function collectField(string $line, int $length): int
+    {
         $position = strpos($line, ':');
         if ($position === false) {
             return $length;
@@ -87,41 +91,47 @@ final class ResponseHeaderCollector
 
         $name = strtolower(trim(substr($line, 0, $position)));
         $value = trim(substr($line, $position + 1));
+        $existing = $this->activeHeaders[$name] ?? null;
 
-        if (!isset($this->activeHeaders[$name])) {
+        if ($existing === null) {
             $this->activeHeaders[$name] = $value;
-
-            return $length;
-        }
-
-        $existing = $this->activeHeaders[$name];
-        if (is_array($existing)) {
+        } elseif (is_array($existing)) {
             $existing[] = $value;
             $this->activeHeaders[$name] = $existing;
-
-            return $length;
+        } else {
+            $this->activeHeaders[$name] = [$existing, $value];
         }
-
-        $this->activeHeaders[$name] = [$existing, $value];
 
         return $length;
     }
 
-    public function error(): ?string
+    private function collectStatusLine(string $line): void
     {
-        return $this->error;
+        $this->activeHeaders = [];
+        if (preg_match('/^HTTP\/\S+\s+(\d{3})/', $line, $matches) === 1) {
+            $this->statusCode = (int) $matches[1];
+        }
     }
 
-    /**
-     * @return array<string, string|list<string>>
-     */
-    public function headers(): array
+    private function finishHeaderBlock(): void
     {
-        return $this->headers;
+        if ($this->activeHeaders !== []) {
+            $this->headers = $this->activeHeaders;
+        }
     }
 
-    public function statusCode(): ?int
+    private function withinByteBudget(int $length): bool
     {
-        return $this->statusCode;
+        $this->receivedBytes += $length;
+        if ($this->maxBytes === null || $this->receivedBytes <= $this->maxBytes) {
+            return true;
+        }
+
+        $this->error = sprintf(
+            'HTTP response headers exceeded max allowed bytes (%d).',
+            $this->maxBytes,
+        );
+
+        return false;
     }
 }
