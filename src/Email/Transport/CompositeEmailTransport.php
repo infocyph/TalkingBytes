@@ -11,98 +11,6 @@ use Infocyph\TalkingBytes\Email\EmailMessage;
 
 final readonly class CompositeEmailTransport implements EmailTransport
 {
-    /**
-     * @param list<EmailTransport> $fallbackTransports
-     */
-    public function __construct(
-        private EmailTransport $primaryTransport,
-        private array $fallbackTransports = [],
-        private ?CancellationSignal $cancellation = null,
-        private ?OperationDeadline $deadline = null,
-    ) {}
-
-    public function send(EmailMessage $message): CommunicationResult
-    {
-        $attemptedTransports = [];
-        $preflight = $this->preflightFailure($attemptedTransports);
-        if ($preflight !== null) {
-            return $preflight;
-        }
-
-        $primaryResult = $this->primaryTransport->send($message);
-        $attemptedTransports[] = $this->primaryTransport::class;
-
-        if ($primaryResult->successful) {
-            return $primaryResult;
-        }
-        if ($this->isTerminalExecutionFailure($primaryResult)) {
-            return $this->terminalFailure($primaryResult, $attemptedTransports);
-        }
-
-        foreach ($this->fallbackTransports as $transport) {
-            $preflight = $this->preflightFailure($attemptedTransports);
-            if ($preflight !== null) {
-                return $preflight;
-            }
-
-            $attemptedTransports[] = $transport::class;
-            $result = $transport->send($message);
-
-            if ($result->successful) {
-                $metadata = $result->metadata;
-                $metadata['fallback_used'] = true;
-                $metadata['attempted_transports'] = $attemptedTransports;
-
-                return new CommunicationResult(
-                    true,
-                    $result->statusCode,
-                    null,
-                    $result->response,
-                    $metadata,
-                );
-            }
-            if ($this->isTerminalExecutionFailure($result)) {
-                return $this->terminalFailure($result, $attemptedTransports);
-            }
-
-            $primaryResult = $result;
-        }
-
-        $metadata = $primaryResult->metadata;
-        $metadata['attempted_transports'] = $attemptedTransports;
-
-        return CommunicationResult::failure(
-            $primaryResult->error ?? 'All configured transports failed.',
-            statusCode: $primaryResult->statusCode,
-            response: $primaryResult->response,
-            metadata: $metadata,
-        );
-    }
-
-    private function isTerminalExecutionFailure(CommunicationResult $result): bool
-    {
-        return ($result->metadata['cancelled'] ?? false) === true
-            || ($result->metadata['deadline_exceeded'] ?? false) === true;
-    }
-
-    /**
-     * @param list<class-string<EmailTransport>> $attemptedTransports
-     */
-    private function terminalFailure(
-        CommunicationResult $result,
-        array $attemptedTransports,
-    ): CommunicationResult {
-        return CommunicationResult::failure(
-            $result->error ?? 'Email operation terminated.',
-            statusCode: $result->statusCode,
-            response: $result->response,
-            metadata: [
-                ...$result->metadata,
-                'attempted_transports' => $attemptedTransports,
-            ],
-        );
-    }
-
     /** @phpstan-impure */
     private function cancellationRequested(): bool
     {
@@ -152,4 +60,14 @@ final readonly class CompositeEmailTransport implements EmailTransport
 
         return null;
     }
+
+    /**
+     * @param list<EmailTransport> $fallbackTransports
+     */
+    public function __construct(
+        private EmailTransport $primaryTransport,
+        private array $fallbackTransports = [],
+        private ?CancellationSignal $cancellation = null,
+        private ?OperationDeadline $deadline = null,
+    ) {}
 }
