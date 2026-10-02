@@ -87,6 +87,8 @@ final readonly class HttpClient
                 caBundle: $config->caBundle,
                 userAgent: $config->userAgent,
                 maxResponseBytes: $config->maxResponseBytes,
+                maxResponseHeaderBytes: $config->maxResponseHeaderBytes,
+                maxResponseHeaderCount: $config->maxResponseHeaderCount,
             ),
             defaultHeaders: $config->defaultHeaders,
         );
@@ -490,6 +492,20 @@ final readonly class HttpClient
             && !$request->options->isExplicit('maxResponseBytes')
         ) {
             $request = $request->maxResponseBytes($this->defaultOptions->maxResponseBytes);
+        }
+
+        if (
+            $this->defaultOptions->maxResponseHeaderBytes !== null
+            && !$request->options->isExplicit('maxResponseHeaderBytes')
+        ) {
+            $request = $request->maxResponseHeaderBytes($this->defaultOptions->maxResponseHeaderBytes);
+        }
+
+        if (
+            $this->defaultOptions->maxResponseHeaderCount !== null
+            && !$request->options->isExplicit('maxResponseHeaderCount')
+        ) {
+            $request = $request->maxResponseHeaderCount($this->defaultOptions->maxResponseHeaderCount);
         }
 
         return $request;
