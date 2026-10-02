@@ -34,6 +34,7 @@ It provides:
    events
    middleware-and-resilience
    resolved-composition
+   runwire-integration
    testing
    security
    performance
