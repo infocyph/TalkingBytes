@@ -7,6 +7,7 @@ namespace Infocyph\TalkingBytes\Email\Mailbox;
 use Infocyph\TalkingBytes\Core\Event\BestEffortEventDispatcher;
 use Infocyph\TalkingBytes\Core\Event\EventDispatcher;
 use Infocyph\TalkingBytes\Core\Event\NullEventDispatcher;
+use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
 use Infocyph\TalkingBytes\Core\Support\Clock;
 use Infocyph\TalkingBytes\Core\Support\OperationDeadline;
 use Infocyph\TalkingBytes\Core\Support\Sleeper;
@@ -39,6 +40,8 @@ final class Pop3SocketTransport implements Pop3Transport
         ?EventDispatcher $events = null,
         ?Clock $clock = null,
         ?Sleeper $sleeper = null,
+        private readonly ?CancellationSignal $cancellation = null,
+        private readonly ?OperationDeadline $operationDeadline = null,
     ) {
         $this->events = new BestEffortEventDispatcher($events ?? new NullEventDispatcher());
         $this->clock = $clock ?? Clock::system();
@@ -62,6 +65,8 @@ final class Pop3SocketTransport implements Pop3Transport
 
     public function connect(): void
     {
+        $this->assertExecutionAllowed();
+
         if (is_resource($this->connection)) {
             return;
         }
@@ -234,10 +239,21 @@ final class Pop3SocketTransport implements Pop3Transport
         $stop = $shouldStop ?? static fn(): bool => false;
         $deadline = $this->clock->monotonic() + max(1, $timeoutSeconds);
 
-        while ($this->clock->monotonic() < $deadline && !$stop()) {
+        while ($this->clock->monotonic() < $deadline && !$stop() && !$this->executionStopRequested()) {
             $status = $this->status();
             $onEvent(sprintf('+OK %d messages', $status->messages));
             $this->sleeper->milliseconds(250);
+        }
+    }
+
+    private function assertExecutionAllowed(): void
+    {
+        if ($this->cancellation?->isRequested() === true) {
+            throw new MailboxConnectionException('POP3 operation cancelled.');
+        }
+
+        if ($this->operationDeadline?->expired() === true) {
+            throw new MailboxConnectionException('POP3 operation deadline exceeded.');
         }
     }
 
@@ -266,6 +282,20 @@ final class Pop3SocketTransport implements Pop3Transport
 
         $this->connection = null;
         $this->capabilities = [];
+    }
+
+    private function commandDeadline(): OperationDeadline
+    {
+        $deadline = OperationDeadline::after((float) $this->config->timeoutSeconds, $this->clock);
+
+        return $this->operationDeadline?->earliest($deadline) ?? $deadline;
+    }
+
+    /** @phpstan-impure */
+    private function executionStopRequested(): bool
+    {
+        return $this->cancellation?->isRequested() === true
+            || $this->operationDeadline?->expired() === true;
     }
 
     /**
@@ -333,9 +363,11 @@ final class Pop3SocketTransport implements Pop3Transport
 
     private function readLineUntil(OperationDeadline $deadline): string
     {
+        $this->assertExecutionAllowed();
         $connection = $this->requireConnection();
         $this->applyReadDeadline($connection, $deadline);
         $line = SocketMailboxRuntime::readLine($connection, 'pop3');
+        $this->assertExecutionAllowed();
         if ($deadline->expired()) {
             throw new MailboxConnectionException('POP3 command deadline exceeded.');
         }
@@ -348,7 +380,7 @@ final class Pop3SocketTransport implements Pop3Transport
      */
     private function readMultilineResponse(?OperationDeadline $deadline = null): array
     {
-        $deadline ??= OperationDeadline::after((float) $this->config->timeoutSeconds, $this->clock);
+        $deadline ??= $this->commandDeadline();
         $lines = [];
         $bytes = 0;
 
@@ -380,7 +412,7 @@ final class Pop3SocketTransport implements Pop3Transport
 
     private function refreshCapabilities(): void
     {
-        $deadline = OperationDeadline::after((float) $this->config->timeoutSeconds, $this->clock);
+        $deadline = $this->commandDeadline();
 
         try {
             $this->write("CAPA\r\n");
@@ -436,7 +468,7 @@ final class Pop3SocketTransport implements Pop3Transport
      */
     private function runMultilineCommand(string $command, string $stage): array
     {
-        $deadline = OperationDeadline::after((float) $this->config->timeoutSeconds, $this->clock);
+        $deadline = $this->commandDeadline();
 
         try {
             $status = $this->runSingleCommand($command, $deadline);
@@ -450,6 +482,7 @@ final class Pop3SocketTransport implements Pop3Transport
 
     private function runSingleCommand(string $command, ?OperationDeadline $deadline = null): string
     {
+        $this->assertExecutionAllowed();
         $start = SocketMailboxRuntime::dispatchStart('pop3', $command, [
             'host' => $this->config->host,
             'port' => $this->config->port,
