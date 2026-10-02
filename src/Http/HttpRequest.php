@@ -9,6 +9,7 @@ use Infocyph\TalkingBytes\Auth\AuthenticatorInterface;
 use Infocyph\TalkingBytes\Auth\BasicAuth;
 use Infocyph\TalkingBytes\Auth\BearerTokenAuth;
 use Infocyph\TalkingBytes\Auth\SignedRequestAuth;
+use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
 use Infocyph\TalkingBytes\Core\Support\OperationDeadline;
 use Infocyph\TalkingBytes\Http\Body\FormBody;
 use Infocyph\TalkingBytes\Http\Body\HttpBody;
@@ -212,6 +213,13 @@ final readonly class HttpRequest
         }
 
         return $base;
+    }
+
+    public function cancellationSignal(): ?CancellationSignal
+    {
+        $cancellation = $this->metadata['_cancellation_signal'] ?? null;
+
+        return $cancellation instanceof CancellationSignal ? $cancellation : null;
     }
 
     public function caBundle(string $path): self
@@ -648,6 +656,14 @@ final readonly class HttpRequest
             $authenticators,
             $this->metadata,
         );
+    }
+
+    public function withCancellationSignal(CancellationSignal $cancellation): self
+    {
+        return $this->metadata([
+            ...$this->metadata,
+            '_cancellation_signal' => $cancellation,
+        ]);
     }
 
     public function withBasicAuth(#[\SensitiveParameter] string $username, #[\SensitiveParameter] string $password): self
