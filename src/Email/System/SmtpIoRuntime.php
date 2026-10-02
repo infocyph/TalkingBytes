@@ -54,13 +54,19 @@ final readonly class SmtpIoRuntime
 
         while ($bytesWritten < $dataLength) {
             $this->assertExecutionAllowed($deadline);
-            if ($this->streamWaiter !== null && !$this->streamWaiter->waitWritable($connection, $deadline)) {
-                $this->assertExecutionAllowed($deadline);
+            $effectiveDeadline = $this->operationDeadline?->earliest($deadline) ?? $deadline;
+            if ($this->streamWaiter !== null) {
+                if (!$this->streamWaiter->waitWritable($connection, $effectiveDeadline)) {
+                    $this->assertExecutionAllowed($deadline);
 
-                throw new RuntimeException('SMTP cooperative write wait was interrupted.');
+                    throw new RuntimeException('SMTP cooperative write wait was interrupted.');
+                }
+            } else {
+                $this->applyBlockingTimeout($connection, $effectiveDeadline);
             }
 
             $written = fwrite($connection, substr($data, $bytesWritten));
+            $this->assertExecutionAllowed($deadline);
             if ($written === false) {
                 throw new RuntimeException('Failed to write to SMTP server socket.');
             }
@@ -73,6 +79,27 @@ final readonly class SmtpIoRuntime
             }
 
             $bytesWritten += $written;
+        }
+    }
+
+    /**
+     * @param resource $connection
+     */
+    private function applyBlockingTimeout(mixed $connection, OperationDeadline $deadline): void
+    {
+        $remainingMicros = $deadline->remainingMicroseconds();
+        if ($remainingMicros === 0) {
+            $this->assertExecutionAllowed($deadline);
+
+            throw new RuntimeException('SMTP command deadline exceeded.');
+        }
+
+        if (!stream_set_timeout(
+            $connection,
+            intdiv($remainingMicros, 1_000_000),
+            $remainingMicros % 1_000_000,
+        )) {
+            throw new RuntimeException('Unable to bound SMTP socket write by the operation deadline.');
         }
     }
 
