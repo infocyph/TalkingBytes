@@ -101,6 +101,7 @@ final readonly class GeneratedStubGrpcInvoker implements NativeGrpcInvoker, Nati
         GrpcMetadata $headers,
         ?float $deadlineSeconds = null,
     ): NativeGrpcResult {
+        $this->assertNotCancelled();
         $call = $this->invokeStubMethod(
             $this->resolveMethodName($method),
             [
@@ -110,7 +111,17 @@ final readonly class GeneratedStubGrpcInvoker implements NativeGrpcInvoker, Nati
             ],
         );
 
-        return $this->finalizeCall($call);
+        try {
+            $this->assertNotCancelled();
+            $result = $this->finalizeCall($call);
+            $this->assertNotCancelled();
+
+            return $result;
+        } catch (Throwable $exception) {
+            $this->cancelCall($call);
+
+            throw $exception;
+        }
     }
 
     public function serverStream(
@@ -158,7 +169,7 @@ final readonly class GeneratedStubGrpcInvoker implements NativeGrpcInvoker, Nati
     private function assertNotCancelled(): void
     {
         if ($this->cancellation?->isRequested() === true) {
-            throw new RuntimeException('gRPC stream operation cancelled.');
+            throw new RuntimeException('gRPC operation cancelled.');
         }
     }
 
