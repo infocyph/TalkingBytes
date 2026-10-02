@@ -258,6 +258,21 @@ final readonly class CurlTransport implements HttpTransport
         return $jar instanceof CookieJar ? $jar : null;
     }
 
+    private function cancellationFailure(HttpRequest $request): ?CommunicationResult
+    {
+        if ($request->cancellationSignal()?->isRequested() !== true) {
+            return null;
+        }
+
+        return CommunicationResult::failure(
+            'HTTP operation cancelled.',
+            metadata: [
+                'cancelled' => true,
+                'transport' => 'curl',
+            ],
+        );
+    }
+
     private function deadlineFailure(HttpRequest $request): ?CommunicationResult
     {
         if ($request->operationDeadline()?->expired() !== true) {
@@ -308,6 +323,11 @@ final readonly class CurlTransport implements HttpTransport
 
     private function executeSingle(HttpRequest $resolvedRequest, string $url): CommunicationResult
     {
+        $cancellationFailure = $this->cancellationFailure($resolvedRequest);
+        if ($cancellationFailure !== null) {
+            return $cancellationFailure;
+        }
+
         $deadlineFailure = $this->deadlineFailure($resolvedRequest);
         if ($deadlineFailure !== null) {
             return $deadlineFailure;
@@ -317,6 +337,11 @@ final readonly class CurlTransport implements HttpTransport
             $pinnedResolution = RequestSecurityGuard::pinnedResolution($resolvedRequest, $url);
         } catch (InvalidArgumentException $exception) {
             return CommunicationResult::failure($exception->getMessage(), metadata: ['transport' => 'curl']);
+        }
+
+        $cancellationFailure = $this->cancellationFailure($resolvedRequest);
+        if ($cancellationFailure !== null) {
+            return $cancellationFailure;
         }
 
         $deadlineFailure = $this->deadlineFailure($resolvedRequest);
@@ -365,6 +390,13 @@ final readonly class CurlTransport implements HttpTransport
                 'cURL request failed: ' . $executionError->getMessage(),
                 metadata: ['transport' => 'curl', 'exception' => $executionError::class],
             );
+        }
+
+        $cancellationFailure = $this->cancellationFailure($resolvedRequest);
+        if ($cancellationFailure !== null) {
+            $bodyCollector->abort();
+
+            return $cancellationFailure;
         }
 
         $deadlineFailure = $this->deadlineFailure($resolvedRequest);
