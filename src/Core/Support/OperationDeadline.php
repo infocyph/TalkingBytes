@@ -15,13 +15,13 @@ final readonly class OperationDeadline
 
     public static function after(float $seconds, ?Clock $clock = null): self
     {
-        if (! is_finite($seconds) || $seconds <= 0.0) {
+        if (!is_finite($seconds) || $seconds <= 0.0) {
             throw new InvalidArgumentException('Operation deadline duration must be finite and greater than zero.');
         }
 
         $clock ??= Clock::system();
         $deadlineAt = $clock->monotonic() + $seconds;
-        if (! is_finite($deadlineAt)) {
+        if (!is_finite($deadlineAt)) {
             throw new InvalidArgumentException('Operation deadline is not representable.');
         }
 
