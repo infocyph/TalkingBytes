@@ -369,16 +369,19 @@ final readonly class SmtpTransport implements EmailTransport
             while (true) {
                 $this->applyReadDeadline($connection, $deadline);
                 $line = fgets($connection, 1024);
-                if ($deadline->expired()) {
-                    throw new RuntimeException('SMTP command deadline exceeded.');
-                }
                 if ($line === false) {
                     $metadata = stream_get_meta_data($connection);
                     if ($metadata['timed_out']) {
                         throw new RuntimeException('SMTP server response timed out.');
                     }
+                    if ($deadline->expired()) {
+                        throw new RuntimeException('SMTP command deadline exceeded.');
+                    }
 
                     throw new RuntimeException('Failed to read SMTP server response.');
+                }
+                if ($deadline->expired()) {
+                    throw new RuntimeException('SMTP command deadline exceeded.');
                 }
 
                 if (!str_ends_with($line, "\n") && !feof($connection)) {
