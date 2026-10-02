@@ -1,6 +1,6 @@
 # TalkingBytes audit, hardening and Runwire integration plan
 
-Audit date: 2026-10-02 (Asia/Dhaka). Status: implementation active; Batch 1 complete and PR-verified, remaining batches pending.
+Audit date: 2026-10-02 (Asia/Dhaka). Status: implementation active; Batches 1–4 complete and PR-verified, Batch 5 active.
 
 ## Decision
 
@@ -233,8 +233,8 @@ Do not automatically fan out stateful mailbox commands over one connection, shar
 | 1 | F1 upload redirect leakage + F2 exact-byte signed uploads | ✅ Complete | PR #16 run 36958385505: PHP 8.4/8.5 stable+lowest QA, analysis, benchmarks, clean install, Mailpit, native gRPC, docs and optional-capability coldness passed. |
 | 2 | F3 MIME child-header limits + F6 RFC redirect/IPv6 correctness + cookie/resource hardening | ✅ Complete | PR #16 run 36961362557: PHP 8.4/8.5 stable+lowest QA, analysis, benchmarks, clean install, Mailpit, native gRPC, docs and optional-capability coldness passed after replacing flaky filesystem fixture readiness with a direct bounded stdout handshake. |
 | 3 | F4 cancellation + F5 total deadlines + F7 collaborator propagation | ✅ Complete | PR #16 run 36966309267: PHP 8.4/8.5 stable+lowest QA, analysis, benchmarks, clean install, Mailpit, native gRPC, docs and optional-capability coldness all passed. |
-| 4 | Optional Runwire 2.1 binding and lifecycle propagation | 🔄 Active | Implementation in progress; PR QA pending. |
-| 5 | Supported cooperative HTTP/socket/process I/O and lifecycle matrix | ⏳ Pending | Pending |
+| 4 | Optional Runwire 2.1 binding and lifecycle propagation | ✅ Complete | PR #16 run 36981793377: PHP 8.4/8.5 stable+lowest QA, analysis, benchmarks, clean install, Mailpit, native gRPC, docs and optional-capability coldness all passed on exact head `c8ab8bb1e4fa1545f6842a55912ef0a178fc06cc`. |
+| 5 | Supported cooperative HTTP/socket/process I/O and lifecycle matrix | 🔄 Active | Implementation in progress; PR QA pending. |
 | 6 | Duplicate/architecture/reproducibility/docs/performance/final release gates | ⏳ Pending | Pending |
 
 Batch progression is strict: implement one batch, resolve its PR QA on the exact source head, update this tracker, then start the next batch. The PR remains open and unmerged until the final release gates pass.
@@ -257,10 +257,10 @@ Batch progression is strict: implement one batch, resolve its PR QA on the exact
 
 ### Phase 3 — Optional Runwire binding
 
-- [ ] Add the explicit fluent binding and one justified internal adapter.
+- [x] Add the explicit fluent binding and one justified internal adapter.
 - [ ] Reuse host request/task instances through both direct and intermediary-library composition.
-- [ ] Capability checks occur once per binding where stable; live cancellation/deadline checks remain live.
-- [ ] Normal path stays cold when unbound; custom transports and stronger caller policy remain authoritative.
+- [x] Capability checks occur once per binding where stable; live cancellation/deadline checks remain live.
+- [x] Normal path stays cold when unbound; custom transports and stronger caller policy remain authoritative.
 - [ ] Complete automatic cancellation/deadline/cooperative retry waits as an internal milestone of the single release, with honest blocking-I/O documentation.
 
 ### Phase 4 — Complete supported cooperative I/O
