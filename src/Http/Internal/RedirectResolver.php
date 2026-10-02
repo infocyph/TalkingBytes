@@ -25,9 +25,7 @@ final class RedirectResolver
             throw new InvalidArgumentException('Unable to resolve HTTP redirect against the request URL.');
         }
 
-        $target = self::resolveComponents($base, $reference);
-
-        return self::buildUrl($target);
+        return self::buildUrl(self::resolveComponents($base, $reference));
     }
 
     /**
@@ -73,6 +71,7 @@ final class RedirectResolver
             $url .= '//' . $target['authority'];
         }
         $url .= $target['path'];
+
         if (array_key_exists('query', $target)) {
             $url .= '?' . $target['query'];
         }
@@ -94,11 +93,10 @@ final class RedirectResolver
         }
 
         $slash = strrpos($basePath, '/');
-        if ($slash === false) {
-            return $referencePath;
-        }
 
-        return substr($basePath, 0, $slash + 1) . $referencePath;
+        return $slash === false
+            ? $referencePath
+            : substr($basePath, 0, $slash + 1) . $referencePath;
     }
 
     private static function normalizeHost(string $host): string
@@ -169,6 +167,39 @@ final class RedirectResolver
     }
 
     /**
+     * @param array<string, int|string> $reference
+     * @return array{scheme:string, authority?:string, path:string, query?:string, fragment?:string}
+     */
+    private static function resolveAbsoluteReference(array $reference): array
+    {
+        $target = [
+            'scheme' => (string) $reference['scheme'],
+            'path' => self::removeDotSegments((string) ($reference['path'] ?? '')),
+        ];
+        if (isset($reference['host'])) {
+            $target['authority'] = self::authority($reference);
+        }
+
+        return self::withFragment(self::withQuery($target, $reference), $reference);
+    }
+
+    /**
+     * @param array<string, int|string> $base
+     * @param array<string, int|string> $reference
+     * @return array{scheme:string, authority:string, path:string, query?:string, fragment?:string}
+     */
+    private static function resolveAuthorityReference(array $base, array $reference): array
+    {
+        $target = [
+            'scheme' => (string) $base['scheme'],
+            'authority' => self::authority($reference),
+            'path' => self::removeDotSegments((string) ($reference['path'] ?? '')),
+        ];
+
+        return self::withFragment(self::withQuery($target, $reference), $reference);
+    }
+
+    /**
      * @param array<string, int|string> $base
      * @param array<string, int|string> $reference
      * @return array{scheme:string, authority?:string, path:string, query?:string, fragment?:string}
@@ -176,57 +207,44 @@ final class RedirectResolver
     private static function resolveComponents(array $base, array $reference): array
     {
         if (isset($reference['scheme'])) {
-            $target = [
-                'scheme' => (string) $reference['scheme'],
-                'path' => self::removeDotSegments((string) ($reference['path'] ?? '')),
-            ];
-            if (isset($reference['host'])) {
-                $target['authority'] = self::authority($reference);
-            }
-            if (array_key_exists('query', $reference)) {
-                $target['query'] = (string) $reference['query'];
-            }
-
-            return self::withFragment($target, $reference);
+            return self::resolveAbsoluteReference($reference);
+        }
+        if (isset($reference['host'])) {
+            return self::resolveAuthorityReference($base, $reference);
         }
 
+        return self::resolveRelativeReference($base, $reference);
+    }
+
+    /**
+     * @param array<string, int|string> $base
+     * @param array<string, int|string> $reference
+     * @return array{scheme:string, authority:string, path:string, query?:string, fragment?:string}
+     */
+    private static function resolveRelativeReference(array $base, array $reference): array
+    {
+        $referencePath = (string) ($reference['path'] ?? '');
         $target = [
             'scheme' => (string) $base['scheme'],
-            'authority' => isset($reference['host'])
-                ? self::authority($reference)
-                : self::authority($base),
-            'path' => '',
+            'authority' => self::authority($base),
+            'path' => (string) ($base['path'] ?? ''),
         ];
 
-        if (isset($reference['host'])) {
-            $target['path'] = self::removeDotSegments((string) ($reference['path'] ?? ''));
-            if (array_key_exists('query', $reference)) {
-                $target['query'] = (string) $reference['query'];
-            }
+        if ($referencePath === '') {
+            $target = array_key_exists('query', $reference)
+                ? self::withQuery($target, $reference)
+                : self::withQuery($target, $base);
 
             return self::withFragment($target, $reference);
         }
 
-        $referencePath = (string) ($reference['path'] ?? '');
-        if ($referencePath === '') {
-            $target['path'] = (string) ($base['path'] ?? '');
-            if (array_key_exists('query', $reference)) {
-                $target['query'] = (string) $reference['query'];
-            } elseif (array_key_exists('query', $base)) {
-                $target['query'] = (string) $base['query'];
-            }
-        } else {
-            $target['path'] = self::removeDotSegments(
-                str_starts_with($referencePath, '/')
-                    ? $referencePath
-                    : self::mergePath($base, $referencePath),
-            );
-            if (array_key_exists('query', $reference)) {
-                $target['query'] = (string) $reference['query'];
-            }
-        }
+        $target['path'] = self::removeDotSegments(
+            str_starts_with($referencePath, '/')
+                ? $referencePath
+                : self::mergePath($base, $referencePath),
+        );
 
-        return self::withFragment($target, $reference);
+        return self::withFragment(self::withQuery($target, $reference), $reference);
     }
 
     /**
@@ -245,13 +263,27 @@ final class RedirectResolver
 
     /**
      * @param array{scheme:string, authority?:string, path:string, query?:string, fragment?:string} $target
-     * @param array<string, int|string> $reference
+     * @param array<string, int|string> $source
      * @return array{scheme:string, authority?:string, path:string, query?:string, fragment?:string}
      */
-    private static function withFragment(array $target, array $reference): array
+    private static function withFragment(array $target, array $source): array
     {
-        if (array_key_exists('fragment', $reference)) {
-            $target['fragment'] = (string) $reference['fragment'];
+        if (array_key_exists('fragment', $source)) {
+            $target['fragment'] = (string) $source['fragment'];
+        }
+
+        return $target;
+    }
+
+    /**
+     * @param array{scheme:string, authority?:string, path:string, query?:string, fragment?:string} $target
+     * @param array<string, int|string> $source
+     * @return array{scheme:string, authority?:string, path:string, query?:string, fragment?:string}
+     */
+    private static function withQuery(array $target, array $source): array
+    {
+        if (array_key_exists('query', $source)) {
+            $target['query'] = (string) $source['query'];
         }
 
         return $target;
