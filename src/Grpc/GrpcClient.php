@@ -217,7 +217,14 @@ final readonly class GrpcClient
      */
     public function withMiddlewares(array $middlewares): self
     {
-        return new self($this->transport, $middlewares, $this->streamingInvoker, $this->events, $this->clock);
+        return new self(
+            $this->transport,
+            $middlewares,
+            $this->streamingInvoker,
+            $this->events,
+            $this->clock,
+            $this->cancellation,
+        );
     }
 
     public function withRetryPolicy(
