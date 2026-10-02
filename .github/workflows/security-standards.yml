@@ -62,34 +62,34 @@ jobs:
       - name: Run 2.2 sustained baseline
         run: |
           mkdir -p build/sustained-performance
-          php benchmarks/HttpSustainedPerformance.php \
+          php .automation/scripts/ci/http-sustained-performance.php \
             baseline/vendor/autoload.php \
-            benchmarks/Fixtures/http-sustained-server.php \
+            .automation/scripts/ci/http-sustained-server.php \
             build/sustained-performance/baseline.json \
             unbound \
             "${{ steps.revisions.outputs.baseline }}"
 
       - name: Run 2.3 sustained unbound candidate
         run: |
-          php benchmarks/HttpSustainedPerformance.php \
+          php .automation/scripts/ci/http-sustained-performance.php \
             vendor/autoload.php \
-            benchmarks/Fixtures/http-sustained-server.php \
+            .automation/scripts/ci/http-sustained-server.php \
             build/sustained-performance/candidate-unbound.json \
             unbound \
             "${{ steps.revisions.outputs.candidate }}"
 
       - name: Run 2.3 sustained Runwire candidate
         run: |
-          php benchmarks/HttpSustainedPerformance.php \
+          php .automation/scripts/ci/http-sustained-performance.php \
             vendor/autoload.php \
-            benchmarks/Fixtures/http-sustained-server.php \
+            .automation/scripts/ci/http-sustained-server.php \
             build/sustained-performance/candidate-runwire.json \
             runwire \
             "${{ steps.revisions.outputs.candidate }}"
 
       - name: Enforce sustained throughput acceptance
         run: |
-          php benchmarks/CompareSustainedPerformance.php \
+          php .automation/scripts/ci/compare-sustained-performance.php \
             build/sustained-performance/baseline.json \
             build/sustained-performance/candidate-unbound.json \
             build/sustained-performance/candidate-runwire.json \
