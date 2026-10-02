@@ -10,6 +10,7 @@ use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
 use Infocyph\TalkingBytes\Core\Support\Clock;
 use Infocyph\TalkingBytes\Core\Support\Sleeper;
 use Infocyph\TalkingBytes\Grpc\Contract\GrpcMiddleware;
+use Infocyph\TalkingBytes\Grpc\GrpcStatus;
 use Infocyph\TalkingBytes\Grpc\Sender\GrpcRequest;
 use Infocyph\TalkingBytes\Retry\RetryContext;
 use Infocyph\TalkingBytes\Retry\RetryPolicy;
@@ -48,10 +49,17 @@ final readonly class RetryMiddleware implements GrpcMiddleware
             }
 
             $attemptRequest = $this->withRemainingDeadline($request, $startedAt);
+            if ($attemptRequest === null) {
+                return $this->deadlineExceeded($attempt - 1);
+            }
+
             $result = $next($attemptRequest);
             $decision = $this->policy->decide(new RetryContext($attempt, $result));
-            if (!$decision->retry || !$this->delayFitsDeadline($request, $startedAt, $decision->delayMs)) {
+            if (!$decision->retry) {
                 return $result;
+            }
+            if (!$this->delayFitsDeadline($request, $startedAt, $decision->delayMs)) {
+                return $this->deadlineExceeded($attempt);
             }
 
             if ($this->cancellation === null) {
@@ -75,6 +83,19 @@ final readonly class RetryMiddleware implements GrpcMiddleware
         );
     }
 
+    private function deadlineExceeded(int $attempts): CommunicationResult
+    {
+        return CommunicationResult::failure(
+            'gRPC operation deadline exceeded.',
+            statusCode: GrpcStatus::DeadlineExceeded->value,
+            metadata: [
+                'deadline_exceeded' => true,
+                'attempts' => max(0, $attempts),
+                'transport' => 'grpc',
+            ],
+        );
+    }
+
     private function delayFitsDeadline(GrpcRequest $request, float $startedAt, int $delayMs): bool
     {
         if ($request->deadlineSeconds === null) {
@@ -84,7 +105,7 @@ final readonly class RetryMiddleware implements GrpcMiddleware
         return ($this->clock->monotonic() - $startedAt) + ($delayMs / 1000) < $request->deadlineSeconds;
     }
 
-    private function withRemainingDeadline(GrpcRequest $request, float $startedAt): GrpcRequest
+    private function withRemainingDeadline(GrpcRequest $request, float $startedAt): ?GrpcRequest
     {
         if ($request->deadlineSeconds === null) {
             return $request;
@@ -92,7 +113,7 @@ final readonly class RetryMiddleware implements GrpcMiddleware
 
         $remaining = $request->deadlineSeconds - ($this->clock->monotonic() - $startedAt);
         if ($remaining <= 0.0) {
-            return $request->withDeadlineSeconds(0.000001);
+            return null;
         }
 
         return $request->withDeadlineSeconds($remaining);
