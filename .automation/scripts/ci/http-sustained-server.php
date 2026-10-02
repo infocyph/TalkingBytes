@@ -31,6 +31,19 @@ $clients = [];
 $completed = 0;
 $deadline = microtime(true) + 30.0;
 
+$withoutStreamWarnings = static function (callable $operation): mixed {
+    set_error_handler(
+        static fn(): bool => true,
+        E_NOTICE | E_WARNING,
+    );
+
+    try {
+        return $operation();
+    } finally {
+        restore_error_handler();
+    }
+};
+
 while ($completed < $expectedRequests && microtime(true) < $deadline) {
     $read = [$server];
     foreach ($clients as $client) {
@@ -41,11 +54,15 @@ while ($completed < $expectedRequests && microtime(true) < $deadline) {
 
     $write = [];
     $except = [];
-    stream_select($read, $write, $except, 0, 5_000);
+    $withoutStreamWarnings(
+        static fn(): int|false => stream_select($read, $write, $except, 0, 5_000),
+    );
 
     foreach ($read as $stream) {
         if ($stream === $server) {
-            while (($client = stream_socket_accept($server, 0)) !== false) {
+            while (($client = $withoutStreamWarnings(
+                static fn(): mixed => stream_socket_accept($server, 0),
+            )) !== false) {
                 stream_set_blocking($client, false);
                 $clients[(int) $client] = [
                     'stream' => $client,
@@ -62,7 +79,9 @@ while ($completed < $expectedRequests && microtime(true) < $deadline) {
             continue;
         }
 
-        $chunk = fread($stream, 8192);
+        $chunk = $withoutStreamWarnings(
+            static fn(): string|false => fread($stream, 8192),
+        );
         if (!is_string($chunk) || $chunk === '') {
             continue;
         }
@@ -86,7 +105,9 @@ while ($completed < $expectedRequests && microtime(true) < $deadline) {
             . "Connection: close\r\n\r\n"
             . $body;
 
-        fwrite($client['stream'], $response);
+        $withoutStreamWarnings(
+            static fn(): int|false => fwrite($client['stream'], $response),
+        );
         fclose($client['stream']);
         unset($clients[$id]);
         $completed++;
