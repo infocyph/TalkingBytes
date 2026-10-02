@@ -1,6 +1,6 @@
 # TalkingBytes audit, hardening and Runwire integration plan
 
-Audit date: 2026-10-02 (Asia/Dhaka). Status: plan revised for the user's single-release scope; protocol fixes and integration implementation pending.
+Audit date: 2026-10-02 (Asia/Dhaka). Status: implementation active; Batch 1 complete and PR-verified, remaining batches pending.
 
 ## Decision
 
@@ -226,12 +226,25 @@ Do not automatically fan out stateful mailbox commands over one connection, shar
 - Test minimum supported 2.1 and latest supported 2.x independently. Do not assume future 3.x compatibility.
 - Runwire requires 64-bit PHP; apply that prerequisite to its integration path without silently raising TalkingBytes' standalone requirements.
 
+## Implementation tracker
+
+| Batch | Scope | Status | PR QA evidence |
+| --- | --- | --- | --- |
+| 1 | F1 upload redirect leakage + F2 exact-byte signed uploads | ✅ Complete | PR #16 run 36958385505: PHP 8.4/8.5 stable+lowest QA, analysis, benchmarks, clean install, Mailpit, native gRPC, docs and optional-capability coldness passed. |
+| 2 | F3 MIME child-header limits + F6 RFC redirect/IPv6 correctness + cookie/resource hardening | 🔄 Active | Pending |
+| 3 | F4 cancellation + F5 total deadlines + F7 collaborator propagation | ⏳ Pending | Pending |
+| 4 | Optional Runwire 2.1 binding and lifecycle propagation | ⏳ Pending | Pending |
+| 5 | Supported cooperative HTTP/socket/process I/O and lifecycle matrix | ⏳ Pending | Pending |
+| 6 | Duplicate/architecture/reproducibility/docs/performance/final release gates | ⏳ Pending | Pending |
+
+Batch progression is strict: implement one batch, resolve its PR QA on the exact source head, update this tracker, then start the next batch. The PR remains open and unmerged until the final release gates pass.
+
 ## Implementation order and acceptance
 
 ### Phase 1 — Fix security and correctness
 
 - [ ] Turn F1–F7 reproductions into focused regressions in the existing HTTP signing/security/streaming, MIME limits, runtime cancellation, gRPC retry and IMAP literal test files.
-- [ ] Fix upload redirect and signing failures first, then parser/deadline/cancellation/URL/composition gaps.
+- [x] Fix upload redirect and signing failures first, then parser/deadline/cancellation/URL/composition gaps. F1/F2 completed in Batch 1; remaining findings continue in later batches.
 - [ ] Cover cookie integrity and clarify resource-limit policy; distinguish safe bug fixes from newly configurable policies.
 - [ ] Prepare the security section of the combined 2.3.0 release notes, including affected configurations and signed-upload tightening. Prepare private security reporting if warranted by the confirmed impact; do not publish a vulnerability announcement automatically.
 
