@@ -39,7 +39,7 @@ final readonly class RawEmailParser implements EmailParser
         }
 
         [$headerBlock, $body] = $this->splitRawMessage($rawEmail);
-        $this->assertHeaderLimits($headerBlock);
+        HeaderLimitValidator::assertWithin($headerBlock, $this->limits);
         $headers = $this->headerParser->parse($headerBlock);
         $rootPart = $this->mimeParser->parse($headers, $body);
         $this->assertMimeLimits($rootPart);
@@ -112,37 +112,6 @@ final readonly class RawEmailParser implements EmailParser
                     $this->limits->maxDecodedBodyBytes,
                 ));
             }
-        }
-    }
-
-    private function assertHeaderLimits(string $headerBlock): void
-    {
-        if (strlen($headerBlock) > $this->limits->maxHeaderBytes) {
-            throw new EmailParseException(sprintf(
-                'Header section exceeds limit (%d bytes).',
-                $this->limits->maxHeaderBytes,
-            ));
-        }
-
-        $headerLines = preg_split('/\r\n/', $headerBlock) ?: [];
-        $fieldCount = 0;
-        foreach ($headerLines as $line) {
-            if (strlen($line) > $this->limits->maxHeaderLineBytes) {
-                throw new EmailParseException(sprintf(
-                    'Header line exceeds limit (%d bytes).',
-                    $this->limits->maxHeaderLineBytes,
-                ));
-            }
-            if ($line !== '' && !str_starts_with($line, ' ') && !str_starts_with($line, "\t")) {
-                $fieldCount++;
-            }
-        }
-
-        if ($fieldCount > $this->limits->maxHeaderCount) {
-            throw new EmailParseException(sprintf(
-                'Header count exceeds limit (%d).',
-                $this->limits->maxHeaderCount,
-            ));
         }
     }
 
