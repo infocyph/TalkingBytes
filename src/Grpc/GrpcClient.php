@@ -198,6 +198,14 @@ final readonly class GrpcClient
 
     public function withCancellation(CancellationSignal $cancellation): self
     {
+        if ($this->cancellation !== null && $this->cancellation !== $cancellation) {
+            $current = $this->cancellation;
+            $explicit = $cancellation;
+            $cancellation = CancellationSignal::fromCallable(
+                static fn(): bool => $current->isRequested() || $explicit->isRequested(),
+            );
+        }
+
         return new self(
             $this->transport,
             $this->middlewares,
