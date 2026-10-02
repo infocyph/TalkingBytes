@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Infocyph\TalkingBytes\Email\Transport;
 
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
+use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
 use Infocyph\TalkingBytes\Email\EmailMessage;
 
 final readonly class CompositeEmailTransport implements EmailTransport
@@ -15,11 +16,15 @@ final readonly class CompositeEmailTransport implements EmailTransport
     public function __construct(
         private EmailTransport $primaryTransport,
         private array $fallbackTransports = [],
+        private ?CancellationSignal $cancellation = null,
     ) {}
 
     public function send(EmailMessage $message): CommunicationResult
     {
         $attemptedTransports = [];
+        if ($this->cancellation?->isRequested() === true) {
+            return $this->cancelled($attemptedTransports);
+        }
 
         $primaryResult = $this->primaryTransport->send($message);
         $attemptedTransports[] = $this->primaryTransport::class;
@@ -29,6 +34,10 @@ final readonly class CompositeEmailTransport implements EmailTransport
         }
 
         foreach ($this->fallbackTransports as $transport) {
+            if ($this->cancellation?->isRequested() === true) {
+                return $this->cancelled($attemptedTransports);
+            }
+
             $attemptedTransports[] = $transport::class;
             $result = $transport->send($message);
 
@@ -57,6 +66,20 @@ final readonly class CompositeEmailTransport implements EmailTransport
             statusCode: $primaryResult->statusCode,
             response: $primaryResult->response,
             metadata: $metadata,
+        );
+    }
+
+    /** @param list<class-string<EmailTransport>> $attemptedTransports */
+    private function cancelled(array $attemptedTransports): CommunicationResult
+    {
+        return CommunicationResult::failure(
+            'Email operation cancelled.',
+            metadata: [
+                'cancelled' => true,
+                'attempts' => count($attemptedTransports),
+                'attempted_transports' => $attemptedTransports,
+                'transport' => 'email',
+            ],
         );
     }
 }
