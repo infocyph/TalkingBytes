@@ -29,167 +29,6 @@ declare(strict_types=1);
  */
 final class SustainedPerformanceComparison
 {
-    /**
-     * @param PerformanceReport $report
-     * @return array<int, LevelResult>
-     */
-    private static function indexLevels(array $report): array
-    {
-        $indexed = [];
-        foreach ($report['levels'] as $level) {
-            $indexed[$level['concurrency']] = $level;
-        }
-
-        ksort($indexed);
-
-        return $indexed;
-    }
-
-    /** @return PerformanceReport */
-    private static function loadReport(string $path): array
-    {
-        $decoded = json_decode((string) file_get_contents($path), true, flags: JSON_THROW_ON_ERROR);
-        if (!is_array($decoded)) {
-            throw new RuntimeException(sprintf('Invalid sustained performance report: %s', $path));
-        }
-
-        /** @var array<string, mixed> $decoded */
-        return self::normalizeReport($decoded);
-    }
-
-    /**
-     * @param array<string, mixed> $source
-     */
-    private static function floatValue(array $source, string $key): float
-    {
-        $value = $source[$key] ?? null;
-        if (!is_int($value) && !is_float($value)) {
-            throw new RuntimeException(sprintf('Performance field "%s" must be numeric.', $key));
-        }
-
-        return (float) $value;
-    }
-
-    /**
-     * @param array<string, mixed> $source
-     */
-    private static function intValue(array $source, string $key): int
-    {
-        $value = $source[$key] ?? null;
-        if (!is_int($value)) {
-            throw new RuntimeException(sprintf('Performance field "%s" must be an integer.', $key));
-        }
-
-        return $value;
-    }
-
-    /**
-     * @param array<string, mixed> $source
-     * @return LevelResult
-     */
-    private static function normalizeLevel(array $source): array
-    {
-        $rawTrials = $source['trial_results'] ?? null;
-        if (!is_array($rawTrials)) {
-            throw new RuntimeException('Performance level is missing trial results.');
-        }
-
-        /** @var list<TrialResult> $trials */
-        $trials = [];
-        foreach ($rawTrials as $rawTrial) {
-            if (!is_array($rawTrial)) {
-                throw new RuntimeException('Performance trial result must be an object.');
-            }
-
-            /** @var array<string, mixed> $rawTrial */
-            $trials[] = [
-                'elapsed_seconds' => self::floatValue($rawTrial, 'elapsed_seconds'),
-            ];
-        }
-
-        return [
-            'concurrency' => self::intValue($source, 'concurrency'),
-            'median_rpm' => self::floatValue($source, 'median_rpm'),
-            'p50_batch_latency_ms' => self::floatValue($source, 'p50_batch_latency_ms'),
-            'p95_batch_latency_ms' => self::floatValue($source, 'p95_batch_latency_ms'),
-            'p99_batch_latency_ms' => self::floatValue($source, 'p99_batch_latency_ms'),
-            'errors' => self::intValue($source, 'errors'),
-            'timeouts' => self::intValue($source, 'timeouts'),
-            'warmup_errors' => self::intValue($source, 'warmup_errors'),
-            'warmup_timeouts' => self::intValue($source, 'warmup_timeouts'),
-            'max_cpu_percent' => self::floatValue($source, 'max_cpu_percent'),
-            'max_memory_bytes' => self::intValue($source, 'max_memory_bytes'),
-            'max_resource_count' => self::intValue($source, 'max_resource_count'),
-            'max_resource_delta' => self::intValue($source, 'max_resource_delta'),
-            'trial_results' => $trials,
-        ];
-    }
-
-    /**
-     * @param array<string, mixed> $source
-     * @return PerformanceReport
-     */
-    private static function normalizeReport(array $source): array
-    {
-        $rawLevels = $source['levels'] ?? null;
-        if (!is_array($rawLevels)) {
-            throw new RuntimeException('Sustained performance report has no concurrency levels.');
-        }
-
-        /** @var list<LevelResult> $levels */
-        $levels = [];
-        foreach ($rawLevels as $rawLevel) {
-            if (!is_array($rawLevel)) {
-                throw new RuntimeException('Sustained performance level must be an object.');
-            }
-
-            /** @var array<string, mixed> $rawLevel */
-            $levels[] = self::normalizeLevel($rawLevel);
-        }
-
-        return [
-            'warmup_seconds' => self::floatValue($source, 'warmup_seconds'),
-            'steady_state_seconds' => self::floatValue($source, 'steady_state_seconds'),
-            'trials' => self::intValue($source, 'trials'),
-            'levels' => $levels,
-        ];
-    }
-
-    /**
-     * @param PerformanceReport $report
-     */
-    private static function validateMeasurementShape(array $report): void
-    {
-        if ($report['warmup_seconds'] < 1.0) {
-            throw new RuntimeException('Sustained performance warm-up must be at least one second.');
-        }
-        if ($report['steady_state_seconds'] < 5.0) {
-            throw new RuntimeException('Sustained performance steady state must be at least five seconds.');
-        }
-        if ($report['trials'] < 3) {
-            throw new RuntimeException('Sustained performance requires at least three trials per concurrency level.');
-        }
-
-        $levels = self::indexLevels($report);
-        if (array_keys($levels) !== [5, 20, 50]) {
-            throw new RuntimeException('Sustained performance must exercise concurrency levels 5, 20, and 50.');
-        }
-
-        foreach ($levels as $level) {
-            if (count($level['trial_results']) < 3) {
-                throw new RuntimeException('Sustained performance level is missing repeated trial evidence.');
-            }
-
-            foreach ($level['trial_results'] as $trial) {
-                if ($trial['elapsed_seconds'] < $report['steady_state_seconds']) {
-                    throw new RuntimeException(
-                        'Sustained performance trial did not complete the full steady-state window.',
-                    );
-                }
-            }
-        }
-    }
-
     public static function run(
         string $baselinePath,
         string $candidatePath,
@@ -307,6 +146,167 @@ final class SustainedPerformanceComparison
             throw new RuntimeException(
                 "Sustained HTTP performance acceptance failed:\n- " . implode("\n- ", $failures),
             );
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $source
+     */
+    private static function floatValue(array $source, string $key): float
+    {
+        $value = $source[$key] ?? null;
+        if (!is_int($value) && !is_float($value)) {
+            throw new RuntimeException(sprintf('Performance field "%s" must be numeric.', $key));
+        }
+
+        return (float) $value;
+    }
+
+    /**
+     * @param PerformanceReport $report
+     * @return array<int, LevelResult>
+     */
+    private static function indexLevels(array $report): array
+    {
+        $indexed = [];
+        foreach ($report['levels'] as $level) {
+            $indexed[$level['concurrency']] = $level;
+        }
+
+        ksort($indexed);
+
+        return $indexed;
+    }
+
+    /**
+     * @param array<string, mixed> $source
+     */
+    private static function intValue(array $source, string $key): int
+    {
+        $value = $source[$key] ?? null;
+        if (!is_int($value)) {
+            throw new RuntimeException(sprintf('Performance field "%s" must be an integer.', $key));
+        }
+
+        return $value;
+    }
+
+    /** @return PerformanceReport */
+    private static function loadReport(string $path): array
+    {
+        $decoded = json_decode((string) file_get_contents($path), true, flags: JSON_THROW_ON_ERROR);
+        if (!is_array($decoded)) {
+            throw new RuntimeException(sprintf('Invalid sustained performance report: %s', $path));
+        }
+
+        /** @var array<string, mixed> $decoded */
+        return self::normalizeReport($decoded);
+    }
+
+    /**
+     * @param array<string, mixed> $source
+     * @return LevelResult
+     */
+    private static function normalizeLevel(array $source): array
+    {
+        $rawTrials = $source['trial_results'] ?? null;
+        if (!is_array($rawTrials)) {
+            throw new RuntimeException('Performance level is missing trial results.');
+        }
+
+        /** @var list<TrialResult> $trials */
+        $trials = [];
+        foreach ($rawTrials as $rawTrial) {
+            if (!is_array($rawTrial)) {
+                throw new RuntimeException('Performance trial result must be an object.');
+            }
+
+            /** @var array<string, mixed> $rawTrial */
+            $trials[] = [
+                'elapsed_seconds' => self::floatValue($rawTrial, 'elapsed_seconds'),
+            ];
+        }
+
+        return [
+            'concurrency' => self::intValue($source, 'concurrency'),
+            'median_rpm' => self::floatValue($source, 'median_rpm'),
+            'p50_batch_latency_ms' => self::floatValue($source, 'p50_batch_latency_ms'),
+            'p95_batch_latency_ms' => self::floatValue($source, 'p95_batch_latency_ms'),
+            'p99_batch_latency_ms' => self::floatValue($source, 'p99_batch_latency_ms'),
+            'errors' => self::intValue($source, 'errors'),
+            'timeouts' => self::intValue($source, 'timeouts'),
+            'warmup_errors' => self::intValue($source, 'warmup_errors'),
+            'warmup_timeouts' => self::intValue($source, 'warmup_timeouts'),
+            'max_cpu_percent' => self::floatValue($source, 'max_cpu_percent'),
+            'max_memory_bytes' => self::intValue($source, 'max_memory_bytes'),
+            'max_resource_count' => self::intValue($source, 'max_resource_count'),
+            'max_resource_delta' => self::intValue($source, 'max_resource_delta'),
+            'trial_results' => $trials,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $source
+     * @return PerformanceReport
+     */
+    private static function normalizeReport(array $source): array
+    {
+        $rawLevels = $source['levels'] ?? null;
+        if (!is_array($rawLevels)) {
+            throw new RuntimeException('Sustained performance report has no concurrency levels.');
+        }
+
+        /** @var list<LevelResult> $levels */
+        $levels = [];
+        foreach ($rawLevels as $rawLevel) {
+            if (!is_array($rawLevel)) {
+                throw new RuntimeException('Sustained performance level must be an object.');
+            }
+
+            /** @var array<string, mixed> $rawLevel */
+            $levels[] = self::normalizeLevel($rawLevel);
+        }
+
+        return [
+            'warmup_seconds' => self::floatValue($source, 'warmup_seconds'),
+            'steady_state_seconds' => self::floatValue($source, 'steady_state_seconds'),
+            'trials' => self::intValue($source, 'trials'),
+            'levels' => $levels,
+        ];
+    }
+
+    /**
+     * @param PerformanceReport $report
+     */
+    private static function validateMeasurementShape(array $report): void
+    {
+        if ($report['warmup_seconds'] < 1.0) {
+            throw new RuntimeException('Sustained performance warm-up must be at least one second.');
+        }
+        if ($report['steady_state_seconds'] < 5.0) {
+            throw new RuntimeException('Sustained performance steady state must be at least five seconds.');
+        }
+        if ($report['trials'] < 3) {
+            throw new RuntimeException('Sustained performance requires at least three trials per concurrency level.');
+        }
+
+        $levels = self::indexLevels($report);
+        if (array_keys($levels) !== [5, 20, 50]) {
+            throw new RuntimeException('Sustained performance must exercise concurrency levels 5, 20, and 50.');
+        }
+
+        foreach ($levels as $level) {
+            if (count($level['trial_results']) < 3) {
+                throw new RuntimeException('Sustained performance level is missing repeated trial evidence.');
+            }
+
+            foreach ($level['trial_results'] as $trial) {
+                if ($trial['elapsed_seconds'] < $report['steady_state_seconds']) {
+                    throw new RuntimeException(
+                        'Sustained performance trial did not complete the full steady-state window.',
+                    );
+                }
+            }
         }
     }
 
