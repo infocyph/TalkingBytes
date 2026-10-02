@@ -5,6 +5,7 @@
 benchmarks export-ignore
 docs export-ignore
 examples export-ignore
+performance export-ignore
 tests export-ignore
 vendor export-ignore
 
