@@ -11,6 +11,7 @@ use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
 use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
 use Infocyph\TalkingBytes\Core\Support\Clock;
 use Infocyph\TalkingBytes\Core\Support\ObservabilitySanitizer;
+use Infocyph\TalkingBytes\Core\Support\Sleeper;
 use Infocyph\TalkingBytes\Grpc\Contract\GrpcMiddleware;
 use Infocyph\TalkingBytes\Grpc\Middleware\RetryMiddleware;
 use Infocyph\TalkingBytes\Grpc\Native\GeneratedStubGrpcInvoker;
@@ -173,8 +174,9 @@ final readonly class GrpcClient
     public function withGrpcRetry(
         ?GrpcRetryPolicy $policy = null,
         ?CancellationSignal $cancellation = null,
+        ?Sleeper $sleeper = null,
     ): self {
-        return $this->withRetryPolicy($policy ?? GrpcRetryPolicy::standard(), $cancellation);
+        return $this->withRetryPolicy($policy ?? GrpcRetryPolicy::standard(), $cancellation, $sleeper);
     }
 
     public function withMiddleware(GrpcMiddleware $middleware): self
@@ -193,9 +195,12 @@ final readonly class GrpcClient
         return new self($this->transport, $middlewares, $this->streamingInvoker, $this->events, $this->clock);
     }
 
-    public function withRetryPolicy(RetryPolicy $policy, ?CancellationSignal $cancellation = null): self
-    {
-        return $this->withMiddleware(new RetryMiddleware($policy, $cancellation));
+    public function withRetryPolicy(
+        RetryPolicy $policy,
+        ?CancellationSignal $cancellation = null,
+        ?Sleeper $sleeper = null,
+    ): self {
+        return $this->withMiddleware(new RetryMiddleware($policy, $cancellation, $this->clock, $sleeper));
     }
 
     /**
