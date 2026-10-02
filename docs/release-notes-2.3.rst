@@ -151,10 +151,11 @@ centralized only where semantics are genuinely common; field-specific protocol
 validation remains with its owner.
 
 The release workflow follows the latest reusable PHPForge workflow on ``@main``
-while Mailpit remains pinned to the candidate-tested image digest. The PHPForge
-Composer dev constraint remains ``dev-main@dev``; CI records the exact package
-revision it resolves for each run. Dedicated gates verify both production
-installation without Runwire and integration behavior with Runwire installed.
+and the Mailpit integration service follows ``axllent/mailpit:latest``. The
+PHPForge Composer dev constraint remains ``dev-main@dev``; CI records the exact
+package revision it resolves for each run. Dedicated gates verify both
+production installation without Runwire and integration behavior with Runwire
+installed.
 
 Compatibility and migration
 ---------------------------
