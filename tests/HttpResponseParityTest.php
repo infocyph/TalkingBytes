@@ -44,15 +44,28 @@ final class HttpResponseParityServer
             $pipes[0] = null;
         }
 
-        $deadline = microtime(true) + 2.0;
+        $deadline = microtime(true) + 5.0;
         while (!is_file($ready) && microtime(true) < $deadline) {
+            $status = proc_get_status($process);
+            if (!$status['running']) {
+                break;
+            }
+
             usleep(10_000);
         }
 
         $decoded = is_file($ready) ? json_decode((string) file_get_contents($ready), true) : null;
         $port = is_array($decoded) ? ($decoded['port'] ?? null) : null;
         if (!is_int($port) || $port < 1) {
-            throw new RuntimeException('HTTP response fixture did not become ready.');
+            $error = is_resource($pipes[2] ?? null) ? trim((string) stream_get_contents($pipes[2])) : '';
+            proc_terminate($process);
+            proc_close($process);
+
+            throw new RuntimeException(
+                $error === ''
+                    ? 'HTTP response fixture did not become ready.'
+                    : 'HTTP response fixture failed: ' . $error,
+            );
         }
 
         return new self($process, $pipes, $directory, $port);
