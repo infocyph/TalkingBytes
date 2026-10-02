@@ -34,6 +34,26 @@ final readonly class MimePartParser
         return $this->parsePart($headers, $body, $partNumber, 1, $partCount, $decodedBytes);
     }
 
+    /**
+     * @param list<string> $parts
+     * @param list<string> $buffer
+     */
+    private function appendMultipartPart(array &$parts, array &$buffer, int $maxParts): void
+    {
+        if ($buffer === []) {
+            return;
+        }
+        if (count($parts) >= $maxParts) {
+            throw new EmailParseException(sprintf(
+                'MIME part count exceeds limit (%d).',
+                $this->limits->maxMimeParts,
+            ));
+        }
+
+        $parts[] = implode("\r\n", $buffer);
+        $buffer = [];
+    }
+
     private function contentId(HeaderBag $headers): ?string
     {
         $contentId = $headers->first('Content-ID');
@@ -105,6 +125,7 @@ final readonly class MimePartParser
     }
 
     /** @return array{0:string,1:list<ParsedEmailPart>} */
+
     private function parseBody(
         string $body,
         string $contentType,
@@ -266,26 +287,6 @@ final readonly class MimePartParser
         $segments[] = $buffer;
 
         return $segments;
-    }
-
-    /**
-     * @param list<string> $parts
-     * @param list<string> $buffer
-     */
-    private function appendMultipartPart(array &$parts, array &$buffer, int $maxParts): void
-    {
-        if ($buffer === []) {
-            return;
-        }
-        if (count($parts) >= $maxParts) {
-            throw new EmailParseException(sprintf(
-                'MIME part count exceeds limit (%d).',
-                $this->limits->maxMimeParts,
-            ));
-        }
-
-        $parts[] = implode("\r\n", $buffer);
-        $buffer = [];
     }
 
     /**
