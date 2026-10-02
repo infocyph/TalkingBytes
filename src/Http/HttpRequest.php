@@ -346,6 +346,16 @@ final readonly class HttpRequest
         return $this->withOptions($this->options->withMaxResponseBytes($bytes));
     }
 
+    public function maxResponseHeaderBytes(int $bytes): self
+    {
+        return $this->withOptions($this->options->withMaxResponseHeaderBytes($bytes));
+    }
+
+    public function maxResponseHeaderCount(int $count): self
+    {
+        return $this->withOptions($this->options->withMaxResponseHeaderCount($count));
+    }
+
     public function maxUploadBytes(int $bytes): self
     {
         return $this->withOptions($this->options->withMaxUploadBytes($bytes));
