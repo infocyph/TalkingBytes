@@ -20,9 +20,10 @@ final class UploadHandleManager
         }
 
         $openedByConfigurator = $request->metadata['_upload_opened_by_configurator'] ?? false;
+        $ownedByRequest = $request->metadata['_upload_handle_owned'] ?? false;
         $resource = $request->metadata['_upload_handle'] ?? null;
 
-        if ($openedByConfigurator !== true || !is_resource($resource)) {
+        if (($openedByConfigurator !== true && $ownedByRequest !== true) || !is_resource($resource)) {
             return;
         }
 
