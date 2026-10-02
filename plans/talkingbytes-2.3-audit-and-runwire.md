@@ -1,6 +1,6 @@
 # TalkingBytes audit, hardening and Runwire integration plan
 
-Audit date: 2026-10-02 (Asia/Dhaka). Status: Batches 1–7 complete and source-acceptance verified. Source head `97308689c639befe02c337a236dc69a3ef712bd9` passed the full release matrix in run 37038089876; the tracker-closing head is tag-eligible only when its own CI remains green.
+Audit date: 2026-10-02 (Asia/Dhaka). Status: Batches 1–7 complete and source-acceptance verified. Final implementation/style head `8e7dd8c6139b9f39e884cea94c3bea8753a11073` passed the full release matrix in run 37039214341; the tracker-closing head is tag-eligible only when its own CI remains green.
 
 ## Decision
 
@@ -236,7 +236,7 @@ Do not automatically fan out stateful mailbox commands over one connection, shar
 | 4 | Optional Runwire 2.1 binding and lifecycle propagation | ✅ Complete | PR #16 run 36981793377: PHP 8.4/8.5 stable+lowest QA, analysis, benchmarks, clean install, Mailpit, native gRPC, docs and optional-capability coldness all passed on exact head `c8ab8bb1e4fa1545f6842a55912ef0a178fc06cc`. |
 | 5 | Supported cooperative HTTP/socket/process I/O and lifecycle matrix | ✅ Complete | PR #16 run 36985198397: PHP 8.4/8.5 stable+lowest QA, analysis, benchmarks, clean install, Mailpit, native gRPC, docs and optional-capability coldness all passed on exact head `37706276780861360e0a53df5b30f5625140a0be`. |
 | 6 | Duplicate/architecture/reproducibility/docs/performance/final release gates | ✅ Complete | PR #16 run 36987414120: PHP 8.4/8.5 stable+lowest QA, analysis, benchmarks, clean install, docs, Mailpit, native gRPC, optional-capability coldness, Runwire absent/present and explicit `ic:tests:details` → `ic:tests` → `ic:release:guard` acceptance all passed on implementation head `283df18c7fa0fd92e8d7ba8cb2c7427e7bb83b04`. |
-| 7 | Final release-blocker remediation: signed 307 upload offsets, terminal email fallback cancellation/deadlines, Runwire cancellation composition, blocking socket write deadlines, and sustained-throughput validation | ✅ Complete | PR #16 run 37038089876 passed PHP 8.4/8.5 stable+lowest QA, analysis, component benchmarks, clean install, docs, Mailpit, native gRPC, Runwire absent/present, explicit release acceptance, and the new sustained HTTP performance gate on exact source head `97308689c639befe02c337a236dc69a3ef712bd9`. |
+| 7 | Final release-blocker remediation: signed 307 upload offsets, terminal email fallback cancellation/deadlines, Runwire cancellation composition, blocking socket write deadlines, and sustained-throughput validation | ✅ Complete | Source acceptance run 37038089876 passed on `97308689c639befe02c337a236dc69a3ef712bd9`; after final PHPForge style/standards cleanup, exact implementation head `8e7dd8c6139b9f39e884cea94c3bea8753a11073` passed the complete matrix again in run 37039214341, including sustained HTTP performance and release acceptance. |
 
 Batch progression is strict: implement one batch, resolve its PR QA on the exact source head, update this tracker, then start the next batch. The PR remains open and unmerged until the final release gates pass.
 
