@@ -7,6 +7,7 @@ namespace Infocyph\TalkingBytes\Http;
 use Infocyph\TalkingBytes\Core\Event\EventDispatcher;
 use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
 use Infocyph\TalkingBytes\Core\Support\Clock;
+use Infocyph\TalkingBytes\Core\Support\Sleeper;
 use Infocyph\TalkingBytes\Http\Contract\HttpTransport;
 use Infocyph\TalkingBytes\Http\Cookie\CookieJar;
 use Infocyph\TalkingBytes\Http\Retry\HttpRetryPolicy;
@@ -20,6 +21,7 @@ final readonly class HttpClientFactory
         private ?EventDispatcher $events = null,
         private ?CancellationSignal $cancellation = null,
         private ?Clock $clock = null,
+        private ?Sleeper $sleeper = null,
     ) {}
 
     /**
@@ -72,6 +74,7 @@ final readonly class HttpClientFactory
                     self::int($retry, 'max_retry_after_seconds', 30),
                 ),
                 $this->cancellation,
+                $this->sleeper,
             );
         }
 
@@ -80,6 +83,7 @@ final readonly class HttpClientFactory
             $client = $client->withRateLimit(new RateLimiter(
                 self::int($rateLimit, 'max_requests', 60),
                 self::int($rateLimit, 'per_seconds', 60),
+                $this->clock,
             ));
         }
 
@@ -88,6 +92,7 @@ final readonly class HttpClientFactory
             $client = $client->withCircuitBreaker(new CircuitBreaker(
                 self::int($circuit, 'failure_threshold', 5),
                 self::int($circuit, 'cool_down_seconds', 30),
+                $this->clock,
             ));
         }
 
