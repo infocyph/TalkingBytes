@@ -120,18 +120,14 @@ final readonly class RunwireBinding
         $scope = $this->scope;
 
         return new StreamWaiter(
-            static fn(mixed $stream, ?OperationDeadline $deadline): bool => self::waitForStream(
-                $scope,
-                $stream,
-                $deadline,
-                readable: true,
-            ),
-            static fn(mixed $stream, ?OperationDeadline $deadline): bool => self::waitForStream(
-                $scope,
-                $stream,
-                $deadline,
-                readable: false,
-            ),
+            static function (mixed $stream, ?OperationDeadline $deadline) use ($scope): bool {
+                /** @var resource $stream */
+                return self::waitForStream($scope, $stream, $deadline, readable: true);
+            },
+            static function (mixed $stream, ?OperationDeadline $deadline) use ($scope): bool {
+                /** @var resource $stream */
+                return self::waitForStream($scope, $stream, $deadline, readable: false);
+            },
         );
     }
 
