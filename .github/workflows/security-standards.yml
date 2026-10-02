@@ -24,6 +24,85 @@ jobs:
       actions: read
       contents: read
 
+  sustained-http-performance:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout candidate head
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Checkout 2.2 baseline
+        uses: actions/checkout@v7
+        with:
+          ref: "2.2"
+          path: baseline
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.5"
+          extensions: "curl, fileinfo, openssl"
+          coverage: none
+
+      - name: Install candidate dependencies
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Install baseline production dependencies
+        run: composer install --working-dir=baseline --no-dev --no-interaction --prefer-dist --no-progress --classmap-authoritative
+
+      - name: Record compared revisions
+        id: revisions
+        shell: bash
+        run: |
+          echo "candidate=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "baseline=$(git -C baseline rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Run 2.2 sustained baseline
+        run: |
+          mkdir -p build/sustained-performance
+          php benchmarks/HttpSustainedPerformance.php \
+            baseline/vendor/autoload.php \
+            benchmarks/Fixtures/http-sustained-server.php \
+            build/sustained-performance/baseline.json \
+            unbound \
+            "${{ steps.revisions.outputs.baseline }}"
+
+      - name: Run 2.3 sustained unbound candidate
+        run: |
+          php benchmarks/HttpSustainedPerformance.php \
+            vendor/autoload.php \
+            benchmarks/Fixtures/http-sustained-server.php \
+            build/sustained-performance/candidate-unbound.json \
+            unbound \
+            "${{ steps.revisions.outputs.candidate }}"
+
+      - name: Run 2.3 sustained Runwire candidate
+        run: |
+          php benchmarks/HttpSustainedPerformance.php \
+            vendor/autoload.php \
+            benchmarks/Fixtures/http-sustained-server.php \
+            build/sustained-performance/candidate-runwire.json \
+            runwire \
+            "${{ steps.revisions.outputs.candidate }}"
+
+      - name: Enforce sustained throughput acceptance
+        run: |
+          php benchmarks/CompareSustainedPerformance.php \
+            build/sustained-performance/baseline.json \
+            build/sustained-performance/candidate-unbound.json \
+            build/sustained-performance/candidate-runwire.json \
+            2
+
+      - name: Upload sustained performance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sustained-http-performance
+          path: build/sustained-performance/*.json
+          retention-days: 61
+
   optional-capability-coldness:
     runs-on: ubuntu-latest
 
