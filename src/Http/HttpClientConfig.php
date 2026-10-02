@@ -26,9 +26,9 @@ final readonly class HttpClientConfig
         public ?string $proxyPassword = null,
         public ?string $userAgent = null,
         public ?int $maxResponseBytes = null,
+        public array $defaultHeaders = [],
         public ?int $maxResponseHeaderBytes = null,
         public ?int $maxResponseHeaderCount = null,
-        public array $defaultHeaders = [],
     ) {
         new CurlOptions(
             timeoutSeconds: $this->timeoutSeconds,
