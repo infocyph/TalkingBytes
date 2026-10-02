@@ -7,6 +7,7 @@ use Infocyph\TalkingBytes\Core\Event\CommunicationEventBus;
 use Infocyph\TalkingBytes\Core\Event\CallableEventDispatcher;
 use Infocyph\TalkingBytes\Http\Concurrent\CurlMultiTransport;
 use Infocyph\TalkingBytes\Http\HttpRequest;
+use Infocyph\TalkingBytes\Http\Internal\RedirectResolver;
 use Infocyph\TalkingBytes\Http\Internal\RequestSecurityGuard;
 use Infocyph\TalkingBytes\Http\Support\HttpRedactor;
 use Infocyph\TalkingBytes\Http\Transport\CurlTransport;
@@ -258,4 +259,68 @@ it('keeps accepted sensitive header names trackable at the configured boundary',
         ->withApiKeyHeader($rejectedName, $secret)
         ->prepareForTransport())
         ->toThrow(InvalidArgumentException::class, 'cannot exceed 256 bytes');
+});
+
+
+it('resolves RFC 3986 redirect references without changing path semantics', function (): void {
+    $base = 'http://a/b/c/d;p?q';
+    $vectors = [
+        'g:h' => 'g:h',
+        'g' => 'http://a/b/c/g',
+        './g' => 'http://a/b/c/g',
+        'g/' => 'http://a/b/c/g/',
+        '/g' => 'http://a/g',
+        '//g' => 'http://g',
+        '?y' => 'http://a/b/c/d;p?y',
+        'g?y' => 'http://a/b/c/g?y',
+        '#s' => 'http://a/b/c/d;p?q#s',
+        'g#s' => 'http://a/b/c/g#s',
+        'g?y#s' => 'http://a/b/c/g?y#s',
+        ';p' => 'http://a/b/c/;p',
+        'g;x' => 'http://a/b/c/g;x',
+        '.' => 'http://a/b/c/',
+        './' => 'http://a/b/c/',
+        '..' => 'http://a/b/',
+        '../' => 'http://a/b/',
+        '../g' => 'http://a/b/g',
+        '../..' => 'http://a/',
+        '../../g' => 'http://a/g',
+        '../../../g' => 'http://a/g',
+        '/./g' => 'http://a/g',
+        '/../g' => 'http://a/g',
+        'g/./h' => 'http://a/b/c/g/h',
+        'g/../h' => 'http://a/b/c/h',
+        'g?y/./x' => 'http://a/b/c/g?y/./x',
+        'g#s/../x' => 'http://a/b/c/g#s/../x',
+    ];
+
+    foreach ($vectors as $reference => $expected) {
+        expect(RedirectResolver::resolve($base, $reference))->toBe($expected);
+    }
+});
+
+it('preserves repeated slashes trailing slashes and IPv6 authority on redirects', function (): void {
+    expect(RedirectResolver::resolve(
+        'https://[2606:4700:4700::1111]/a',
+        '/b',
+    ))->toBe('https://[2606:4700:4700::1111]/b');
+
+    expect(RedirectResolver::resolve(
+        'https://example.test/a',
+        '/b//c/',
+    ))->toBe('https://example.test/b//c/');
+});
+
+it('accepts public IPv6 literals under strict private-network protection', function (): void {
+    $url = 'https://[2606:4700:4700::1111]/';
+    $request = HttpRequest::get($url)->blockPrivateNetworks();
+
+    expect(fn() => RequestSecurityGuard::assertAllowed($request))->not->toThrow(InvalidArgumentException::class)
+        ->and(RequestSecurityGuard::pinnedResolution($request, $url))->toBeNull();
+});
+
+it('rejects hexadecimal IPv4-mapped private IPv6 literals', function (): void {
+    expect(fn() => RequestSecurityGuard::assertAllowed(
+        HttpRequest::get('http://[::ffff:7f00:1]/')->blockPrivateNetworks(),
+    ))->toThrow(InvalidArgumentException::class, 'private or reserved');
 });
