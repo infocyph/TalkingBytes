@@ -6,6 +6,7 @@ namespace Infocyph\TalkingBytes\Email\Transport;
 
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
 use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
+use Infocyph\TalkingBytes\Core\Support\OperationDeadline;
 use Infocyph\TalkingBytes\Email\EmailMessage;
 
 final readonly class CompositeEmailTransport implements EmailTransport
@@ -17,13 +18,15 @@ final readonly class CompositeEmailTransport implements EmailTransport
         private EmailTransport $primaryTransport,
         private array $fallbackTransports = [],
         private ?CancellationSignal $cancellation = null,
+        private ?OperationDeadline $deadline = null,
     ) {}
 
     public function send(EmailMessage $message): CommunicationResult
     {
         $attemptedTransports = [];
-        if ($this->cancellationRequested()) {
-            return $this->cancelled($attemptedTransports);
+        $preflight = $this->preflightFailure($attemptedTransports);
+        if ($preflight !== null) {
+            return $preflight;
         }
 
         $primaryResult = $this->primaryTransport->send($message);
@@ -34,8 +37,9 @@ final readonly class CompositeEmailTransport implements EmailTransport
         }
 
         foreach ($this->fallbackTransports as $transport) {
-            if ($this->cancellationRequested()) {
-                return $this->cancelled($attemptedTransports);
+            $preflight = $this->preflightFailure($attemptedTransports);
+            if ($preflight !== null) {
+                return $preflight;
             }
 
             $attemptedTransports[] = $transport::class;
@@ -87,5 +91,35 @@ final readonly class CompositeEmailTransport implements EmailTransport
                 'transport' => 'email',
             ],
         );
+    }
+
+    /** @param list<class-string<EmailTransport>> $attemptedTransports */
+    private function deadlineExceeded(array $attemptedTransports): CommunicationResult
+    {
+        return CommunicationResult::failure(
+            'Email operation deadline exceeded.',
+            metadata: [
+                'deadline_exceeded' => true,
+                'attempts' => count($attemptedTransports),
+                'attempted_transports' => $attemptedTransports,
+                'transport' => 'email',
+            ],
+        );
+    }
+
+    /**
+     * @param list<class-string<EmailTransport>> $attemptedTransports
+     */
+    private function preflightFailure(array $attemptedTransports): ?CommunicationResult
+    {
+        if ($this->cancellationRequested()) {
+            return $this->cancelled($attemptedTransports);
+        }
+
+        if ($this->deadline?->expired() === true) {
+            return $this->deadlineExceeded($attemptedTransports);
+        }
+
+        return null;
     }
 }
