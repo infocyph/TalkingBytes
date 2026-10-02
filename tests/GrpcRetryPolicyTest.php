@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
 use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
+use Infocyph\TalkingBytes\Core\Support\Clock;
+use Infocyph\TalkingBytes\Core\Support\Sleeper;
 use Infocyph\TalkingBytes\Grpc\GrpcClient;
 use Infocyph\TalkingBytes\Grpc\Sender\GrpcRequest;
 use Infocyph\TalkingBytes\Grpc\Sender\GrpcResponse;
@@ -93,4 +95,42 @@ it('checks grpc retry cancellation before retry-safety bypass', function (): voi
     expect($result->successful)->toBeFalse()
         ->and($result->metadata['cancelled'] ?? false)->toBeTrue()
         ->and($attempts)->toBe(0);
+});
+
+
+it('does not start a grpc retry after its original deadline expires', function (): void {
+    $now = 0.0;
+    $attempts = 0;
+    $clock = new Clock(
+        static fn(): float => 0.0,
+        static function () use (&$now): float {
+            return $now;
+        },
+    );
+    $sleeper = new Sleeper(static function (int $microseconds) use (&$now): void {
+        unset($microseconds);
+        $now = 2.0;
+    });
+    $client = GrpcClient::using(
+        static function () use (&$attempts): GrpcResponse {
+            $attempts++;
+
+            return new GrpcResponse(GrpcStatus::Unavailable);
+        },
+        clock: $clock,
+    )->withGrpcRetry(
+        GrpcRetryPolicy::standard(attempts: 3, baseDelayMs: 100, jitterRatio: 0),
+        sleeper: $sleeper,
+    );
+
+    $result = $client->send(
+        (new GrpcRequest('Orders/Create', ['id' => 1], deadlineSeconds: 1.0))
+            ->withRetrySafety(),
+    );
+
+    expect($result->successful)->toBeFalse()
+        ->and($result->statusCode)->toBe(GrpcStatus::DeadlineExceeded->value)
+        ->and($result->metadata['deadline_exceeded'] ?? false)->toBeTrue()
+        ->and($result->metadata['attempts'] ?? null)->toBe(1)
+        ->and($attempts)->toBe(1);
 });
