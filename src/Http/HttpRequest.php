@@ -692,7 +692,10 @@ final readonly class HttpRequest
     {
         $uploadPath = $this->metadata['upload_file_path'] ?? null;
         $uploadStream = $this->metadata['upload_stream'] ?? null;
-        if (!is_string($uploadPath) && !is_resource($uploadStream)) {
+        if (
+            (!is_string($uploadPath) && !is_resource($uploadStream))
+            || !$this->hasSignedAuthenticator()
+        ) {
             return $this;
         }
 
@@ -701,38 +704,96 @@ final readonly class HttpRequest
             throw new InvalidArgumentException('Upload size metadata is missing or invalid.');
         }
 
-        if (is_resource($uploadStream)) {
-            $offset = $this->metadata['upload_offset'] ?? null;
-            if (!is_int($offset) || fseek($uploadStream, $offset) !== 0) {
-                throw new InvalidArgumentException('Unable to rewind HTTP upload stream to its starting position.');
-            }
+        $snapshot = tmpfile();
+        if ($snapshot === false) {
+            throw new InvalidArgumentException('Unable to create a temporary HTTP upload snapshot.');
+        }
+
+        try {
+            $this->copyUploadToSnapshot($snapshot, $uploadPath, $uploadStream, $size);
+            rewind($snapshot);
 
             return $this->metadata([
                 ...$this->metadata,
-                '_upload_handle' => $uploadStream,
-                '_upload_handle_owned' => false,
+                '_upload_handle' => $snapshot,
+                '_upload_handle_owned' => true,
+                'upload_offset' => 0,
             ]);
+        } catch (Throwable $throwable) {
+            fclose($snapshot);
+
+            throw $throwable;
+        }
+    }
+
+    /**
+     * @param resource $snapshot
+     * @param resource|null $uploadStream
+     */
+    private function copyUploadToSnapshot(
+        mixed $snapshot,
+        mixed $uploadPath,
+        mixed $uploadStream,
+        int $size,
+    ): void {
+        $source = $uploadStream;
+        $closeSource = false;
+        $offset = $this->metadata['upload_offset'] ?? 0;
+
+        if (is_string($uploadPath)) {
+            $source = fopen($uploadPath, 'rb');
+            if ($source === false) {
+                throw new InvalidArgumentException(sprintf('Failed to open upload file: %s', $uploadPath));
+            }
+            $closeSource = true;
+            $offset = 0;
         }
 
-        $resource = fopen($uploadPath, 'rb');
-        if ($resource === false) {
-            throw new InvalidArgumentException(sprintf('Failed to open upload file: %s', $uploadPath));
+        if (!is_resource($source) || !is_int($offset) || $offset < 0) {
+            if ($closeSource && is_resource($source)) {
+                fclose($source);
+            }
+
+            throw new InvalidArgumentException('Prepared HTTP upload source is invalid.');
         }
 
-        $stat = fstat($resource);
-        $currentSize = is_array($stat) ? ($stat['size'] ?? null) : null;
-        if (!is_int($currentSize) || $currentSize !== $size) {
-            fclose($resource);
+        $originalOffset = ftell($source);
+        if (!is_int($originalOffset) || fseek($source, $offset) !== 0) {
+            if ($closeSource) {
+                fclose($source);
+            }
 
-            throw new InvalidArgumentException('HTTP upload file changed after it was selected.');
+            throw new InvalidArgumentException('Unable to position HTTP upload stream for signing.');
         }
 
-        return $this->metadata([
-            ...$this->metadata,
-            '_upload_handle' => $resource,
-            '_upload_handle_owned' => true,
-            'upload_offset' => 0,
-        ]);
+        try {
+            $remaining = $size;
+            while ($remaining > 0) {
+                $chunk = fread($source, min(8192, $remaining));
+                if ($chunk === false || $chunk === '') {
+                    throw new InvalidArgumentException('HTTP upload ended before the declared upload size.');
+                }
+                if (fwrite($snapshot, $chunk) !== strlen($chunk)) {
+                    throw new InvalidArgumentException('Unable to snapshot HTTP upload for signing.');
+                }
+
+                $remaining -= strlen($chunk);
+            }
+        } finally {
+            if ($closeSource) {
+                fclose($source);
+            } elseif (fseek($source, $originalOffset) !== 0) {
+                throw new InvalidArgumentException('Unable to restore HTTP upload stream after signing.');
+            }
+        }
+    }
+
+    private function hasSignedAuthenticator(): bool
+    {
+        return array_any(
+            $this->authenticators,
+            static fn(AuthenticatorInterface $authenticator): bool => $authenticator instanceof SignedRequestAuth,
+        );
     }
 
     private function assertValidUrl(string $url): void
