@@ -45,6 +45,20 @@ final readonly class RunwireBinding
         }
     }
 
+    public function assertSameContext(
+        RuntimeContext $runtime,
+        ?RequestContext $request = null,
+        ?CoroutineScope $scope = null,
+    ): void {
+        if ($this->runtime === $runtime && $this->request === $request && $this->scope === $scope) {
+            return;
+        }
+
+        throw new LogicException(
+            'A Runwire-bound graph cannot be rebound to a different runtime, request, or scope context.',
+        );
+    }
+
     public function cancellation(?CancellationSignal $explicit = null): ?CancellationSignal
     {
         if ($explicit === null && $this->request === null && $this->scope === null) {
