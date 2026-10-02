@@ -11,6 +11,7 @@ use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
 use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
 use Infocyph\TalkingBytes\Core\Support\Clock;
 use Infocyph\TalkingBytes\Core\Support\ObservabilitySanitizer;
+use Infocyph\TalkingBytes\Core\Support\OperationDeadline;
 use Infocyph\TalkingBytes\Core\Support\Sleeper;
 use Infocyph\TalkingBytes\Grpc\Contract\GrpcMiddleware;
 use Infocyph\TalkingBytes\Grpc\Middleware\RetryMiddleware;
@@ -45,6 +46,7 @@ final readonly class GrpcClient
         ?EventDispatcher $events = null,
         ?Clock $clock = null,
         private ?CancellationSignal $cancellation = null,
+        private ?OperationDeadline $operationDeadline = null,
     ) {
         $this->pipeline = new GrpcPipeline($transport, $middlewares);
         $this->events = new BestEffortEventDispatcher($events ?? new NullEventDispatcher());
@@ -116,6 +118,24 @@ final readonly class GrpcClient
         );
     }
 
+    private function deadlineExceeded(?string $streamType = null): CommunicationResult
+    {
+        $metadata = [
+            'deadline_exceeded' => true,
+            'attempts' => 0,
+            'transport' => 'grpc',
+        ];
+        if ($streamType !== null) {
+            $metadata['stream_type'] = $streamType;
+        }
+
+        return CommunicationResult::failure(
+            'gRPC operation deadline exceeded.',
+            GrpcStatus::DeadlineExceeded->value,
+            metadata: $metadata,
+        );
+    }
+
     /**
      * @param iterable<mixed> $messages
      * @param array<string, mixed> $metadata
@@ -151,7 +171,19 @@ final readonly class GrpcClient
             return $this->cancelled($request->method);
         }
 
-        return $this->pipeline->send($request);
+        $request = $this->boundedRequest($request);
+        if ($request === null) {
+            return $this->deadlineExceeded();
+        }
+
+        $result = $this->pipeline->send($request);
+        if ($this->operationDeadline?->expired() === true
+            && ($result->metadata['deadline_exceeded'] ?? false) !== true
+        ) {
+            return $this->deadlineExceeded();
+        }
+
+        return $result;
     }
 
     /**
@@ -159,6 +191,11 @@ final readonly class GrpcClient
      */
     public function serverStream(GrpcRequest $request, callable $onMessage): CommunicationResult
     {
+        $request = $this->boundedRequest($request);
+        if ($request === null) {
+            return $this->deadlineExceeded('server');
+        }
+
         return $this->runStream(
             streamType: 'server',
             method: $request->method,
@@ -186,6 +223,22 @@ final readonly class GrpcClient
             $this->events,
             $this->clock,
             $cancellation,
+            $this->operationDeadline,
+        );
+    }
+
+    public function withOperationDeadline(OperationDeadline $deadline): self
+    {
+        $deadline = $this->operationDeadline?->earliest($deadline) ?? $deadline;
+
+        return new self(
+            $this->transport,
+            $this->middlewares,
+            $this->streamingInvoker,
+            $this->events,
+            $this->clock,
+            $this->cancellation,
+            $deadline,
         );
     }
 
@@ -209,6 +262,7 @@ final readonly class GrpcClient
             $this->events,
             $this->clock,
             $this->cancellation,
+            $this->operationDeadline,
         );
     }
 
@@ -224,6 +278,7 @@ final readonly class GrpcClient
             $this->events,
             $this->clock,
             $this->cancellation,
+            $this->operationDeadline,
         );
     }
 
@@ -233,6 +288,32 @@ final readonly class GrpcClient
         ?Sleeper $sleeper = null,
     ): self {
         return $this->withMiddleware(new RetryMiddleware($policy, $cancellation, $this->clock, $sleeper));
+    }
+
+    private function boundedDeadlineSeconds(?float $callerDeadline): ?float
+    {
+        if ($this->operationDeadline === null) {
+            return $callerDeadline;
+        }
+
+        $remaining = $this->operationDeadline->remainingSeconds();
+        if ($remaining <= 0.0) {
+            return 0.0;
+        }
+
+        return $callerDeadline === null ? $remaining : min($callerDeadline, $remaining);
+    }
+
+    private function boundedRequest(GrpcRequest $request): ?GrpcRequest
+    {
+        $deadline = $this->boundedDeadlineSeconds($request->deadlineSeconds);
+        if ($deadline === 0.0) {
+            return null;
+        }
+
+        return $deadline === $request->deadlineSeconds
+            ? $request
+            : $request->withDeadlineSeconds($deadline);
     }
 
     private function cancelled(string $method, ?string $streamType = null): CommunicationResult
@@ -267,6 +348,11 @@ final readonly class GrpcClient
         array $metadata,
         ?callable $onMessage = null,
     ): CommunicationResult {
+        $deadlineSeconds = $this->boundedDeadlineSeconds($deadlineSeconds);
+        if ($deadlineSeconds === 0.0) {
+            return $this->deadlineExceeded($streamType);
+        }
+
         $request = new GrpcStreamRequest($method, $messages, $headers, $deadlineSeconds, $metadata);
 
         return $this->runStream(
@@ -298,6 +384,10 @@ final readonly class GrpcClient
     {
         if ($this->cancellation?->isRequested() === true) {
             return $this->cancelled($method, $streamType);
+        }
+
+        if ($this->operationDeadline?->expired() === true) {
+            return $this->deadlineExceeded($streamType);
         }
 
         if ($this->streamingInvoker === null) {
@@ -348,6 +438,10 @@ final readonly class GrpcClient
                     'grpc_error' => $error,
                 ],
             );
+        }
+
+        if ($this->operationDeadline?->expired() === true) {
+            return $this->deadlineExceeded($streamType);
         }
 
         $durationMs = (int) (($this->clock->monotonic() - $startedAt) * 1000);
