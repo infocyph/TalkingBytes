@@ -150,3 +150,75 @@ it('validates curl options upfront', function (): void {
     expect(fn() => HttpRequest::get('https://example.com')->proxyAuth('bad:name', 'secret'))
         ->toThrow(InvalidArgumentException::class, 'Proxy credentials are invalid');
 });
+
+
+it('propagates configured response header budgets to requests', function (): void {
+    $client = HttpClient::fromConfig(HttpClientConfig::fromArray([
+        'maxResponseHeaderBytes' => '4096',
+        'maxResponseHeaderCount' => 64,
+    ]));
+    $method = new ReflectionMethod($client, 'applyDefaults');
+    /** @var HttpRequest $request */
+    $request = $method->invoke($client, HttpRequest::get('https://example.com'));
+
+    expect($request->options->maxResponseHeaderBytes)->toBe(4096)
+        ->and($request->options->maxResponseHeaderCount)->toBe(64);
+});
+
+it('keeps existing positional HTTP option and config arguments stable', function (): void {
+    $options = new CurlOptions(
+        11,
+        12,
+        true,
+        4,
+        null,
+        null,
+        true,
+        true,
+        null,
+        null,
+        null,
+        null,
+        'Agent/1',
+        null,
+        null,
+        1000,
+        2000,
+        3000,
+        CURL_HTTP_VERSION_2_0,
+    );
+
+    expect($options->maxResponseBytes)->toBe(1000)
+        ->and($options->maxDownloadBytes)->toBe(2000)
+        ->and($options->maxUploadBytes)->toBe(3000)
+        ->and($options->httpVersion)->toBe(CURL_HTTP_VERSION_2_0)
+        ->and($options->maxResponseHeaderBytes)->toBeNull();
+
+    $config = new HttpClientConfig(
+        11,
+        12,
+        true,
+        4,
+        true,
+        true,
+        null,
+        null,
+        null,
+        null,
+        'Agent/1',
+        1000,
+        ['X-App' => 'TalkingBytes'],
+    );
+
+    expect($config->maxResponseBytes)->toBe(1000)
+        ->and($config->defaultHeaders)->toBe(['X-App' => 'TalkingBytes'])
+        ->and($config->maxResponseHeaderBytes)->toBeNull();
+});
+
+it('validates response header budgets upfront', function (): void {
+    expect(fn() => new CurlOptions(maxResponseHeaderBytes: 0))
+        ->toThrow(InvalidArgumentException::class, 'maxResponseHeaderBytes must be greater than 0');
+
+    expect(fn() => new CurlOptions(maxResponseHeaderCount: 0))
+        ->toThrow(InvalidArgumentException::class, 'maxResponseHeaderCount must be greater than 0');
+});
