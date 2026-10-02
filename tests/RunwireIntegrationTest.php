@@ -11,6 +11,7 @@ use Infocyph\Runwire\Runtime\RequestExecutionPolicy;
 use Infocyph\Runwire\RuntimeCapabilities;
 use Infocyph\Runwire\RuntimeContext;
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
+use Infocyph\TalkingBytes\Core\Support\OperationDeadline;
 use Infocyph\TalkingBytes\Email\Config\ImapConfig;
 use Infocyph\TalkingBytes\Email\Config\SpoolConfig;
 use Infocyph\TalkingBytes\Email\EmailMailboxFactory;
@@ -28,6 +29,7 @@ use Infocyph\TalkingBytes\Http\HttpClientFactory;
 use Infocyph\TalkingBytes\Http\HttpRequest;
 use Infocyph\TalkingBytes\Http\HttpResponse;
 use Infocyph\TalkingBytes\Http\Testing\FakeHttpTransport;
+use Infocyph\TalkingBytes\Integration\Runwire\RunwireBinding;
 use Infocyph\TalkingBytes\Webhook\Webhook;
 use Infocyph\TalkingBytes\Webhook\WebhookMessage;
 
@@ -68,6 +70,103 @@ function talkingBytesRunwireMessage(): EmailMessage
         ->subject('Runwire')
         ->text('payload');
 }
+
+it('bounds borrowed Runwire stream readiness without owning the scope', function (): void {
+    $runtime = talkingBytesRunwireContext(cooperative: true);
+    $pair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
+    expect($pair)->not->toBeFalse();
+
+    try {
+        $events = [];
+        $read = (new CoroutineRuntime())->run(
+            static function (CoroutineScope $scope) use ($runtime, $pair, &$events): string {
+                $waiter = (new RunwireBinding($runtime, scope: $scope))->streamWaiter();
+                expect($waiter)->not->toBeNull();
+
+                $scope->spawn(static function () use ($scope, $pair, &$events): void {
+                    $scope->sleep(0.02);
+                    fwrite($pair[1], 'ready');
+                    $events[] = 'writer';
+                });
+
+                $ready = $waiter?->waitReadable($pair[0], OperationDeadline::after(0.2));
+                expect($ready)->toBeTrue();
+                $events[] = 'reader';
+
+                return (string) fread($pair[0], 5);
+            },
+        );
+
+        expect($read)->toBe('ready')
+            ->and($events)->toBe(['writer', 'reader']);
+
+        $timedOut = (new CoroutineRuntime())->run(
+            static function (CoroutineScope $scope) use ($runtime, $pair): bool {
+                $waiter = (new RunwireBinding($runtime, scope: $scope))->streamWaiter();
+
+                return $waiter?->waitReadable($pair[0], OperationDeadline::after(0.03)) ?? true;
+            },
+        );
+
+        expect($timedOut)->toBeFalse();
+    } finally {
+        fclose($pair[0]);
+        fclose($pair[1]);
+    }
+});
+
+it('supports repeated intermediary Runwire binding without taking host lifecycle ownership', function (): void {
+    $runtime = talkingBytesRunwireContext();
+    $request = talkingBytesRunwireRequest($runtime);
+    $transport = new FakeHttpTransport();
+
+    $firstIntermediary = static fn(HttpClientFactory $factory): HttpClientFactory => $factory->withRunwire(
+        $runtime,
+        $request,
+    );
+    $secondIntermediary = static fn(HttpClientFactory $factory): HttpClientFactory => $factory->withRunwire(
+        $runtime,
+        $request,
+    );
+
+    $client = $secondIntermediary($firstIntermediary(new HttpClientFactory()))
+        ->fromArray([], $transport);
+
+    $request->cancel(CancellationReason::HOST_CANCELLED);
+    $result = $client->get('https://example.test/intermediary');
+
+    expect($result->metadata['cancelled'] ?? false)->toBeTrue()
+        ->and($transport->sentRequests())->toBe([])
+        ->and($request->completed())->toBeFalse();
+
+    $request->complete();
+});
+
+it('keeps sequential Runwire request bindings isolated when reusing an unbound factory', function (): void {
+    $runtime = talkingBytesRunwireContext();
+    $baseFactory = new HttpClientFactory();
+    $requestA = talkingBytesRunwireRequest($runtime);
+    $requestB = talkingBytesRunwireRequest($runtime);
+    $transportA = new FakeHttpTransport();
+    $transportB = new FakeHttpTransport();
+
+    $clientA = $baseFactory->withRunwire($runtime, $requestA)->fromArray([], $transportA);
+    $clientB = $baseFactory->withRunwire($runtime, $requestB)->fromArray([], $transportB);
+
+    $requestA->cancel(CancellationReason::HOST_CANCELLED);
+
+    $resultA = $clientA->get('https://tenant-a.example.test');
+    $resultB = $clientB->get('https://tenant-b.example.test');
+
+    expect($resultA->metadata['cancelled'] ?? false)->toBeTrue()
+        ->and($transportA->sentRequests())->toBe([])
+        ->and($resultB->successful)->toBeTrue()
+        ->and($transportB->sentRequests())->toHaveCount(1)
+        ->and($requestB->completed())->toBeFalse();
+
+    $requestA->complete();
+    $requestB->complete();
+});
 
 it('supports runtime-only binding without changing the normal protocol path', function (): void {
     $runtime = talkingBytesRunwireContext();
