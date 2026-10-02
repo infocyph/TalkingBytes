@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Infocyph\TalkingBytes\Http\Internal;
 
+use InvalidArgumentException;
+
 final class ResponseHeaderCollector
 {
     /**
@@ -11,15 +13,44 @@ final class ResponseHeaderCollector
      */
     private array $activeHeaders = [];
 
+    private ?string $error = null;
+
+    private int $fieldCount = 0;
+
     /**
      * @var array<string, string|list<string>>
      */
     private array $headers = [];
 
+    private int $receivedBytes = 0;
+
     private ?int $statusCode = null;
+
+    public function __construct(
+        private readonly ?int $maxBytes = null,
+        private readonly ?int $maxFields = null,
+    ) {
+        if ($this->maxBytes !== null && $this->maxBytes < 1) {
+            throw new InvalidArgumentException('HTTP response header byte limit must be greater than zero.');
+        }
+        if ($this->maxFields !== null && $this->maxFields < 1) {
+            throw new InvalidArgumentException('HTTP response header field limit must be greater than zero.');
+        }
+    }
 
     public function collect(string $line): int
     {
+        $length = strlen($line);
+        $this->receivedBytes += $length;
+        if ($this->maxBytes !== null && $this->receivedBytes > $this->maxBytes) {
+            $this->error = sprintf(
+                'HTTP response headers exceeded max allowed bytes (%d).',
+                $this->maxBytes,
+            );
+
+            return 0;
+        }
+
         $trimmed = trim($line);
 
         if ($trimmed === '') {
@@ -27,7 +58,7 @@ final class ResponseHeaderCollector
                 $this->headers = $this->activeHeaders;
             }
 
-            return strlen($line);
+            return $length;
         }
 
         if (str_starts_with($trimmed, 'HTTP/')) {
@@ -36,12 +67,22 @@ final class ResponseHeaderCollector
                 $this->statusCode = (int) $matches[1];
             }
 
-            return strlen($line);
+            return $length;
         }
 
         $position = strpos($line, ':');
         if ($position === false) {
-            return strlen($line);
+            return $length;
+        }
+
+        $this->fieldCount++;
+        if ($this->maxFields !== null && $this->fieldCount > $this->maxFields) {
+            $this->error = sprintf(
+                'HTTP response headers exceeded max allowed fields (%d).',
+                $this->maxFields,
+            );
+
+            return 0;
         }
 
         $name = strtolower(trim(substr($line, 0, $position)));
@@ -50,7 +91,7 @@ final class ResponseHeaderCollector
         if (!isset($this->activeHeaders[$name])) {
             $this->activeHeaders[$name] = $value;
 
-            return strlen($line);
+            return $length;
         }
 
         $existing = $this->activeHeaders[$name];
@@ -58,12 +99,17 @@ final class ResponseHeaderCollector
             $existing[] = $value;
             $this->activeHeaders[$name] = $existing;
 
-            return strlen($line);
+            return $length;
         }
 
         $this->activeHeaders[$name] = [$existing, $value];
 
-        return strlen($line);
+        return $length;
+    }
+
+    public function error(): ?string
+    {
+        return $this->error;
     }
 
     /**
