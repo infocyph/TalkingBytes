@@ -362,7 +362,7 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
         $this->watchWithIdle($onEvent, $timeoutSeconds, $stop);
     }
 
-/**
+    /**
      * @param resource $connection
      */
     private function applyReadDeadline(mixed $connection, OperationDeadline $deadline): void
