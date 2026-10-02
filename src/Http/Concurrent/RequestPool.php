@@ -20,6 +20,7 @@ final readonly class RequestPool
         private bool $stopOnFailure = false,
         private ?CancellationSignal $cancellation = null,
         private ?OperationDeadline $operationDeadline = null,
+        private ?RunwireBinding $runwireBinding = null,
     ) {}
 
     public function maxConcurrency(int $maxConcurrency): self
@@ -30,6 +31,7 @@ final readonly class RequestPool
             $this->stopOnFailure,
             $this->cancellation,
             $this->operationDeadline,
+            $this->runwireBinding,
         );
     }
 
@@ -44,6 +46,7 @@ final readonly class RequestPool
             $this->stopOnFailure,
             $this->cancellation,
             $this->operationDeadline,
+            $this->runwireBinding,
         );
     }
 
@@ -55,6 +58,7 @@ final readonly class RequestPool
             $enabled,
             $this->cancellation,
             $this->operationDeadline,
+            $this->runwireBinding,
         );
     }
 
@@ -66,6 +70,7 @@ final readonly class RequestPool
             $this->stopOnFailure,
             $cancellation,
             $this->operationDeadline,
+            $this->runwireBinding,
         );
     }
 
@@ -79,6 +84,7 @@ final readonly class RequestPool
             $this->stopOnFailure,
             $this->cancellation,
             $deadline,
+            $this->runwireBinding,
         );
     }
 
@@ -87,6 +93,12 @@ final readonly class RequestPool
         ?RequestContext $request = null,
         ?CoroutineScope $scope = null,
     ): self {
+        if ($this->runwireBinding !== null) {
+            $this->runwireBinding->assertSameContext($runtime, $request, $scope);
+
+            return $this;
+        }
+
         $binding = new RunwireBinding($runtime, $request, $scope);
         $deadline = $binding->deadline();
         if ($deadline !== null && $this->operationDeadline !== null) {
@@ -107,6 +119,7 @@ final readonly class RequestPool
             $this->stopOnFailure,
             $binding->cancellation($this->cancellation),
             $deadline,
+            $binding,
         );
     }
 }
