@@ -10,6 +10,7 @@ use Infocyph\TalkingBytes\Core\Event\NullEventDispatcher;
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
 use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
 use Infocyph\TalkingBytes\Core\Support\Clock;
+use Infocyph\TalkingBytes\Core\Support\OperationDeadline;
 use Infocyph\TalkingBytes\Core\Support\ObservabilitySanitizer;
 use Infocyph\TalkingBytes\Core\Support\Sleeper;
 use Infocyph\TalkingBytes\Email\Config\DkimConfig;
@@ -28,6 +29,7 @@ use Infocyph\TalkingBytes\Email\Transport\LogEmailTransport;
 use Infocyph\TalkingBytes\Email\Transport\LoggingEmailTransport;
 use Infocyph\TalkingBytes\Email\Transport\MailFunctionTransport;
 use Infocyph\TalkingBytes\Email\Transport\NullEmailTransport;
+use Infocyph\TalkingBytes\Email\Transport\OperationDeadlineEmailTransport;
 use Infocyph\TalkingBytes\Email\Transport\RateLimitedEmailTransport;
 use Infocyph\TalkingBytes\Email\Transport\RetryEmailTransport;
 use Infocyph\TalkingBytes\Email\Transport\SendmailTransport;
@@ -185,9 +187,10 @@ final readonly class Emailer
     public function withFallback(
         array $fallbackTransports,
         ?CancellationSignal $cancellation = null,
+        ?OperationDeadline $deadline = null,
     ): self {
         return new self(
-            new FallbackEmailTransport($this->transport, $fallbackTransports, $cancellation),
+            new FallbackEmailTransport($this->transport, $fallbackTransports, $cancellation, $deadline),
             $this->events,
             $this->clock,
             $this->sleeper,
@@ -202,6 +205,16 @@ final readonly class Emailer
         return new self(new LoggingEmailTransport($this->transport, $logger), $this->events, $this->clock, $this->sleeper);
     }
 
+    public function withOperationDeadline(OperationDeadline $deadline): self
+    {
+        return new self(
+            new OperationDeadlineEmailTransport($this->transport, $deadline),
+            $this->events,
+            $this->clock,
+            $this->sleeper,
+        );
+    }
+
     public function withPsrLogger(object $logger, string $level = 'info'): self
     {
         return $this->withLogging(new Psr3LoggerAdapter($logger)->toCallable($level));
@@ -212,10 +225,19 @@ final readonly class Emailer
         return new self(new RateLimitedEmailTransport($this->transport, $rateLimiter), $this->events, $this->clock, $this->sleeper);
     }
 
-    public function withRetry(RetryPolicy $retryPolicy, ?CancellationSignal $cancellation = null): self
-    {
+    public function withRetry(
+        RetryPolicy $retryPolicy,
+        ?CancellationSignal $cancellation = null,
+        ?OperationDeadline $deadline = null,
+    ): self {
         return new self(
-            new RetryEmailTransport($this->transport, $retryPolicy, $cancellation, $this->sleeper),
+            new RetryEmailTransport(
+                $this->transport,
+                $retryPolicy,
+                $cancellation,
+                $this->sleeper,
+                $deadline,
+            ),
             $this->events,
             $this->clock,
             $this->sleeper,
