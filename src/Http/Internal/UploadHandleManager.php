@@ -8,7 +8,7 @@ use Infocyph\TalkingBytes\Http\HttpRequest;
 
 final class UploadHandleManager
 {
-public static function cleanup(HttpRequest $request): void
+    public static function cleanup(HttpRequest $request): void
     {
         $paths = $request->metadata['_multipart_temp_paths'] ?? [];
         if (is_array($paths)) {
@@ -30,7 +30,7 @@ public static function cleanup(HttpRequest $request): void
         fclose($resource);
     }
 
-/**
+    /**
      * @param array<string, mixed> $metadata
      * @return array<string, mixed>
      */
@@ -52,7 +52,7 @@ public static function cleanup(HttpRequest $request): void
         return $metadata;
     }
 
-/**
+    /**
      * @param array<string, mixed> $metadata
      * @param resource $snapshot
      * @return array<string, mixed>
