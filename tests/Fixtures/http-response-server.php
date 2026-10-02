@@ -2,7 +2,6 @@
 
 declare(strict_types=1);
 
-$readyPath = $argv[1] ?? '';
 $server = stream_socket_server('tcp://127.0.0.1:0', $errno, $errstr);
 if ($server === false) {
     throw new RuntimeException(sprintf('Unable to bind HTTP response fixture: %s (%d)', $errstr, $errno));
@@ -15,7 +14,8 @@ if (!is_string($address) || !str_contains($address, ':')) {
 }
 
 $port = (int) substr(strrchr($address, ':'), 1);
-file_put_contents($readyPath, json_encode(['port' => $port], JSON_THROW_ON_ERROR));
+fwrite(STDOUT, json_encode(['port' => $port], JSON_THROW_ON_ERROR) . "\n");
+fflush(STDOUT);
 
 $deadline = microtime(true) + 5.0;
 $handled = 0;
