@@ -119,19 +119,6 @@ final readonly class SustainedHttpPerformance
     }
 
     /**
-     * @param array<array-key, mixed> $usage
-     */
-    private static function usageInt(array $usage, string $key): int
-    {
-        $value = $usage[$key] ?? 0;
-        if (!is_int($value)) {
-            throw new RuntimeException(sprintf('Invalid process resource field: %s.', $key));
-        }
-
-        return $value;
-    }
-
-    /**
      * @param list<float|int> $values
      */
     private static function percentile(array $values, int $percentile): float
@@ -144,6 +131,19 @@ final readonly class SustainedHttpPerformance
         $index = (int) ceil(($percentile / 100) * count($values)) - 1;
 
         return (float) $values[max(0, min(count($values) - 1, $index))];
+    }
+
+    /**
+     * @param array<array-key, mixed> $usage
+     */
+    private static function usageInt(array $usage, string $key): int
+    {
+        $value = $usage[$key] ?? 0;
+        if (!is_int($value)) {
+            throw new RuntimeException(sprintf('Invalid process resource field: %s.', $key));
+        }
+
+        return $value;
     }
 
     /** @return TrialResult */
@@ -237,7 +237,8 @@ final readonly class SustainedHttpPerformance
         int $concurrency,
         float $durationSeconds,
         bool $recordLatency,
-    ): array {
+    ): array
+    {
         /** @var list<float> $latencies */
         $latencies = [];
         $errors = 0;
