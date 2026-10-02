@@ -8,12 +8,14 @@ use Infocyph\Runwire\CancellationToken;
 use Infocyph\Runwire\Coroutine\CoroutineScope;
 use Infocyph\Runwire\Exception\CancelledException;
 use Infocyph\Runwire\RequestContext;
+use Infocyph\Runwire\RequestDeadline;
 use Infocyph\Runwire\Runtime\Enum\CancellationReason;
 use Infocyph\Runwire\Runtime\Enum\RuntimeCapability;
 use Infocyph\Runwire\RuntimeContext;
 use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
 use Infocyph\TalkingBytes\Core\Support\OperationDeadline;
 use Infocyph\TalkingBytes\Core\Support\Sleeper;
+use Infocyph\TalkingBytes\Core\Support\StreamWaiter;
 use LogicException;
 use RuntimeException;
 
@@ -109,6 +111,30 @@ final readonly class RunwireBinding
         );
     }
 
+    public function streamWaiter(): ?StreamWaiter
+    {
+        if ($this->scope === null) {
+            return null;
+        }
+
+        $scope = $this->scope;
+
+        return new StreamWaiter(
+            static fn(mixed $stream, ?OperationDeadline $deadline): bool => self::waitForStream(
+                $scope,
+                $stream,
+                $deadline,
+                readable: true,
+            ),
+            static fn(mixed $stream, ?OperationDeadline $deadline): bool => self::waitForStream(
+                $scope,
+                $stream,
+                $deadline,
+                readable: false,
+            ),
+        );
+    }
+
     private static function tokenCancelledOutsideDeadline(CancellationToken $token): bool
     {
         if (!$token->isCancelled()) {
@@ -116,6 +142,41 @@ final readonly class RunwireBinding
         }
 
         return $token->reason() !== CancellationReason::DEADLINE_EXCEEDED;
+    }
+
+    /**
+     * @param resource $stream
+     */
+    private static function waitForStream(
+        CoroutineScope $scope,
+        mixed $stream,
+        ?OperationDeadline $deadline,
+        bool $readable,
+    ): bool {
+        try {
+            if ($deadline === null) {
+                $readable ? $scope->waitReadable($stream) : $scope->waitWritable($stream);
+
+                return true;
+            }
+
+            $remaining = $deadline->remainingSeconds();
+            if ($remaining <= 0.0) {
+                return false;
+            }
+
+            $bounded = RequestDeadline::afterSeconds($remaining, hrtime(true));
+            $scope->withDeadline(
+                $bounded,
+                static function (CoroutineScope $waitScope) use ($stream, $readable): void {
+                    $readable ? $waitScope->waitReadable($stream) : $waitScope->waitWritable($stream);
+                },
+            );
+
+            return true;
+        } catch (CancelledException) {
+            return false;
+        }
     }
 
     private function supportsCooperativeScope(): bool
