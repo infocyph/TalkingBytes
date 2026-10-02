@@ -63,6 +63,10 @@ final readonly class RequestPool
 
     public function withCancellation(?CancellationSignal $cancellation): self
     {
+        if ($this->runwireBinding !== null) {
+            $cancellation = $this->runwireBinding->cancellation($cancellation);
+        }
+
         return new self(
             $this->transport,
             $this->maxConcurrency,
