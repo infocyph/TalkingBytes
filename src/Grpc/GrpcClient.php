@@ -118,24 +118,6 @@ final readonly class GrpcClient
         );
     }
 
-    private function deadlineExceeded(?string $streamType = null): CommunicationResult
-    {
-        $metadata = [
-            'deadline_exceeded' => true,
-            'attempts' => 0,
-            'transport' => 'grpc',
-        ];
-        if ($streamType !== null) {
-            $metadata['stream_type'] = $streamType;
-        }
-
-        return CommunicationResult::failure(
-            'gRPC operation deadline exceeded.',
-            GrpcStatus::DeadlineExceeded->value,
-            metadata: $metadata,
-        );
-    }
-
     /**
      * @param iterable<mixed> $messages
      * @param array<string, mixed> $metadata
@@ -227,21 +209,6 @@ final readonly class GrpcClient
         );
     }
 
-    public function withOperationDeadline(OperationDeadline $deadline): self
-    {
-        $deadline = $this->operationDeadline?->earliest($deadline) ?? $deadline;
-
-        return new self(
-            $this->transport,
-            $this->middlewares,
-            $this->streamingInvoker,
-            $this->events,
-            $this->clock,
-            $this->cancellation,
-            $deadline,
-        );
-    }
-
     public function withGrpcRetry(
         ?GrpcRetryPolicy $policy = null,
         ?CancellationSignal $cancellation = null,
@@ -279,6 +246,21 @@ final readonly class GrpcClient
             $this->clock,
             $this->cancellation,
             $this->operationDeadline,
+        );
+    }
+
+    public function withOperationDeadline(OperationDeadline $deadline): self
+    {
+        $deadline = $this->operationDeadline?->earliest($deadline) ?? $deadline;
+
+        return new self(
+            $this->transport,
+            $this->middlewares,
+            $this->streamingInvoker,
+            $this->events,
+            $this->clock,
+            $this->cancellation,
+            $deadline,
         );
     }
 
@@ -330,6 +312,24 @@ final readonly class GrpcClient
 
         return CommunicationResult::failure(
             'gRPC operation cancelled.',
+            metadata: $metadata,
+        );
+    }
+
+    private function deadlineExceeded(?string $streamType = null): CommunicationResult
+    {
+        $metadata = [
+            'deadline_exceeded' => true,
+            'attempts' => 0,
+            'transport' => 'grpc',
+        ];
+        if ($streamType !== null) {
+            $metadata['stream_type'] = $streamType;
+        }
+
+        return CommunicationResult::failure(
+            'gRPC operation deadline exceeded.',
+            GrpcStatus::DeadlineExceeded->value,
             metadata: $metadata,
         );
     }
