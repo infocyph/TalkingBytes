@@ -379,6 +379,13 @@ final readonly class HttpRequest
         );
     }
 
+    public function operationDeadline(): ?OperationDeadline
+    {
+        $deadline = $this->metadata['_operation_deadline'] ?? null;
+
+        return $deadline instanceof OperationDeadline ? $deadline : null;
+    }
+
     public function mtls(string $certificatePath, string $keyPath, #[\SensitiveParameter] ?string $passphrase = null): self
     {
         return $this->withOptions($this->options->withMtls($certificatePath, $keyPath, $passphrase));
