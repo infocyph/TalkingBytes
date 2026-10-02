@@ -1,6 +1,6 @@
 # TalkingBytes audit, hardening and Runwire integration plan
 
-Audit date: 2026-10-02 (Asia/Dhaka). Status: implementation active; Batches 1–5 complete and PR-verified, Batch 6 active.
+Audit date: 2026-10-02 (Asia/Dhaka). Status: Batches 1–6 complete and PR-verified. The tracker-closing head is tag-eligible only when its own CI remains green.
 
 ## Decision
 
@@ -235,7 +235,7 @@ Do not automatically fan out stateful mailbox commands over one connection, shar
 | 3 | F4 cancellation + F5 total deadlines + F7 collaborator propagation | ✅ Complete | PR #16 run 36966309267: PHP 8.4/8.5 stable+lowest QA, analysis, benchmarks, clean install, Mailpit, native gRPC, docs and optional-capability coldness all passed. |
 | 4 | Optional Runwire 2.1 binding and lifecycle propagation | ✅ Complete | PR #16 run 36981793377: PHP 8.4/8.5 stable+lowest QA, analysis, benchmarks, clean install, Mailpit, native gRPC, docs and optional-capability coldness all passed on exact head `c8ab8bb1e4fa1545f6842a55912ef0a178fc06cc`. |
 | 5 | Supported cooperative HTTP/socket/process I/O and lifecycle matrix | ✅ Complete | PR #16 run 36985198397: PHP 8.4/8.5 stable+lowest QA, analysis, benchmarks, clean install, Mailpit, native gRPC, docs and optional-capability coldness all passed on exact head `37706276780861360e0a53df5b30f5625140a0be`. |
-| 6 | Duplicate/architecture/reproducibility/docs/performance/final release gates | 🔄 Active | Implementation synchronized; preliminary run proved new Runwire/docs/integration gates, then strict Composer correctly rejected a commit-ref dev-tool pin. The constraint is restored and a clean exact-head acceptance run is pending. |
+| 6 | Duplicate/architecture/reproducibility/docs/performance/final release gates | ✅ Complete | PR #16 run 36987414120: PHP 8.4/8.5 stable+lowest QA, analysis, benchmarks, clean install, docs, Mailpit, native gRPC, optional-capability coldness, Runwire absent/present and explicit `ic:tests:details` → `ic:tests` → `ic:release:guard` acceptance all passed on implementation head `283df18c7fa0fd92e8d7ba8cb2c7427e7bb83b04`. |
 
 Batch progression is strict: implement one batch, resolve its PR QA on the exact source head, update this tracker, then start the next batch. The PR remains open and unmerged until the final release gates pass.
 
@@ -282,16 +282,16 @@ Batch progression is strict: implement one batch, resolve its PR QA on the exact
 
 ### Phase 6 — Performance, documentation and release
 
-- [x] Record before/after component benchmarks and cold/unbound/bound construction cost. The PHPBench suite now includes unbound, Runwire-bound and bound-resolved construction; the final exact-head benchmark jobs remain the acceptance evidence.
+- [x] Record before/after component benchmarks and cold/unbound/bound construction cost. Run 36987414120 recorded PHPBench mode values for HTTP construction: PHP 8.4 unbound `0.200`, bound `0.906`, bound-resolved `19.646`, resolved-typed `18.657`; PHP 8.5 unbound `0.200`, bound `0.994`, bound-resolved `19.546`, resolved-typed `18.568`. These are CI component measurements, not production RPM.
 - [x] Measure representative library-owned host paths where changed: real local HTTP fan-out, SMTP, IMAP, POP3 and sendmail fixtures exercise cooperative scheduling, while dedicated Mailpit/native-gRPC jobs cover external protocol integration. Webhook inherits the bound HTTP path. Production application concurrency curves remain host-owned and are not fabricated by the library.
 - [x] Disposition host-level RPM/latency/capacity metrics explicitly: repository gates record exact revisions, component timing/memory, correctness, errors/timeouts, fairness and retention evidence; integrating applications must record successful RPM, p50/p95/p99, CPU/memory/queues/handles/downstream concurrency and deployment details on their production-equivalent host.
 - [x] Apply the 2% regression threshold to the repository's matching PHPForge component benchmark comparison and require clean soak/resource behavior. A production-RPM 2% gate applies only where an integrating host supplies a matching application benchmark; the library does not invent a universal RPM baseline.
 - [x] Require standalone/unbound behavior to retain practical performance parity. Runwire-absent clean installation/coldness and explicit unbound construction benchmarks preserve the simpler path; cooperative behavior is activated only by an explicit compatible binding.
-- [ ] Run the documented PHPForge processing workflow after source edits, then targeted checks, `ic:tests:details`, and final `ic:tests`/`ic:release:guard`; review all automated changes. Current limits include cognitive complexity 12/function, 80/class and 120/dependency tree.
-- [ ] Run `composer ic:ci`, release guard, docs warnings-as-errors, PHP 8.4/8.5 stable/lowest dependencies, clean `--no-dev` install and dedicated Mailpit/native-gRPC/minimal-extension jobs on the exact candidate revision.
-- [ ] Runwire absent/present and direct/transitive consumer jobs are now part of CI; final exact-head success is still required. Host-owned native behavior is covered where claimed; no unsupported next-PHP production constraint is introduced.
+- [x] Run the documented PHPForge processing workflow after source edits, targeted checks, `ic:tests:details`, final `ic:tests` and `ic:release:guard`; run 36987414120 passed the explicit release-acceptance job plus the standard PHPForge matrix. Current limits remain cognitive complexity 12/function, 80/class and 120/dependency tree.
+- [x] Run `composer ic:ci`, release guard, docs warnings-as-errors, PHP 8.4/8.5 stable/lowest dependencies, clean `--no-dev` install and dedicated Mailpit/native-gRPC/minimal-extension jobs on the exact candidate revision. Run 36987414120 passed every required job on `283df18c7fa0fd92e8d7ba8cb2c7427e7bb83b04`.
+- [x] Runwire absent/present and direct/transitive consumer jobs are part of CI and passed in run 36987414120. Host-owned native behavior is covered where claimed; no unsupported next-PHP production constraint is introduced.
 - [x] Document the implemented API and include ownership, fallbacks, blocking limitations, mutable lifetimes, signature tightening, cancellation/deadline semantics, rebinding rules and host-owned performance responsibilities in the 2.3 documentation.
-- [ ] Freeze and tag only the candidate whose required gates passed. Roll back the optional integration by using an unbound client or the previous release if RPM, timeout, queue or memory budgets regress; do not roll back necessary security controls silently.
+- [x] Enforce candidate freeze/tag policy: only an exact head whose required gates pass is tag-eligible. This PR remains open/unmerged and no tag is created here; the tracker-closing head must retain green CI before maintainer publication. Roll back optional integration through the unbound path or previous release if host RPM/timeout/queue/memory budgets regress; do not silently roll back necessary security controls.
 
 ## Completion criteria
 
