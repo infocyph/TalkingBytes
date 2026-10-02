@@ -20,6 +20,7 @@ use Infocyph\TalkingBytes\Email\Config\SpoolConfig;
 use Infocyph\TalkingBytes\Email\Logging\Psr3LoggerAdapter;
 use Infocyph\TalkingBytes\Email\Testing\AssertableEmailTransport;
 use Infocyph\TalkingBytes\Email\Testing\FakeEmailTransport;
+use Infocyph\TalkingBytes\Email\Transport\CancellationEmailTransport;
 use Infocyph\TalkingBytes\Email\Transport\DkimSigningTransport;
 use Infocyph\TalkingBytes\Email\Transport\EmailTransport;
 use Infocyph\TalkingBytes\Email\Transport\FallbackEmailTransport;
@@ -161,6 +162,16 @@ final readonly class Emailer
     public function transport(): EmailTransport
     {
         return $this->transport;
+    }
+
+    public function withCancellation(CancellationSignal $cancellation): self
+    {
+        return new self(
+            new CancellationEmailTransport($this->transport, $cancellation),
+            $this->events,
+            $this->clock,
+            $this->sleeper,
+        );
     }
 
     public function withDkim(DkimConfig $config): self
