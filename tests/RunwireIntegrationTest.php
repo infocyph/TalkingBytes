@@ -74,7 +74,9 @@ function talkingBytesRunwireMessage(): EmailMessage
 it('bounds borrowed Runwire stream readiness without owning the scope', function (): void {
     $runtime = talkingBytesRunwireContext(cooperative: true);
     $pair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
-    expect($pair)->not->toBeFalse();
+    if ($pair === false) {
+        throw new RuntimeException('Unable to create stream pair for Runwire readiness test.');
+    }
 
     try {
         $events = [];
