@@ -11,6 +11,7 @@ use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
 use Infocyph\TalkingBytes\Core\Support\Clock;
 use Infocyph\TalkingBytes\Core\Support\OperationDeadline;
 use Infocyph\TalkingBytes\Core\Support\Sleeper;
+use Infocyph\TalkingBytes\Core\Support\StreamWaiter;
 use Infocyph\TalkingBytes\Email\Config\ImapConfig;
 use Infocyph\TalkingBytes\Email\Enum\ImapSecurity;
 use Infocyph\TalkingBytes\Email\Exception\MailboxAuthenticationException;
@@ -47,6 +48,7 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
         ?Sleeper $sleeper = null,
         private readonly ?CancellationSignal $cancellation = null,
         private readonly ?OperationDeadline $operationDeadline = null,
+        private readonly ?StreamWaiter $streamWaiter = null,
     ) {
         $this->events = new BestEffortEventDispatcher($events ?? new NullEventDispatcher());
         $this->clock = $clock ?? Clock::system();
@@ -90,6 +92,7 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
             $this->config->timeoutSeconds,
             'IMAP',
             $this->config->security === ImapSecurity::Ssl,
+            $this->streamWaiter,
         );
         $this->selectedFolder = null;
 
@@ -474,7 +477,12 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
             throw new MailboxConnectionException('IMAP STARTTLS negotiation command was rejected.');
         }
 
-        SocketMailboxRuntime::enableTls($this->requireConnection(), 'imap');
+        SocketMailboxRuntime::enableTls(
+            $this->requireConnection(),
+            'imap',
+            $this->streamWaiter,
+            $this->commandDeadline(),
+        );
 
         $this->refreshCapabilities();
     }
@@ -523,6 +531,15 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
                 $this->applyReadDeadline($connection, $deadline);
             }
 
+            if ($this->streamWaiter !== null && !$this->streamWaiter->waitReadable($connection, $deadline)) {
+                $this->assertExecutionAllowed();
+                if ($deadline?->expired() === true) {
+                    throw new MailboxConnectionException('IMAP command deadline exceeded.');
+                }
+
+                throw new MailboxConnectionException('IMAP cooperative read wait was interrupted.');
+            }
+
             $remaining = max(1, $bytes - strlen($buffer));
             $chunk = fread($connection, $remaining);
             $this->assertExecutionAllowed();
@@ -534,6 +551,9 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
                 $meta = stream_get_meta_data($connection);
                 if (($meta['timed_out'] ?? false) === true) {
                     throw new MailboxConnectionException('IMAP literal read timed out.');
+                }
+                if ($this->streamWaiter !== null && !feof($connection)) {
+                    continue;
                 }
 
                 throw new MailboxProtocolException(sprintf(
@@ -551,7 +571,7 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
 
     private function readLine(): string
     {
-        return SocketMailboxRuntime::readLine($this->requireConnection(), 'imap');
+        return $this->readLineUntil($this->commandDeadline());
     }
 
     private function readLineUntil(OperationDeadline $deadline): string
@@ -559,7 +579,13 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
         $this->assertExecutionAllowed();
         $connection = $this->requireConnection();
         $this->applyReadDeadline($connection, $deadline);
-        $line = SocketMailboxRuntime::readLine($connection, 'imap');
+        $line = SocketMailboxRuntime::readLine(
+            $connection,
+            'imap',
+            streamWaiter: $this->streamWaiter,
+            cancellation: $this->cancellation,
+            deadline: $deadline,
+        );
         $this->assertExecutionAllowed();
         if ($deadline->expired()) {
             throw new MailboxConnectionException('IMAP command deadline exceeded.');
@@ -736,12 +762,17 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
             $read = [$socket];
             $write = [];
             $except = [];
-            $ready = stream_select($read, $write, $except, 0, 250000);
+            $microseconds = $this->streamWaiter === null ? 250000 : 0;
+            $ready = stream_select($read, $write, $except, 0, $microseconds);
             if ($ready === false) {
                 throw new MailboxConnectionException('IMAP IDLE stream_select failed.');
             }
 
             if ($ready < 1) {
+                if ($this->streamWaiter !== null) {
+                    $this->sleeper->milliseconds(10);
+                }
+
                 continue;
             }
 
@@ -790,6 +821,19 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
 
     private function write(string $value): void
     {
-        SocketMailboxRuntime::write($this->requireConnection(), $value, 'imap');
+        $this->assertExecutionAllowed();
+        $deadline = $this->commandDeadline();
+        SocketMailboxRuntime::write(
+            $this->requireConnection(),
+            $value,
+            'imap',
+            $this->streamWaiter,
+            $this->cancellation,
+            $deadline,
+        );
+        $this->assertExecutionAllowed();
+        if ($deadline->expired()) {
+            throw new MailboxConnectionException('IMAP command deadline exceeded.');
+        }
     }
 }
