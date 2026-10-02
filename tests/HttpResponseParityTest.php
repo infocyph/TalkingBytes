@@ -250,3 +250,34 @@ it('preserves cookie provenance through supported native transport decoration', 
         $server->stop();
     }
 });
+
+
+it('sends no upload bytes after a 303 redirect converts the request to GET', function (): void {
+    $server = HttpResponseParityServer::start();
+
+    try {
+        $base = sprintf('http://127.0.0.1:%d', $server->port);
+        $transport = new CurlTransport();
+
+        foreach (['/upload-303', '/upload-cross-303'] as $path) {
+            $stream = fopen('php://temp', 'w+b');
+            expect($stream)->toBeResource();
+            fwrite($stream, 'audit-sentinel');
+            rewind($stream);
+
+            $result = $transport->send(
+                HttpRequest::post($base . $path)
+                    ->uploadFromStream($stream, 14)
+                    ->followRedirects(),
+            );
+
+            expect($result->successful)->toBeTrue()
+                ->and($result->response?->body)->toBe('GET:')
+                ->and(is_resource($stream))->toBeTrue();
+
+            fclose($stream);
+        }
+    } finally {
+        $server->stop();
+    }
+});
