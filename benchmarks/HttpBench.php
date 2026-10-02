@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace Infocyph\TalkingBytes\Benchmarks;
 
 use Closure;
+use Infocyph\Runwire\Runtime\Enum\RuntimeDriver;
+use Infocyph\Runwire\RuntimeCapabilities;
+use Infocyph\Runwire\RuntimeContext;
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
 use Infocyph\TalkingBytes\Http\Contract\HttpMiddleware;
 use Infocyph\TalkingBytes\Http\Contract\HttpTransport;
@@ -30,6 +33,8 @@ final class HttpBench
     private HttpClient $fakeClient;
 
     private HttpRequest $request;
+
+    private RuntimeContext $runwireRuntime;
 
     /** @var array<string, mixed> */
     private array $resolvedConfig;
@@ -68,6 +73,19 @@ final class HttpBench
             'idempotency' => ['enabled' => true, 'header' => 'Idempotency-Key'],
         ];
         $this->typedResolvedConfig = HttpClientConfig::fromArray($this->resolvedConfig);
+        $this->runwireRuntime = RuntimeContext::fromCapabilities(
+            new RuntimeCapabilities(
+                driver: RuntimeDriver::NATIVE,
+                persistentProcess: true,
+                persistentApplication: true,
+                ownsEventLoop: false,
+                runwireLoopAvailable: false,
+                supportsAsyncIo: false,
+                supportsRunwireCoroutines: false,
+            ),
+            mode: 'native',
+            concurrent: false,
+        );
         $this->request = HttpRequest::post('https://api.example.com/v1/orders?existing=1#frag')
             ->header('X-App', 'TalkingBytes')
             ->header('X-Trace', 'bench-123')
@@ -131,6 +149,33 @@ final class HttpBench
     public function benchImmutableClientConstruction(): void
     {
         HttpClient::using(new FakeHttpTransport());
+    }
+
+    #[Iterations(5)]
+    #[Revs(1000)]
+    public function benchUnboundFactoryConstruction(): void
+    {
+        new HttpClientFactory();
+    }
+
+    #[Iterations(5)]
+    #[Revs(1000)]
+    public function benchRunwireBoundFactoryConstruction(): void
+    {
+        (new HttpClientFactory())->withRunwire($this->runwireRuntime);
+    }
+
+    #[Iterations(5)]
+    #[Revs(250)]
+    public function benchRunwireBoundResolvedFactoryConstruction(): void
+    {
+        (new HttpClientFactory())
+            ->withRunwire($this->runwireRuntime)
+            ->fromConfig(
+                $this->typedResolvedConfig,
+                $this->resolvedConfig,
+                new FakeHttpTransport(),
+            );
     }
 
     #[Iterations(5)]
