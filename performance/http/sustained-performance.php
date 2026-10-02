@@ -105,12 +105,30 @@ final readonly class SustainedHttpPerformance
     }
 
     /**
-     * @param array<string, int> $usage
+     * @param array<array-key, mixed> $usage
      */
     private static function cpuSeconds(array $usage): float
     {
-        return (($usage['ru_utime.tv_sec'] ?? 0) + ($usage['ru_stime.tv_sec'] ?? 0))
-            + (($usage['ru_utime.tv_usec'] ?? 0) + ($usage['ru_stime.tv_usec'] ?? 0)) / 1_000_000;
+        $userSeconds = self::usageInt($usage, 'ru_utime.tv_sec');
+        $systemSeconds = self::usageInt($usage, 'ru_stime.tv_sec');
+        $userMicroseconds = self::usageInt($usage, 'ru_utime.tv_usec');
+        $systemMicroseconds = self::usageInt($usage, 'ru_stime.tv_usec');
+
+        return ($userSeconds + $systemSeconds)
+            + (($userMicroseconds + $systemMicroseconds) / 1_000_000);
+    }
+
+    /**
+     * @param array<array-key, mixed> $usage
+     */
+    private static function usageInt(array $usage, string $key): int
+    {
+        $value = $usage[$key] ?? 0;
+        if (!is_int($value)) {
+            throw new RuntimeException(sprintf('Invalid process resource field: %s.', $key));
+        }
+
+        return $value;
     }
 
     /**
