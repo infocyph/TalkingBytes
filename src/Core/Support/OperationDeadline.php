@@ -20,12 +20,24 @@ final readonly class OperationDeadline
         }
 
         $clock ??= Clock::system();
-        $deadlineAt = $clock->monotonic() + $seconds;
-        if (!is_finite($deadlineAt)) {
-            throw new InvalidArgumentException('Operation deadline is not representable.');
+
+        return self::at($clock->monotonic() + $seconds, $clock);
+    }
+
+    public static function at(float $monotonicSeconds, ?Clock $clock = null): self
+    {
+        if (!is_finite($monotonicSeconds) || $monotonicSeconds < 0.0) {
+            throw new InvalidArgumentException('Operation deadline must be a finite non-negative monotonic timestamp.');
         }
 
-        return new self($clock, $deadlineAt);
+        return new self($clock ?? Clock::system(), $monotonicSeconds);
+    }
+
+    public function earliest(self $other): self
+    {
+        return $this->remainingSeconds() <= $other->remainingSeconds()
+            ? $this
+            : $other;
     }
 
     /** @phpstan-impure */
