@@ -207,59 +207,17 @@ final class SocketMailboxRuntime
         ?OperationDeadline $deadline = null,
     ): string {
         if ($streamWaiter === null) {
-            $line = fgets($connection, max(1, $maxLength));
-            if ($line === false) {
-                /** @var array<string, mixed> $meta */
-                $meta = stream_get_meta_data($connection);
-                if (($meta['timed_out'] ?? false) === true) {
-                    throw new MailboxConnectionException(sprintf('%s server response timed out.', strtoupper($protocol)));
-                }
-
-                throw new MailboxConnectionException(sprintf('Failed to read from %s socket.', strtoupper($protocol)));
-            }
-            if (!str_ends_with($line, "\n") && !feof($connection)) {
-                throw new MailboxConnectionException(sprintf(
-                    '%s response line exceeds %d bytes.',
-                    strtoupper($protocol),
-                    $maxLength - 1,
-                ));
-            }
-
-            return $line;
+            return self::readBlockingLine($connection, $protocol, $maxLength);
         }
 
-        $line = '';
-        $maxBytes = max(1, $maxLength - 1);
-
-        while (strlen($line) < $maxBytes) {
-            if (!$streamWaiter->waitReadable($connection, $deadline)) {
-                throw self::readinessFailure($protocol, 'read', $cancellation, $deadline);
-            }
-
-            $remaining = max(2, $maxLength - strlen($line));
-            $chunk = fgets($connection, $remaining);
-            if ($chunk === false) {
-                if (feof($connection)) {
-                    throw new MailboxConnectionException(sprintf(
-                        'Failed to read from %s socket.',
-                        strtoupper($protocol),
-                    ));
-                }
-
-                continue;
-            }
-
-            $line .= $chunk;
-            if (str_ends_with($line, "\n") || feof($connection)) {
-                return $line;
-            }
-        }
-
-        throw new MailboxConnectionException(sprintf(
-            '%s response line exceeds %d bytes.',
-            strtoupper($protocol),
-            $maxBytes,
-        ));
+        return self::readCooperativeLine(
+            $connection,
+            $protocol,
+            $maxLength,
+            $streamWaiter,
+            $cancellation,
+            $deadline,
+        );
     }
 
     public static function shouldStartTls(bool $required, bool $supported, string $protocol): bool
@@ -333,6 +291,77 @@ final class SocketMailboxRuntime
         } catch (Throwable) {
             // Observability must never affect mailbox protocol outcomes.
         }
+    }
+
+    /**
+     * @param resource $connection
+     */
+    private static function readBlockingLine(mixed $connection, string $protocol, int $maxLength): string
+    {
+        $line = fgets($connection, max(1, $maxLength));
+        if ($line === false) {
+            /** @var array<string, mixed> $meta */
+            $meta = stream_get_meta_data($connection);
+            if (($meta['timed_out'] ?? false) === true) {
+                throw new MailboxConnectionException(sprintf('%s server response timed out.', strtoupper($protocol)));
+            }
+
+            throw new MailboxConnectionException(sprintf('Failed to read from %s socket.', strtoupper($protocol)));
+        }
+
+        if (!str_ends_with($line, "\n") && !feof($connection)) {
+            throw new MailboxConnectionException(sprintf(
+                '%s response line exceeds %d bytes.',
+                strtoupper($protocol),
+                $maxLength - 1,
+            ));
+        }
+
+        return $line;
+    }
+
+    /**
+     * @param resource $connection
+     */
+    private static function readCooperativeLine(
+        mixed $connection,
+        string $protocol,
+        int $maxLength,
+        StreamWaiter $streamWaiter,
+        ?CancellationSignal $cancellation,
+        ?OperationDeadline $deadline,
+    ): string {
+        $line = '';
+        $maxBytes = max(1, $maxLength - 1);
+
+        while (strlen($line) < $maxBytes) {
+            if (!$streamWaiter->waitReadable($connection, $deadline)) {
+                throw self::readinessFailure($protocol, 'read', $cancellation, $deadline);
+            }
+
+            $chunk = fgets($connection, max(2, $maxLength - strlen($line)));
+            if ($chunk === false) {
+                if (feof($connection)) {
+                    throw new MailboxConnectionException(sprintf(
+                        'Failed to read from %s socket.',
+                        strtoupper($protocol),
+                    ));
+                }
+
+                continue;
+            }
+
+            $line .= $chunk;
+            if (str_ends_with($line, "\n") || feof($connection)) {
+                return $line;
+            }
+        }
+
+        throw new MailboxConnectionException(sprintf(
+            '%s response line exceeds %d bytes.',
+            strtoupper($protocol),
+            $maxBytes,
+        ));
     }
 
     private static function readinessFailure(
