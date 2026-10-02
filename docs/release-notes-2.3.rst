@@ -28,7 +28,10 @@ Signed uploads
 Signed file and stream uploads now bind the signature to the exact bounded byte
 range prepared for transfer. Different upload bytes therefore produce different
 signatures, offsets and sizes are honored, and non-repeatable or changed sources
-fail closed instead of silently authenticating an empty-body hash.
+fail closed instead of silently authenticating an empty-body hash. Prepared
+stream snapshots retain the original source offset separately from the snapshot
+offset, so 307/308 replay cannot expose bytes that were excluded from the signed
+bounded range.
 
 This is an intentional security tightening. Applications or receivers that
 mirrored the former empty-body convention for streamed/file uploads must update
@@ -53,13 +56,19 @@ Cancellation and deadlines
 Cancellation is checked independently of retry eligibility and before outbound
 side effects on HTTP, email, webhook, mailbox, and gRPC paths that accept the
 execution policy. Generated unary gRPC invocation now follows the same
-preflight/cleanup expectations as its streaming siblings.
+preflight/cleanup expectations as its streaming siblings. Email fallback chains
+treat cancellation and deadline results as terminal rather than retrying through
+a fallback transport. Later explicit cancellation configuration on a Runwire-bound
+HTTP pool or gRPC client composes with, rather than replaces, the live host
+cancellation signal.
 
 Total operation deadlines use monotonic absolute time across retries, redirects,
 mailbox literal reads, protocol waits, and cleanup boundaries. An expired budget
 cannot be rounded into a fresh retry attempt. SMTP, IMAP, POP3, sendmail, HTTP,
 and gRPC paths clamp work to the earliest supported caller/host/protocol
-deadline where the underlying operation exposes a timeout boundary.
+deadline where the underlying operation exposes a timeout boundary. Blocking
+SMTP and mailbox socket writes now apply the remaining operation deadline to
+the actual ``fwrite()`` call instead of only checking before the write.
 
 Redirect and destination correctness
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -179,8 +188,19 @@ email, webhook, gRPC, resilience, and large-message component benchmarks.
 Concurrent and socket/process integration tests additionally verify scheduler
 peer progress on the paths documented as cooperative.
 
-These repository benchmarks establish component regression and fairness
-evidence; they do not claim universal production-application RPM. Sustained RPM,
-p50/p95/p99 latency, downstream capacity, queue growth, and host memory must be
-measured by an integrating application on its production-equivalent deployment
-when those host-level numbers are required.
+The release workflow also performs a same-runner sustained local HTTP fan-out
+comparison between tag ``2.2`` and the candidate. Source-acceptance run
+``37038089876`` measured ``92,180.56 RPM`` for 2.2 unbound and ``93,299.04 RPM``
+for 2.3 unbound, a ``+1.21%`` change that passes the 2% regression threshold.
+The 2.3 unbound p50/p95/p99 batch latencies were
+``25.50 / 26.03 / 27.74 ms`` with zero errors and zero timeouts. The separately
+characterized Runwire-bound mode measured ``90,244.69 RPM``
+(``-3.27%`` versus 2.3 unbound), also with zero errors/timeouts and zero resource
+delta. It is reported separately because 2.2 has no equivalent Runwire mode.
+
+These repository measurements establish component, fairness, and representative
+library-owned sustained fan-out evidence; they do not claim universal
+production-application capacity. Integrating applications should still measure
+their own sustained RPM, latency percentiles, resource pressure, and downstream
+capacity on the production-equivalent deployment when those host-level numbers
+are required.
