@@ -18,6 +18,10 @@ use Infocyph\TalkingBytes\Http\Retry\HttpRetryPolicy;
 use Infocyph\TalkingBytes\Integration\Runwire\RunwireBinding;
 use Infocyph\TalkingBytes\Resilience\CircuitBreaker;
 use Infocyph\TalkingBytes\Resilience\RateLimiter;
+use Infocyph\TalkingBytes\Runtime\RunwireBinding;
+use Infocyph\Runwire\Coroutine\CoroutineScope;
+use Infocyph\Runwire\RequestContext;
+use Infocyph\Runwire\RuntimeContext;
 use InvalidArgumentException;
 
 final readonly class HttpClientFactory
@@ -29,6 +33,20 @@ final readonly class HttpClientFactory
         private ?Sleeper $sleeper = null,
         private ?OperationDeadline $operationDeadline = null,
     ) {}
+
+    public function withRunwire(
+        RuntimeContext $runtime,
+        ?RequestContext $request = null,
+        ?CoroutineScope $scope = null,
+    ): self {
+        return new self(
+            $this->events,
+            $this->cancellation,
+            $this->clock,
+            $this->sleeper,
+            new RunwireBinding($runtime, $request, $scope),
+        );
+    }
 
     /**
      * Build an HTTP client from already-resolved protocol configuration.
@@ -66,9 +84,15 @@ final readonly class HttpClientFactory
         );
 
         $client = $this->applyAuth($client, self::section($config, 'auth'));
+        $cancellation = $this->runwire?->cancellation($this->cancellation) ?? $this->cancellation;
+        $sleeper = $this->runwire?->sleeper($this->sleeper) ?? $this->sleeper;
+        $deadline = $this->runwire?->deadline();
 
-        if ($this->cancellation !== null) {
-            $client = $client->withCancellation($this->cancellation);
+        if ($cancellation !== null) {
+            $client = $client->withCancellation($cancellation);
+        }
+        if ($deadline !== null) {
+            $client = $client->withOperationDeadline($deadline);
         }
 
         if ($this->operationDeadline !== null) {
@@ -87,8 +111,8 @@ final readonly class HttpClientFactory
                     self::int($retry, 'base_delay_ms', 250),
                     self::int($retry, 'max_retry_after_seconds', 30),
                 ),
-                $this->cancellation,
-                $this->sleeper,
+                $cancellation,
+                $sleeper,
             );
         }
 
