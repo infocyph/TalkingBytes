@@ -489,11 +489,16 @@ final readonly class HttpRequest
         $headers = $this->headers;
         $authenticators = $this->authenticators;
         $metadata = $this->metadata;
+        $sourceOffset = $metadata['_upload_source_offset'] ?? null;
+        if (is_int($sourceOffset) && is_resource($metadata['upload_stream'] ?? null)) {
+            $metadata['upload_offset'] = $sourceOffset;
+        }
         unset(
             $metadata['_transport_prepared'],
             $metadata['_upload_handle'],
             $metadata['_upload_handle_owned'],
             $metadata['_upload_opened_by_configurator'],
+            $metadata['_upload_source_offset'],
         );
         if (!$preserveAuthentication) {
             foreach (array_unique([
@@ -526,6 +531,7 @@ final readonly class HttpRequest
                 $metadata['upload_stream'],
                 $metadata['upload_size'],
                 $metadata['upload_offset'],
+                $metadata['_upload_source_offset'],
             );
             $headers = $headers
                 ->without('Content-Type')
@@ -911,12 +917,22 @@ final readonly class HttpRequest
             $this->copyUploadToSnapshot($snapshot, $uploadPath, $uploadStream, $size);
             rewind($snapshot);
 
-            return $this->metadata([
+            $metadata = [
                 ...$this->metadata,
                 '_upload_handle' => $snapshot,
                 '_upload_handle_owned' => true,
                 'upload_offset' => 0,
-            ]);
+            ];
+            if ($uploadStream !== null) {
+                $sourceOffset = $this->metadata['_upload_source_offset'] ?? $this->metadata['upload_offset'] ?? null;
+                if (!is_int($sourceOffset) || $sourceOffset < 0) {
+                    throw new InvalidArgumentException('Prepared HTTP upload source offset is invalid.');
+                }
+
+                $metadata['_upload_source_offset'] = $sourceOffset;
+            }
+
+            return $this->metadata($metadata);
         } catch (Throwable $throwable) {
             fclose($snapshot);
 
