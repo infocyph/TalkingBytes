@@ -5,12 +5,14 @@ declare(strict_types=1);
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
 use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
 use Infocyph\TalkingBytes\Core\Support\Clock;
+use Infocyph\TalkingBytes\Core\Support\Sleeper;
 use Infocyph\TalkingBytes\Http\Contract\HttpTransport;
 use Infocyph\TalkingBytes\Http\HttpPipeline;
 use Infocyph\TalkingBytes\Http\HttpRequest;
 use Infocyph\TalkingBytes\Http\Middleware\CircuitBreakerMiddleware;
 use Infocyph\TalkingBytes\Http\Middleware\IdempotencyMiddleware;
 use Infocyph\TalkingBytes\Http\Middleware\LoggingMiddleware;
+use Infocyph\TalkingBytes\Http\Middleware\OperationDeadlineMiddleware;
 use Infocyph\TalkingBytes\Http\Middleware\RateLimitMiddleware;
 use Infocyph\TalkingBytes\Http\Middleware\RetryMiddleware;
 use Infocyph\TalkingBytes\Http\Middleware\TimeoutMiddleware;
@@ -140,4 +142,38 @@ it('checks http retry cancellation before unsafe request bypass', function (): v
     expect($result->successful)->toBeFalse()
         ->and($result->metadata['cancelled'] ?? false)->toBeTrue()
         ->and($attempts)->toBe(0);
+});
+
+
+it('bounds http retry backoff by one total operation deadline', function (): void {
+    $now = 0.0;
+    $attempts = 0;
+    $slept = [];
+    $clock = new Clock(
+        static fn(): float => 0.0,
+        static function () use (&$now): float {
+            return $now;
+        },
+    );
+    $sleeper = new Sleeper(static function (int $microseconds) use (&$now, &$slept): void {
+        $slept[] = $microseconds;
+        $now += $microseconds / 1_000_000;
+    });
+    $transport = recordingHttpTransport(static function () use (&$attempts): CommunicationResult {
+        $attempts++;
+
+        return CommunicationResult::failure('temporary', 503);
+    });
+    $pipeline = new HttpPipeline($transport, [
+        new RetryMiddleware(new FixedDelayRetryPolicy(3, 100), sleeper: $sleeper),
+        new OperationDeadlineMiddleware(0.05, $clock),
+    ]);
+
+    $result = $pipeline->send(HttpRequest::get('https://example.test'));
+
+    expect($result->successful)->toBeFalse()
+        ->and($result->metadata['deadline_exceeded'] ?? false)->toBeTrue()
+        ->and($result->metadata['attempts'] ?? null)->toBe(1)
+        ->and($attempts)->toBe(1)
+        ->and($slept)->toBe([50_000]);
 });
