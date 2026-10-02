@@ -464,7 +464,7 @@ final readonly class HttpClient
         return $request;
     }
 
-    private function applyOptionalOptionDefaults(HttpRequest $request): HttpRequest
+    private function applyOptionalConnectionDefaults(HttpRequest $request): HttpRequest
     {
         if ($this->defaultOptions->proxy !== null && !$request->options->isExplicit('proxy')) {
             $request = $request->proxy($this->defaultOptions->proxy);
@@ -487,6 +487,18 @@ final readonly class HttpClient
             $request = $request->userAgent($this->defaultOptions->userAgent);
         }
 
+        return $request;
+    }
+
+    private function applyOptionalOptionDefaults(HttpRequest $request): HttpRequest
+    {
+        $request = $this->applyOptionalConnectionDefaults($request);
+
+        return $this->applyResponseLimitDefaults($request);
+    }
+
+    private function applyResponseLimitDefaults(HttpRequest $request): HttpRequest
+    {
         if (
             $this->defaultOptions->maxResponseBytes !== null
             && !$request->options->isExplicit('maxResponseBytes')
@@ -510,4 +522,5 @@ final readonly class HttpClient
 
         return $request;
     }
+
 }
