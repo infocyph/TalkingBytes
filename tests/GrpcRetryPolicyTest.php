@@ -84,7 +84,7 @@ it('checks grpc retry cancellation before retry-safety bypass', function (): voi
     $client = GrpcClient::using(static function () use (&$attempts): GrpcResponse {
         $attempts++;
 
-        return new GrpcResponse(GrpcStatus::Ok);
+        return new GrpcResponse(GrpcStatus::Ok, null);
     })->withGrpcRetry(
         GrpcRetryPolicy::standard(attempts: 2, baseDelayMs: 0),
         CancellationSignal::fromCallable(static fn(): bool => true),
@@ -115,7 +115,7 @@ it('does not start a grpc retry after its original deadline expires', function (
         static function () use (&$attempts): GrpcResponse {
             $attempts++;
 
-            return new GrpcResponse(GrpcStatus::Unavailable);
+            return new GrpcResponse(GrpcStatus::Unavailable, null);
         },
         clock: $clock,
     )->withGrpcRetry(
