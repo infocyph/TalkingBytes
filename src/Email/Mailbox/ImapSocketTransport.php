@@ -369,18 +369,7 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
         $this->watchWithIdle($onEvent, $timeoutSeconds, $stop);
     }
 
-    private function assertExecutionAllowed(): void
-    {
-        if ($this->cancellation?->isRequested() === true) {
-            throw new MailboxConnectionException('IMAP operation cancelled.');
-        }
-
-        if ($this->operationDeadline?->expired() === true) {
-            throw new MailboxConnectionException('IMAP operation deadline exceeded.');
-        }
-    }
-
-    /**
+/**
      * @param resource $connection
      */
     private function applyReadDeadline(mixed $connection, OperationDeadline $deadline): void
@@ -395,7 +384,18 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
         stream_set_timeout($connection, $seconds, $microseconds);
     }
 
-    private function authenticateStatus(ImapResponse $response): void
+    private function assertExecutionAllowed(): void
+    {
+        if ($this->cancellation?->isRequested() === true) {
+            throw new MailboxConnectionException('IMAP operation cancelled.');
+        }
+
+        if ($this->operationDeadline?->expired() === true) {
+            throw new MailboxConnectionException('IMAP operation deadline exceeded.');
+        }
+    }
+
+        private function authenticateStatus(ImapResponse $response): void
     {
         if ($response->isOk()) {
             return;
