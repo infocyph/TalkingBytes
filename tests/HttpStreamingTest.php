@@ -315,3 +315,33 @@ it('preserves repeatable upload state for 307 and 308 redirects', function (): v
 
     fclose($stream);
 });
+
+
+it('enforces aggregate HTTP response header byte budgets', function (): void {
+    $collector = new ResponseHeaderCollector(maxBytes: 32);
+
+    expect($collector->collect("HTTP/1.1 200 OK\r\n"))->toBe(17);
+    expect($collector->collect("X-Long: 1234567890\r\n"))->toBe(0);
+    expect($collector->error())->toContain('max allowed bytes (32)');
+});
+
+it('enforces aggregate HTTP response header field-count budgets', function (): void {
+    $collector = new ResponseHeaderCollector(maxFields: 1);
+
+    expect($collector->collect("HTTP/1.1 200 OK\r\n"))->toBe(17);
+    expect($collector->collect("X-One: 1\r\n"))->toBe(10);
+    expect($collector->collect("X-Two: 2\r\n"))->toBe(0);
+    expect($collector->error())->toContain('max allowed fields (1)');
+});
+
+it('counts response header budgets across interim and final header blocks', function (): void {
+    $collector = new ResponseHeaderCollector(maxFields: 1);
+
+    $collector->collect("HTTP/1.1 100 Continue\r\n");
+    $collector->collect("X-Interim: 1\r\n");
+    $collector->collect("\r\n");
+    $collector->collect("HTTP/1.1 200 OK\r\n");
+
+    expect($collector->collect("X-Final: 1\r\n"))->toBe(0)
+        ->and($collector->error())->toContain('max allowed fields (1)');
+});
