@@ -479,6 +479,7 @@ final readonly class CurlMultiTransport
             'duration_ms' => $pool->metadata['duration_ms'],
             'stopped_scheduling' => $stoppedScheduling,
             'cancelled' => $cancelled,
+            'deadline_exceeded' => $deadlineExceeded,
             'transport' => 'curl-multi',
         ]);
 
