@@ -55,7 +55,9 @@ while ($completed < $expectedRequests && microtime(true) < $deadline) {
     $write = [];
     $except = [];
     $withoutStreamWarnings(
-        static fn(): int|false => stream_select($read, $write, $except, 0, 5_000),
+        static function () use (&$read, &$write, &$except): int|false {
+            return stream_select($read, $write, $except, 0, 5_000);
+        },
     );
 
     foreach ($read as $stream) {
