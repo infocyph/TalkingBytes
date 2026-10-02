@@ -11,6 +11,7 @@ use Infocyph\Runwire\Runtime\RequestExecutionPolicy;
 use Infocyph\Runwire\RuntimeCapabilities;
 use Infocyph\Runwire\RuntimeContext;
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
+use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
 use Infocyph\TalkingBytes\Core\Support\OperationDeadline;
 use Infocyph\TalkingBytes\Email\Config\ImapConfig;
 use Infocyph\TalkingBytes\Email\Config\SpoolConfig;
@@ -20,6 +21,7 @@ use Infocyph\TalkingBytes\Email\EmailReceiverFactory;
 use Infocyph\TalkingBytes\Email\EmailSenderFactory;
 use Infocyph\TalkingBytes\Email\Enum\ImapSecurity;
 use Infocyph\TalkingBytes\Email\Exception\MailboxConnectionException;
+use Infocyph\TalkingBytes\Email\Transport\EmailTransport;
 use Infocyph\TalkingBytes\Grpc\GrpcClientFactory;
 use Infocyph\TalkingBytes\Grpc\GrpcStatus;
 use Infocyph\TalkingBytes\Grpc\Sender\GrpcRequest;
@@ -543,4 +545,62 @@ it('maps host cancellation during cooperative backoff to the normal cancellation
         ->and($request->completed())->toBeFalse();
 
     $request->complete();
+});
+
+it('preserves host cancellation through later pool grpc and email composition', function (): void {
+    $runtime = talkingBytesRunwireContext();
+    $request = talkingBytesRunwireRequest($runtime);
+
+    $grpcCalls = 0;
+    $grpc = (new GrpcClientFactory())
+        ->withRunwire($runtime, $request)
+        ->using(static function (GrpcRequest $grpcRequest) use (&$grpcCalls): GrpcResponse {
+            unset($grpcRequest);
+            $grpcCalls++;
+
+            return new GrpcResponse(GrpcStatus::Ok, null);
+        })
+        ->withCancellation(CancellationSignal::never());
+
+    $pool = HttpClient::multi(maxConcurrency: 1)
+        ->withRunwire($runtime, $request)
+        ->withCancellation(CancellationSignal::never());
+
+    $fallbackCalls = 0;
+    $fallback = new class($fallbackCalls) implements EmailTransport
+    {
+        public function __construct(private int &$calls) {}
+
+        public function send(EmailMessage $message): CommunicationResult
+        {
+            unset($message);
+            $this->calls++;
+
+            return CommunicationResult::success();
+        }
+    };
+    $emailer = (new EmailSenderFactory())
+        ->withRunwire($runtime, $request)
+        ->usingNull()
+        ->withFallback([$fallback]);
+
+    try {
+        $request->cancel(CancellationReason::HOST_CANCELLED);
+
+        $grpcResult = $grpc->send(new GrpcRequest('/runwire.v1.Test/LateCancellation', []));
+        $poolResult = $pool->sendMany([
+            'cancelled' => HttpRequest::get('https://example.test/cancelled'),
+        ]);
+        $emailResult = $emailer->send(talkingBytesRunwireMessage());
+
+        expect($grpcResult->successful)->toBeFalse()
+            ->and($grpcResult->metadata['cancelled'] ?? false)->toBeTrue()
+            ->and($grpcCalls)->toBe(0)
+            ->and($poolResult->metadata['cancelled'] ?? false)->toBeTrue()
+            ->and($emailResult->successful)->toBeFalse()
+            ->and($emailResult->metadata['cancelled'] ?? false)->toBeTrue()
+            ->and($fallbackCalls)->toBe(0);
+    } finally {
+        $request->complete();
+    }
 });
