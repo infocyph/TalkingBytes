@@ -240,6 +240,23 @@ final class Pop3SocketTransport implements Pop3Transport
         }
     }
 
+/**
+     * @param resource $connection
+     */
+    private function applyReadDeadline(mixed $connection, OperationDeadline $deadline): void
+    {
+        $remainingMicros = $deadline->remainingMicroseconds();
+        if ($remainingMicros === 0) {
+            throw new MailboxConnectionException('POP3 command deadline exceeded.');
+        }
+
+        stream_set_timeout(
+            $connection,
+            intdiv($remainingMicros, 1_000_000),
+            $remainingMicros % 1_000_000,
+        );
+    }
+
     private function closeConnection(): void
     {
         if (is_resource($this->connection)) {
@@ -409,24 +426,7 @@ final class Pop3SocketTransport implements Pop3Transport
         return $this->connection;
     }
 
-    /**
-     * @param resource $connection
-     */
-    private function applyReadDeadline(mixed $connection, OperationDeadline $deadline): void
-    {
-        $remainingMicros = $deadline->remainingMicroseconds();
-        if ($remainingMicros === 0) {
-            throw new MailboxConnectionException('POP3 command deadline exceeded.');
-        }
-
-        stream_set_timeout(
-            $connection,
-            intdiv($remainingMicros, 1_000_000),
-            $remainingMicros % 1_000_000,
-        );
-    }
-
-    private function restoreReadTimeout(): void
+        private function restoreReadTimeout(): void
     {
         if (is_resource($this->connection)) {
             stream_set_timeout($this->connection, $this->config->timeoutSeconds);
