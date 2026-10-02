@@ -182,9 +182,16 @@ final readonly class Emailer
     /**
      * @param list<EmailTransport> $fallbackTransports
      */
-    public function withFallback(array $fallbackTransports): self
-    {
-        return new self(new FallbackEmailTransport($this->transport, $fallbackTransports), $this->events, $this->clock, $this->sleeper);
+    public function withFallback(
+        array $fallbackTransports,
+        ?CancellationSignal $cancellation = null,
+    ): self {
+        return new self(
+            new FallbackEmailTransport($this->transport, $fallbackTransports, $cancellation),
+            $this->events,
+            $this->clock,
+            $this->sleeper,
+        );
     }
 
     /**
