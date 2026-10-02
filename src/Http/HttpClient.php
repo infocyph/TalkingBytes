@@ -23,6 +23,7 @@ use Infocyph\TalkingBytes\Http\Middleware\CancellationMiddleware;
 use Infocyph\TalkingBytes\Http\Middleware\CircuitBreakerMiddleware;
 use Infocyph\TalkingBytes\Http\Middleware\IdempotencyMiddleware;
 use Infocyph\TalkingBytes\Http\Middleware\LoggingMiddleware;
+use Infocyph\TalkingBytes\Http\Middleware\OperationDeadlineMiddleware;
 use Infocyph\TalkingBytes\Http\Middleware\RateLimitMiddleware;
 use Infocyph\TalkingBytes\Http\Middleware\RetryMiddleware;
 use Infocyph\TalkingBytes\Http\Middleware\TimeoutMiddleware;
@@ -377,6 +378,11 @@ final readonly class HttpClient
         $middlewares[] = $middleware;
 
         return new self($this->transport, $middlewares, $this->defaultOptions, $this->defaultHeaders, $this->authenticators, $this->cookieJar);
+    }
+
+    public function withOperationTimeout(float $seconds, ?Clock $clock = null): self
+    {
+        return $this->withMiddleware(new OperationDeadlineMiddleware($seconds, $clock));
     }
 
     public function withQueryAuth(string $key, string $value): self
