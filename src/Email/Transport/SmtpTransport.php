@@ -6,6 +6,7 @@ namespace Infocyph\TalkingBytes\Email\Transport;
 
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
 use Infocyph\TalkingBytes\Core\Support\Clock;
+use Infocyph\TalkingBytes\Core\Support\OperationDeadline;
 use Infocyph\TalkingBytes\Email\Config\SmtpConfig;
 use Infocyph\TalkingBytes\Email\EmailMessage;
 use Infocyph\TalkingBytes\Email\Enum\SmtpAuthMechanism;
@@ -337,6 +338,23 @@ final readonly class SmtpTransport implements EmailTransport
 
     /**
      * @param resource $connection
+     */
+    private function applyReadDeadline(mixed $connection, OperationDeadline $deadline): void
+    {
+        $remainingMicros = $deadline->remainingMicroseconds();
+        if ($remainingMicros === 0) {
+            throw new RuntimeException('SMTP command deadline exceeded.');
+        }
+
+        stream_set_timeout(
+            $connection,
+            intdiv($remainingMicros, 1_000_000),
+            $remainingMicros % 1_000_000,
+        );
+    }
+
+    /**
+     * @param resource $connection
      * @param list<string> $transcript
      * @return array{0:int,1:string,2:list<string>}
      */
@@ -345,46 +363,51 @@ final readonly class SmtpTransport implements EmailTransport
         $response = '';
         $lines = [];
         $code = 0;
-        $deadline = $this->clock->monotonic() + $this->config->timeoutSeconds;
+        $deadline = OperationDeadline::after((float) $this->config->timeoutSeconds, $this->clock);
 
-        while (true) {
-            if ($this->clock->monotonic() >= $deadline) {
-                throw new RuntimeException('SMTP command deadline exceeded.');
-            }
+        try {
+            while (true) {
+                $this->applyReadDeadline($connection, $deadline);
+                $line = fgets($connection, 1024);
+                if ($deadline->expired()) {
+                    throw new RuntimeException('SMTP command deadline exceeded.');
+                }
+                if ($line === false) {
+                    $metadata = stream_get_meta_data($connection);
+                    if ($metadata['timed_out']) {
+                        throw new RuntimeException('SMTP server response timed out.');
+                    }
 
-            $line = fgets($connection, 1024);
-            if ($line === false) {
-                $metadata = stream_get_meta_data($connection);
-                if ($metadata['timed_out']) {
-                    throw new RuntimeException('SMTP server response timed out.');
+                    throw new RuntimeException('Failed to read SMTP server response.');
                 }
 
-                throw new RuntimeException('Failed to read SMTP server response.');
+                if (!str_ends_with($line, "\n") && !feof($connection)) {
+                    throw new RuntimeException('SMTP response line exceeds 1023 bytes.');
+                }
+
+                $response .= $line;
+                $this->recordTranscriptResponse($transcript, $line);
+                $lines[] = rtrim($line, "\r\n");
+                if (count($lines) > 100 || strlen($response) > 65_536) {
+                    throw new RuntimeException('SMTP response exceeds protocol bounds.');
+                }
+
+                if (preg_match('/^(\d{3})([\s-])/', $line, $matches) !== 1) {
+                    continue;
+                }
+
+                $code = (int) $matches[1];
+                if ($matches[2] === ' ') {
+                    break;
+                }
             }
 
-            if (!str_ends_with($line, "\n") && !feof($connection)) {
-                throw new RuntimeException('SMTP response line exceeds 1023 bytes.');
-            }
-
-            $response .= $line;
-            $this->recordTranscriptResponse($transcript, $line);
-            $lines[] = rtrim($line, "\r\n");
-            if (count($lines) > 100 || strlen($response) > 65_536) {
-                throw new RuntimeException('SMTP response exceeds protocol bounds.');
-            }
-
-            if (preg_match('/^(\d{3})([\s-])/', $line, $matches) !== 1) {
-                continue;
-            }
-
-            $code = (int) $matches[1];
-            if ($matches[2] === ' ') {
-                break;
-            }
+            return [$code, $response, $lines];
+        } finally {
+            stream_set_timeout($connection, $this->config->timeoutSeconds);
         }
-
-        return [$code, $response, $lines];
     }
+
 
     /**
      * @param list<string> $transcript
