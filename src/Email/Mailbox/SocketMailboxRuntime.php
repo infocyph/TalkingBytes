@@ -24,7 +24,15 @@ final class SocketMailboxRuntime
         string $protocolLabel,
         bool $ssl,
         ?StreamWaiter $streamWaiter = null,
+        ?OperationDeadline $deadline = null,
     ): mixed {
+        if ($deadline?->expired() === true) {
+            throw new MailboxConnectionException(sprintf(
+                '%s connection deadline exceeded.',
+                strtoupper($protocolLabel),
+            ));
+        }
+
         $targetHost = sprintf('%s://%s:%d', $ssl ? 'ssl' : 'tcp', $host, $port);
         $errno = 0;
         $errstr = '';
@@ -39,7 +47,9 @@ final class SocketMailboxRuntime
             $targetHost,
             $errno,
             $errstr,
-            $timeoutSeconds,
+            $deadline === null
+                ? (float) $timeoutSeconds
+                : max(0.001, min((float) $timeoutSeconds, $deadline->remainingSeconds())),
             STREAM_CLIENT_CONNECT,
             $context,
         );
@@ -49,6 +59,15 @@ final class SocketMailboxRuntime
                 $protocolLabel,
                 $errstr,
                 $errno,
+            ));
+        }
+
+        if ($deadline?->expired() === true) {
+            fclose($connection);
+
+            throw new MailboxConnectionException(sprintf(
+                '%s connection deadline exceeded.',
+                strtoupper($protocolLabel),
             ));
         }
 
