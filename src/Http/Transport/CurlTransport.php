@@ -183,7 +183,7 @@ final readonly class CurlTransport implements HttpTransport
             'curl',
             $body,
             $errno,
-            $bodyCollector->error() ?? $error,
+            $headerCollector->error() ?? $bodyCollector->error() ?? $error,
             $info,
             $headerCollector->headers(),
             publishBufferedDownload: false,
@@ -203,7 +203,10 @@ final readonly class CurlTransport implements HttpTransport
         HttpRequest $request,
         ?string $pinnedResolution,
     ): array|CommunicationResult {
-        $headerCollector = new ResponseHeaderCollector();
+        $headerCollector = new ResponseHeaderCollector(
+            $request->options->maxResponseHeaderBytes,
+            $request->options->maxResponseHeaderCount,
+        );
         $bodyCollector = null;
 
         try {
