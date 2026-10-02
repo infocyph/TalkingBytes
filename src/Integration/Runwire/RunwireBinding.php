@@ -155,7 +155,11 @@ final readonly class RunwireBinding
     ): bool {
         try {
             if ($deadline === null) {
-                $readable ? $scope->waitReadable($stream) : $scope->waitWritable($stream);
+                if ($readable) {
+                    $scope->waitReadable($stream);
+                } else {
+                    $scope->waitWritable($stream);
+                }
 
                 return true;
             }
@@ -169,7 +173,13 @@ final readonly class RunwireBinding
             $scope->withDeadline(
                 $bounded,
                 static function (CoroutineScope $waitScope) use ($stream, $readable): void {
-                    $readable ? $waitScope->waitReadable($stream) : $waitScope->waitWritable($stream);
+                    if ($readable) {
+                        $waitScope->waitReadable($stream);
+
+                        return;
+                    }
+
+                    $waitScope->waitWritable($stream);
                 },
             );
 
