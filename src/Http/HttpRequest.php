@@ -17,6 +17,7 @@ use Infocyph\TalkingBytes\Http\Body\JsonBody;
 use Infocyph\TalkingBytes\Http\Body\MultipartBody;
 use Infocyph\TalkingBytes\Http\Body\RawBody;
 use Infocyph\TalkingBytes\Http\Enum\HttpMethod;
+use Infocyph\TalkingBytes\Http\Internal\UploadHandleManager;
 use Infocyph\TalkingBytes\Http\Options\CurlOptions;
 use Infocyph\TalkingBytes\Http\Signing\RequestSigner;
 use Infocyph\TalkingBytes\Http\Support\HeaderBag;
@@ -488,18 +489,7 @@ final readonly class HttpRequest
     {
         $headers = $this->headers;
         $authenticators = $this->authenticators;
-        $metadata = $this->metadata;
-        $sourceOffset = $metadata['_upload_source_offset'] ?? null;
-        if (is_int($sourceOffset) && is_resource($metadata['upload_stream'] ?? null)) {
-            $metadata['upload_offset'] = $sourceOffset;
-        }
-        unset(
-            $metadata['_transport_prepared'],
-            $metadata['_upload_handle'],
-            $metadata['_upload_handle_owned'],
-            $metadata['_upload_opened_by_configurator'],
-            $metadata['_upload_source_offset'],
-        );
+        $metadata = UploadHandleManager::prepareRedirectMetadata($this->metadata);
         if (!$preserveAuthentication) {
             foreach (array_unique([
                 'Authorization',
@@ -917,22 +907,9 @@ final readonly class HttpRequest
             $this->copyUploadToSnapshot($snapshot, $uploadPath, $uploadStream, $size);
             rewind($snapshot);
 
-            $metadata = [
-                ...$this->metadata,
-                '_upload_handle' => $snapshot,
-                '_upload_handle_owned' => true,
-                'upload_offset' => 0,
-            ];
-            if ($uploadStream !== null) {
-                $sourceOffset = $this->metadata['_upload_source_offset'] ?? $this->metadata['upload_offset'] ?? null;
-                if (!is_int($sourceOffset) || $sourceOffset < 0) {
-                    throw new InvalidArgumentException('Prepared HTTP upload source offset is invalid.');
-                }
-
-                $metadata['_upload_source_offset'] = $sourceOffset;
-            }
-
-            return $this->metadata($metadata);
+            return $this->metadata(
+                UploadHandleManager::prepareSnapshotMetadata($this->metadata, $snapshot),
+            );
         } catch (Throwable $throwable) {
             fclose($snapshot);
 
