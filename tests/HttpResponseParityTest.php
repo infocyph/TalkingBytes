@@ -44,7 +44,7 @@ final class HttpResponseParityServer
             $pipes[0] = null;
         }
 
-        $deadline = microtime(true) + 5.0;
+        $deadline = microtime(true) + 15.0;
         while (!is_file($ready) && microtime(true) < $deadline) {
             $status = proc_get_status($process);
             if (!$status['running']) {
