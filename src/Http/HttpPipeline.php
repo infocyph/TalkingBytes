@@ -8,6 +8,7 @@ use Closure;
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
 use Infocyph\TalkingBytes\Http\Contract\HttpMiddleware;
 use Infocyph\TalkingBytes\Http\Contract\HttpTransport;
+use Infocyph\TalkingBytes\Http\Internal\UploadHandleManager;
 use Infocyph\TalkingBytes\Http\Middleware\IdempotencyMiddleware;
 
 final readonly class HttpPipeline
@@ -29,9 +30,15 @@ final readonly class HttpPipeline
             $ordered[] = $middleware;
         }
 
-        $next = static fn(HttpRequest $request): CommunicationResult => $transport->send(
-            $request->prepareForTransport(),
-        );
+        $next = static function (HttpRequest $request) use ($transport): CommunicationResult {
+            $prepared = $request->prepareForTransport();
+
+            try {
+                return $transport->send($prepared);
+            } finally {
+                UploadHandleManager::cleanup($prepared);
+            }
+        };
 
         foreach (array_reverse($ordered) as $middleware) {
             $currentNext = $next;
