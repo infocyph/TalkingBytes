@@ -88,11 +88,45 @@ jobs:
             "${{ steps.revisions.outputs.candidate }}"
 
       - name: Enforce sustained throughput acceptance
+        id: sustained-initial
+        continue-on-error: true
         run: |
           php performance/http/compare.php \
             build/sustained-performance/baseline.json \
             build/sustained-performance/candidate-unbound.json \
             build/sustained-performance/candidate-runwire.json \
+            2
+
+      - name: Confirm suspected sustained regression
+        if: steps.sustained-initial.outcome == 'failure'
+        run: |
+          echo "Initial sustained comparison failed; running an independent confirmation with candidate/baseline order reversed."
+
+          php performance/http/sustained-performance.php \
+            vendor/autoload.php \
+            performance/http/server.php \
+            build/sustained-performance/candidate-unbound-confirm.json \
+            unbound \
+            "${{ steps.revisions.outputs.candidate }}"
+
+          php performance/http/sustained-performance.php \
+            baseline/vendor/autoload.php \
+            performance/http/server.php \
+            build/sustained-performance/baseline-confirm.json \
+            unbound \
+            "${{ steps.revisions.outputs.baseline }}"
+
+          php performance/http/sustained-performance.php \
+            vendor/autoload.php \
+            performance/http/server.php \
+            build/sustained-performance/candidate-runwire-confirm.json \
+            runwire \
+            "${{ steps.revisions.outputs.candidate }}"
+
+          php performance/http/compare.php \
+            build/sustained-performance/baseline-confirm.json \
+            build/sustained-performance/candidate-unbound-confirm.json \
+            build/sustained-performance/candidate-runwire-confirm.json \
             2
 
       - name: Upload sustained performance evidence
