@@ -124,6 +124,34 @@ jobs:
             tests/MailboxImapTest.php \
             tests/TransportProcessCoverageTest.php
 
+
+  release-acceptance:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.5"
+          extensions: "curl, fileinfo, openssl"
+          coverage: none
+
+      - name: Install development dependencies
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Run detailed release test processing
+        run: composer ic:tests:details
+
+      - name: Run final project quality gate
+        run: composer ic:tests
+
+      - name: Run release guard
+        run: composer ic:release:guard
+
+
   mailpit-integration:
     runs-on: ubuntu-latest
     services:
