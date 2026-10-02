@@ -9,15 +9,15 @@ use InvalidArgumentException;
 
 final readonly class StreamWaiter
 {
-    /** @var Closure(mixed, ?OperationDeadline): bool */
+    /** @var Closure(resource, ?OperationDeadline): bool */
     private Closure $readable;
 
-    /** @var Closure(mixed, ?OperationDeadline): bool */
+    /** @var Closure(resource, ?OperationDeadline): bool */
     private Closure $writable;
 
     /**
-     * @param callable(mixed, ?OperationDeadline): bool $readable
-     * @param callable(mixed, ?OperationDeadline): bool $writable
+     * @param callable(resource, ?OperationDeadline): bool $readable
+     * @param callable(resource, ?OperationDeadline): bool $writable
      */
     public function __construct(callable $readable, callable $writable)
     {
