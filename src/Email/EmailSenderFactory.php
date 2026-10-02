@@ -14,6 +14,7 @@ use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
 use Infocyph\TalkingBytes\Core\Support\Clock;
 use Infocyph\TalkingBytes\Core\Support\OperationDeadline;
 use Infocyph\TalkingBytes\Core\Support\Sleeper;
+use Infocyph\TalkingBytes\Core\Support\StreamWaiter;
 use Infocyph\TalkingBytes\Email\Config\ConfigValue;
 use Infocyph\TalkingBytes\Email\Config\DkimConfig;
 use Infocyph\TalkingBytes\Email\Config\LogEmailConfig;
@@ -40,6 +41,7 @@ final readonly class EmailSenderFactory
         ?Sleeper $sleeper = null,
         private ?CancellationSignal $cancellation = null,
         private ?OperationDeadline $operationDeadline = null,
+        private ?StreamWaiter $streamWaiter = null,
     ) {
         $this->events = new BestEffortEventDispatcher($events ?? new NullEventDispatcher());
         $this->clock = $clock ?? Clock::system();
@@ -151,8 +153,19 @@ final readonly class EmailSenderFactory
 
     public function usingSmtp(SmtpConfig $config): Emailer
     {
+        $cancellation = $this->combinedCancellation(null);
+
         return $this->bindExecution(
-            Emailer::usingSmtp($config, $this->events, $this->clock, $this->sleeper),
+            Emailer::usingSmtp(
+                $config,
+                $this->events,
+                $this->clock,
+                $this->sleeper,
+                $cancellation,
+                $this->operationDeadline,
+                $this->streamWaiter,
+            ),
+            $cancellation,
         );
     }
 
@@ -182,6 +195,7 @@ final readonly class EmailSenderFactory
             $binding->sleeper($this->sleeper),
             $binding->cancellation($this->cancellation),
             $deadline,
+            $this->streamWaiter ?? $binding->streamWaiter(),
         );
     }
 
