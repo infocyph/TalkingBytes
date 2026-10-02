@@ -123,5 +123,4 @@ final readonly class RunwireBinding
         return $this->runtime->supports(RuntimeCapability::RUNWIRE_COROUTINES)
             && $this->runtime->supports(RuntimeCapability::RUNWIRE_LOOP_AVAILABLE);
     }
-
 }
