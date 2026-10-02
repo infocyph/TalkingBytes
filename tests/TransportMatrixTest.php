@@ -237,3 +237,45 @@ it('does not enter an email fallback after cancellation is requested', function 
         ->and($result->metadata['attempts'] ?? null)->toBe(1)
         ->and($state->fallback_calls)->toBe(0);
 });
+
+it('treats cancellation and deadline results as terminal for email fallbacks', function (): void {
+    foreach ([
+        ['cancelled' => true],
+        ['deadline_exceeded' => true],
+    ] as $terminalMetadata) {
+        $fallbackCalls = 0;
+
+        $primary = new class($terminalMetadata) implements EmailTransport
+        {
+            /** @param array<string, bool> $metadata */
+            public function __construct(private array $metadata) {}
+
+            public function send(EmailMessage $message): CommunicationResult
+            {
+                unset($message);
+
+                return CommunicationResult::failure('terminal execution outcome', metadata: $this->metadata);
+            }
+        };
+
+        $fallback = new class($fallbackCalls) implements EmailTransport
+        {
+            public function __construct(private int &$calls) {}
+
+            public function send(EmailMessage $message): CommunicationResult
+            {
+                unset($message);
+                $this->calls++;
+
+                return CommunicationResult::success();
+            }
+        };
+
+        $result = (new FallbackEmailTransport($primary, [$fallback]))->send(baselineEmail());
+
+        expect($result->successful)->toBeFalse()
+            ->and($result->metadata)->toMatchArray($terminalMetadata)
+            ->and($result->metadata['attempted_transports'] ?? [])->toHaveCount(1)
+            ->and($fallbackCalls)->toBe(0);
+    }
+});
