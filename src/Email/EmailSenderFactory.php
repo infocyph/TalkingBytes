@@ -41,7 +41,7 @@ final readonly class EmailSenderFactory
 
     public function fake(): Emailer
     {
-        return Emailer::fake($this->events, $this->clock);
+        return Emailer::fake($this->events, $this->clock, $this->sleeper);
     }
 
     /**
@@ -84,6 +84,7 @@ final readonly class EmailSenderFactory
             $emailer = $emailer->withRateLimit(new RateLimiter(
                 ConfigValue::int($rateLimit, 'max_requests', 60),
                 ConfigValue::int($rateLimit, 'per_seconds', 60),
+                $this->clock,
             ));
         }
 
@@ -97,17 +98,17 @@ final readonly class EmailSenderFactory
 
     public function usingLog(LogEmailConfig $config): Emailer
     {
-        return Emailer::usingLog($config, $this->events, $this->clock);
+        return Emailer::usingLog($config, $this->events, $this->clock, $this->sleeper);
     }
 
     public function usingMailFunction(): Emailer
     {
-        return Emailer::usingMailFunction($this->events, $this->clock);
+        return Emailer::usingMailFunction($this->events, $this->clock, $this->sleeper);
     }
 
     public function usingNull(): Emailer
     {
-        return Emailer::usingNull($this->events, $this->clock);
+        return Emailer::usingNull($this->events, $this->clock, $this->sleeper);
     }
 
     public function usingSendmail(
@@ -125,12 +126,12 @@ final readonly class EmailSenderFactory
 
     public function usingSmtp(SmtpConfig $config): Emailer
     {
-        return Emailer::usingSmtp($config, $this->events, $this->clock);
+        return Emailer::usingSmtp($config, $this->events, $this->clock, $this->sleeper);
     }
 
     public function usingSpool(SpoolConfig $config): Emailer
     {
-        return Emailer::usingSpool($config, $this->events, $this->clock);
+        return Emailer::usingSpool($config, $this->events, $this->clock, $this->sleeper);
     }
 
     /**
