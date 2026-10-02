@@ -20,7 +20,7 @@ final readonly class OperationDeadlineMiddleware implements HttpMiddleware
         private float $timeoutSeconds,
         ?Clock $clock = null,
     ) {
-        if (! is_finite($this->timeoutSeconds) || $this->timeoutSeconds <= 0.0) {
+        if (!is_finite($this->timeoutSeconds) || $this->timeoutSeconds <= 0.0) {
             throw new InvalidArgumentException('HTTP operation timeout must be finite and greater than zero.');
         }
 
