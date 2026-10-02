@@ -249,16 +249,7 @@ final class SocketMailboxRuntime
     ): void {
         $remaining = $value;
         while ($remaining !== '') {
-            if ($cancellation?->isRequested() === true || $deadline?->expired() === true) {
-                throw self::readinessFailure($protocol, 'write', $cancellation, $deadline);
-            }
-            if ($streamWaiter !== null) {
-                if (!$streamWaiter->waitWritable($connection, $deadline)) {
-                    throw self::readinessFailure($protocol, 'write', $cancellation, $deadline);
-                }
-            } elseif ($deadline !== null) {
-                self::applyBlockingTimeout($connection, $deadline, $protocol);
-            }
+            self::prepareWrite($connection, $protocol, $streamWaiter, $cancellation, $deadline);
 
             set_error_handler(
                 static fn(): bool => true,
@@ -271,22 +262,86 @@ final class SocketMailboxRuntime
                 restore_error_handler();
             }
 
-            if ($cancellation?->isRequested() === true || $deadline?->expired() === true) {
-                throw self::readinessFailure($protocol, 'write', $cancellation, $deadline);
-            }
+            self::assertWriteAllowed($protocol, $cancellation, $deadline);
             if ($written === false) {
-                throw new MailboxConnectionException(sprintf('Failed writing to %s socket.', strtoupper($protocol)));
+                throw self::writeFailure($connection, $protocol, $deadline);
             }
             if ($written === 0) {
                 if ($streamWaiter !== null) {
                     continue;
                 }
 
-                throw new MailboxConnectionException(sprintf('Failed writing to %s socket.', strtoupper($protocol)));
+                throw self::writeFailure($connection, $protocol, $deadline);
             }
 
             $remaining = substr($remaining, $written);
         }
+    }
+
+    private static function assertWriteAllowed(
+        string $protocol,
+        ?CancellationSignal $cancellation,
+        ?OperationDeadline $deadline,
+    ): void {
+        if ($cancellation !== null && $cancellation->isRequested()) {
+            throw self::readinessFailure($protocol, 'write', $cancellation, $deadline);
+        }
+        if ($deadline !== null && $deadline->expired()) {
+            throw self::commandDeadlineExceeded($protocol);
+        }
+    }
+
+    private static function commandDeadlineExceeded(string $protocol): MailboxConnectionException
+    {
+        return new MailboxConnectionException(sprintf(
+            '%s command deadline exceeded.',
+            strtoupper($protocol),
+        ));
+    }
+
+    /**
+     * @param resource $connection
+     */
+    private static function prepareWrite(
+        mixed $connection,
+        string $protocol,
+        ?StreamWaiter $streamWaiter,
+        ?CancellationSignal $cancellation,
+        ?OperationDeadline $deadline,
+    ): void {
+        self::assertWriteAllowed($protocol, $cancellation, $deadline);
+
+        if ($streamWaiter !== null) {
+            if (!$streamWaiter->waitWritable($connection, $deadline)) {
+                throw self::readinessFailure($protocol, 'write', $cancellation, $deadline);
+            }
+
+            return;
+        }
+
+        if ($deadline !== null) {
+            self::applyBlockingTimeout($connection, $deadline, $protocol);
+        }
+    }
+
+    /**
+     * @param resource $connection
+     */
+    private static function writeFailure(
+        mixed $connection,
+        string $protocol,
+        ?OperationDeadline $deadline,
+    ): MailboxConnectionException {
+        /** @var array<string, mixed> $metadata */
+        $metadata = stream_get_meta_data($connection);
+        if ($deadline !== null && ($metadata['timed_out'] ?? false) === true) {
+            return self::commandDeadlineExceeded($protocol);
+        }
+
+        return new MailboxConnectionException(sprintf(
+            'Failed writing to %s socket.',
+            strtoupper($protocol),
+        ));
     }
 
     /**
@@ -299,10 +354,7 @@ final class SocketMailboxRuntime
     ): void {
         $remainingMicros = $deadline->remainingMicroseconds();
         if ($remainingMicros === 0) {
-            throw new MailboxConnectionException(sprintf(
-                '%s command deadline exceeded.',
-                strtoupper($protocol),
-            ));
+            throw self::commandDeadlineExceeded($protocol);
         }
 
         if (!stream_set_timeout(
@@ -412,10 +464,7 @@ final class SocketMailboxRuntime
             return new MailboxConnectionException(sprintf('%s operation cancelled.', strtoupper($protocol)));
         }
         if ($deadline?->expired() === true) {
-            return new MailboxConnectionException(sprintf(
-                '%s command deadline exceeded.',
-                strtoupper($protocol),
-            ));
+            return self::commandDeadlineExceeded($protocol);
         }
 
         return new MailboxConnectionException(sprintf(
