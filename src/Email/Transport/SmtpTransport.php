@@ -161,8 +161,11 @@ final readonly class SmtpTransport implements EmailTransport
         if ($this->cancellation?->isRequested() === true) {
             throw new RuntimeException('SMTP operation cancelled.');
         }
-        if ($this->operationDeadline?->expired() === true || $deadline?->expired() === true) {
+        if ($this->operationDeadline?->expired() === true) {
             throw new RuntimeException('SMTP operation deadline exceeded.');
+        }
+        if ($deadline?->expired() === true) {
+            throw new RuntimeException('SMTP command deadline exceeded.');
         }
     }
 
@@ -420,7 +423,7 @@ final readonly class SmtpTransport implements EmailTransport
         $response = '';
         $lines = [];
         $code = 0;
-        $deadline = OperationDeadline::after((float) $this->config->timeoutSeconds, $this->clock);
+        $deadline = $this->commandDeadline();
 
         try {
             while (true) {
