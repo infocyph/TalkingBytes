@@ -326,11 +326,11 @@ final class SustainedPerformanceComparison
             sprintf(
                 "### Sustained HTTP performance\n\n"
                 . "Warm-up: %.1f s; measured steady state: %.1f s; trials per level: %d.\n\n"
-                . "| Concurrency | Mode | Median RPM | p50 batch ms | p95 batch ms | p99 batch ms | "
+                . '| Concurrency | Mode | Median RPM | p50 batch ms | p95 batch ms | p99 batch ms | '
                 . "Errors | Timeouts | Max CPU %% | Max memory bytes | Max resources | Resource delta |\n"
                 . "| ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |\n"
                 . "%s\n\n"
-                . "The %.2f%% regression limit is enforced independently for 2.2 → 2.3 unbound "
+                . 'The %.2f%% regression limit is enforced independently for 2.2 → 2.3 unbound '
                 . "at every concurrency level. Runwire is characterized separately.\n",
                 $candidate['warmup_seconds'],
                 $candidate['steady_state_seconds'],
