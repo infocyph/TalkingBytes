@@ -527,24 +527,26 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
         try {
             while (true) {
                 $line = $this->readLineUntil($deadline);
-            $trimmed = rtrim($line, "\r\n");
-            $lines[] = $trimmed;
-            $totalBytes += strlen($line);
-            if (count($lines) > $this->config->maxResponseLines || $totalBytes > $this->config->maxResponseBytes) {
-                throw new MailboxProtocolException('IMAP response exceeds configured bounds.');
-            }
+                $trimmed = rtrim($line, "\r\n");
+                $lines[] = $trimmed;
+                $totalBytes += strlen($line);
+
+                if (count($lines) > $this->config->maxResponseLines || $totalBytes > $this->config->maxResponseBytes) {
+                    throw new MailboxProtocolException('IMAP response exceeds configured bounds.');
+                }
 
                 $literalSize = $this->parseLiteralSize($trimmed);
                 if ($literalSize !== null) {
                     $literal = $this->readExact($literalSize, $deadline);
-                $totalBytes += strlen($literal);
-                if ($totalBytes > $this->config->maxResponseBytes) {
-                    throw new MailboxProtocolException('IMAP response exceeds configured byte limit.');
-                }
-                $literals[] = $literal;
-            }
+                    $totalBytes += strlen($literal);
+                    if ($totalBytes > $this->config->maxResponseBytes) {
+                        throw new MailboxProtocolException('IMAP response exceeds configured byte limit.');
+                    }
 
-                if (preg_match('/^' . preg_quote($tag, '/') . '\s+(OK|NO|BAD)\b/i', $trimmed, $matches) === 1) {
+                    $literals[] = $literal;
+                }
+
+                if (preg_match('/^' . preg_quote($tag, '/') . '\\s+(OK|NO|BAD)\\b/i', $trimmed, $matches) === 1) {
                     $status = strtoupper($matches[1]);
 
                     break;
