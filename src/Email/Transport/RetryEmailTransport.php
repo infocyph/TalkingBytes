@@ -6,6 +6,7 @@ namespace Infocyph\TalkingBytes\Email\Transport;
 
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
 use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
+use Infocyph\TalkingBytes\Core\Support\OperationDeadline;
 use Infocyph\TalkingBytes\Core\Support\RetryExecutor;
 use Infocyph\TalkingBytes\Core\Support\Sleeper;
 use Infocyph\TalkingBytes\Email\EmailMessage;
@@ -18,6 +19,7 @@ final readonly class RetryEmailTransport implements EmailTransport
         private RetryPolicy $retryPolicy,
         private ?CancellationSignal $cancellation = null,
         private ?Sleeper $sleeper = null,
+        private ?OperationDeadline $deadline = null,
     ) {}
 
     public function send(EmailMessage $message): CommunicationResult
@@ -27,6 +29,7 @@ final readonly class RetryEmailTransport implements EmailTransport
             fn(): CommunicationResult => $this->innerTransport->send($message),
             sleeper: $this->sleeper,
             cancellation: $this->cancellation,
+            deadline: $this->deadline,
         );
     }
 }
