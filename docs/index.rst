@@ -42,3 +42,4 @@ It provides:
    naming
    release-checklist
    release-notes-2.2
+   release-notes-2.3
