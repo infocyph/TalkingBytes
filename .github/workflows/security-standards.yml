@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   phpforge:
-    uses: infocyph/phpforge/.github/workflows/security-standards.yml@18917f38bad206cf7d1bc119c20373bac3982433
+    uses: infocyph/phpforge/.github/workflows/security-standards.yml@main
     with:
       integration_services: '[]'
       service_topologies: '{}'
