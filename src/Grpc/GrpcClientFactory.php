@@ -29,6 +29,7 @@ final readonly class GrpcClientFactory
         private ?Clock $clock = null,
         private ?Sleeper $sleeper = null,
         private ?OperationDeadline $operationDeadline = null,
+        private ?RunwireBinding $runwireBinding = null,
     ) {}
 
     /**
@@ -84,6 +85,12 @@ final readonly class GrpcClientFactory
         ?RequestContext $request = null,
         ?CoroutineScope $scope = null,
     ): self {
+        if ($this->runwireBinding !== null) {
+            $this->runwireBinding->assertSameContext($runtime, $request, $scope);
+
+            return $this;
+        }
+
         $binding = new RunwireBinding($runtime, $request, $scope);
         $deadline = $binding->deadline();
         if ($deadline !== null && $this->operationDeadline !== null) {
@@ -98,6 +105,7 @@ final readonly class GrpcClientFactory
             $this->clock,
             $binding->sleeper($this->sleeper),
             $deadline,
+            $binding,
         );
     }
 
