@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   phpforge:
-    uses: infocyph/phpforge/.github/workflows/security-standards.yml@main
+    uses: infocyph/phpforge/.github/workflows/security-standards.yml@18917f38bad206cf7d1bc119c20373bac3982433
     with:
       integration_services: '[]'
       service_topologies: '{}'
@@ -57,11 +57,78 @@ jobs:
           TALKINGBYTES_OPTIONAL_COLDNESS: "1"
         run: vendor/bin/pest --configuration=vendor/infocyph/phpforge/resources/pest.xml --bootstrap=vendor/autoload.php tests/OptionalCapabilityColdnessTest.php
 
+
+  runwire-absent:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.5"
+          extensions: "curl, fileinfo, openssl"
+          coverage: none
+
+      - name: Install production dependencies without Runwire
+        run: composer install --no-dev --no-interaction --prefer-dist --no-progress --classmap-authoritative
+
+      - name: Verify standalone APIs stay cold without Runwire
+        run: |
+          php -r '
+          require "vendor/autoload.php";
+
+          if (class_exists(\Infocyph\Runwire\RuntimeContext::class)) {
+              fwrite(STDERR, "Runwire unexpectedly available in production-only install\n");
+              exit(1);
+          }
+
+          new \Infocyph\TalkingBytes\Http\HttpClientFactory();
+          new \Infocyph\TalkingBytes\Email\EmailSenderFactory();
+          new \Infocyph\TalkingBytes\Email\EmailMailboxFactory();
+          new \Infocyph\TalkingBytes\Email\EmailReceiverFactory();
+          new \Infocyph\TalkingBytes\Grpc\GrpcClientFactory();
+          \Infocyph\TalkingBytes\Http\HttpClient::multi();
+          '
+
+  runwire-present:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.5"
+          extensions: "curl, fileinfo, openssl"
+          coverage: none
+
+      - name: Install development dependencies with Runwire
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Run Runwire integration and ownership gates
+        run: |
+          vendor/bin/pest \
+            --configuration=vendor/infocyph/phpforge/resources/pest.xml \
+            --bootstrap=vendor/autoload.php \
+            --fail-on-skipped \
+            tests/RunwireArchitectureTest.php \
+            tests/RunwireIntegrationTest.php \
+            tests/HttpConcurrentPoolTest.php \
+            tests/SmtpTransportTest.php \
+            tests/Pop3MailboxTest.php \
+            tests/MailboxImapTest.php \
+            tests/TransportProcessCoverageTest.php
+
   mailpit-integration:
     runs-on: ubuntu-latest
     services:
       mailpit:
-        image: axllent/mailpit:latest
+        image: "axllent/mailpit@sha256:ed9b00c609e77e99c79b93f1178255ebc271868920f2c69a8d166bd5634ed10d"
         ports:
           - 1025:1025
           - 8025:8025
