@@ -362,6 +362,21 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
         $this->watchWithIdle($onEvent, $timeoutSeconds, $stop);
     }
 
+/**
+     * @param resource $connection
+     */
+    private function applyReadDeadline(mixed $connection, OperationDeadline $deadline): void
+    {
+        $remainingMicros = $deadline->remainingMicroseconds();
+        if ($remainingMicros === 0) {
+            throw new MailboxConnectionException('IMAP command deadline exceeded.');
+        }
+
+        $seconds = intdiv($remainingMicros, 1_000_000);
+        $microseconds = $remainingMicros % 1_000_000;
+        stream_set_timeout($connection, $seconds, $microseconds);
+    }
+
     private function authenticateStatus(ImapResponse $response): void
     {
         if ($response->isOk()) {
@@ -559,28 +574,6 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
         }
     }
 
-    /**
-     * @param resource $connection
-     */
-    private function applyReadDeadline(mixed $connection, OperationDeadline $deadline): void
-    {
-        $remainingMicros = $deadline->remainingMicroseconds();
-        if ($remainingMicros === 0) {
-            throw new MailboxConnectionException('IMAP command deadline exceeded.');
-        }
-
-        $seconds = intdiv($remainingMicros, 1_000_000);
-        $microseconds = $remainingMicros % 1_000_000;
-        stream_set_timeout($connection, $seconds, $microseconds);
-    }
-
-    private function restoreReadTimeout(): void
-    {
-        if (is_resource($this->connection)) {
-            stream_set_timeout($this->connection, $this->config->timeoutSeconds);
-        }
-    }
-
     private function refreshCapabilities(): void
     {
         $response = $this->runCommand('CAPABILITY');
@@ -601,6 +594,13 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
         }
 
         return $this->connection;
+    }
+
+        private function restoreReadTimeout(): void
+    {
+        if (is_resource($this->connection)) {
+            stream_set_timeout($this->connection, $this->config->timeoutSeconds);
+        }
     }
 
     private function runCommand(string $command): ImapResponse
