@@ -6,7 +6,7 @@ $expectedRequests = (int) ($argv[1] ?? 0);
 $delayMicroseconds = (int) ($argv[2] ?? 0);
 $readyPath = $argv[3] ?? '';
 
-if ($expectedRequests < 1 || $delayMicroseconds < 0 || $readyPath === '') {
+if ($expectedRequests < 0 || $delayMicroseconds < 0 || $readyPath === '') {
     throw new InvalidArgumentException('Invalid sustained HTTP server arguments.');
 }
 
@@ -29,7 +29,8 @@ file_put_contents($readyPath, json_encode(['port' => $port], JSON_THROW_ON_ERROR
 /** @var array<int, array{stream:resource,buffer:string,due:?float}> $clients */
 $clients = [];
 $completed = 0;
-$deadline = microtime(true) + 30.0;
+$deadline = microtime(true) + 120.0;
+$unbounded = $expectedRequests === 0;
 
 $withoutStreamWarnings = static function (callable $operation): mixed {
     set_error_handler(
@@ -44,7 +45,7 @@ $withoutStreamWarnings = static function (callable $operation): mixed {
     }
 };
 
-while ($completed < $expectedRequests && microtime(true) < $deadline) {
+while (($unbounded || $completed < $expectedRequests) && microtime(true) < $deadline) {
     $read = [$server];
     foreach ($clients as $client) {
         if ($client['due'] === null) {
@@ -121,7 +122,7 @@ foreach ($clients as $client) {
 }
 fclose($server);
 
-if ($completed !== $expectedRequests) {
+if (!$unbounded && $completed !== $expectedRequests) {
     throw new RuntimeException(sprintf(
         'Sustained HTTP server completed %d of %d expected requests.',
         $completed,
