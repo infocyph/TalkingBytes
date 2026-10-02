@@ -93,6 +93,7 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
             'IMAP',
             $this->config->security === ImapSecurity::Ssl,
             $this->streamWaiter,
+            $this->commandDeadline(),
         );
         $this->selectedFolder = null;
 
