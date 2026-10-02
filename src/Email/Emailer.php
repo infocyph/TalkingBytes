@@ -41,33 +41,50 @@ final readonly class Emailer
 
     private EventDispatcher $events;
 
+    private Sleeper $sleeper;
+
     public function __construct(
         private EmailTransport $transport,
         ?EventDispatcher $events = null,
         ?Clock $clock = null,
+        ?Sleeper $sleeper = null,
     ) {
         $this->events = new BestEffortEventDispatcher($events ?? new NullEventDispatcher());
         $this->clock = $clock ?? Clock::system();
+        $this->sleeper = $sleeper ?? Sleeper::system();
     }
 
-    public static function fake(?EventDispatcher $events = null, ?Clock $clock = null): self
-    {
-        return new self(new FakeEmailTransport(), $events, $clock);
+    public static function fake(
+        ?EventDispatcher $events = null,
+        ?Clock $clock = null,
+        ?Sleeper $sleeper = null,
+    ): self {
+        return new self(new FakeEmailTransport(), $events, $clock, $sleeper);
     }
 
-    public static function usingLog(LogEmailConfig $config, ?EventDispatcher $events = null, ?Clock $clock = null): self
-    {
-        return new self(new LogEmailTransport($config), $events, $clock);
+    public static function usingLog(
+        LogEmailConfig $config,
+        ?EventDispatcher $events = null,
+        ?Clock $clock = null,
+        ?Sleeper $sleeper = null,
+    ): self {
+        return new self(new LogEmailTransport($config), $events, $clock, $sleeper);
     }
 
-    public static function usingMailFunction(?EventDispatcher $events = null, ?Clock $clock = null): self
-    {
-        return new self(new MailFunctionTransport(), $events, $clock);
+    public static function usingMailFunction(
+        ?EventDispatcher $events = null,
+        ?Clock $clock = null,
+        ?Sleeper $sleeper = null,
+    ): self {
+        return new self(new MailFunctionTransport(), $events, $clock, $sleeper);
     }
 
-    public static function usingNull(?EventDispatcher $events = null, ?Clock $clock = null): self
-    {
-        return new self(new NullEmailTransport(), $events, $clock);
+    public static function usingNull(
+        ?EventDispatcher $events = null,
+        ?Clock $clock = null,
+        ?Sleeper $sleeper = null,
+    ): self {
+        return new self(new NullEmailTransport(), $events, $clock, $sleeper);
     }
 
     public static function usingSendmail(
@@ -86,17 +103,26 @@ final readonly class Emailer
             ),
             $events,
             $clock,
+            $sleeper,
         );
     }
 
-    public static function usingSmtp(SmtpConfig $config, ?EventDispatcher $events = null, ?Clock $clock = null): self
-    {
-        return new self(new SmtpTransport($config, clock: $clock), $events, $clock);
+    public static function usingSmtp(
+        SmtpConfig $config,
+        ?EventDispatcher $events = null,
+        ?Clock $clock = null,
+        ?Sleeper $sleeper = null,
+    ): self {
+        return new self(new SmtpTransport($config, clock: $clock), $events, $clock, $sleeper);
     }
 
-    public static function usingSpool(SpoolConfig $config, ?EventDispatcher $events = null, ?Clock $clock = null): self
-    {
-        return new self(new SpoolEmailTransport($config), $events, $clock);
+    public static function usingSpool(
+        SpoolConfig $config,
+        ?EventDispatcher $events = null,
+        ?Clock $clock = null,
+        ?Sleeper $sleeper = null,
+    ): self {
+        return new self(new SpoolEmailTransport($config), $events, $clock, $sleeper);
     }
 
     public function assertable(): AssertableEmailTransport
@@ -139,7 +165,7 @@ final readonly class Emailer
 
     public function withDkim(DkimConfig $config): self
     {
-        return new self(new DkimSigningTransport($this->transport, $config), $this->events, $this->clock);
+        return new self(new DkimSigningTransport($this->transport, $config), $this->events, $this->clock, $this->sleeper);
     }
 
     /**
@@ -147,7 +173,7 @@ final readonly class Emailer
      */
     public function withFallback(array $fallbackTransports): self
     {
-        return new self(new FallbackEmailTransport($this->transport, $fallbackTransports), $this->events, $this->clock);
+        return new self(new FallbackEmailTransport($this->transport, $fallbackTransports), $this->events, $this->clock, $this->sleeper);
     }
 
     /**
@@ -155,7 +181,7 @@ final readonly class Emailer
      */
     public function withLogging(callable $logger): self
     {
-        return new self(new LoggingEmailTransport($this->transport, $logger), $this->events, $this->clock);
+        return new self(new LoggingEmailTransport($this->transport, $logger), $this->events, $this->clock, $this->sleeper);
     }
 
     public function withPsrLogger(object $logger, string $level = 'info'): self
@@ -165,20 +191,21 @@ final readonly class Emailer
 
     public function withRateLimit(RateLimiter $rateLimiter): self
     {
-        return new self(new RateLimitedEmailTransport($this->transport, $rateLimiter), $this->events, $this->clock);
+        return new self(new RateLimitedEmailTransport($this->transport, $rateLimiter), $this->events, $this->clock, $this->sleeper);
     }
 
     public function withRetry(RetryPolicy $retryPolicy, ?CancellationSignal $cancellation = null): self
     {
         return new self(
-            new RetryEmailTransport($this->transport, $retryPolicy, $cancellation),
+            new RetryEmailTransport($this->transport, $retryPolicy, $cancellation, $this->sleeper),
             $this->events,
             $this->clock,
+            $this->sleeper,
         );
     }
 
     public function withTransport(EmailTransport $transport): self
     {
-        return new self($transport, $this->events, $this->clock);
+        return new self($transport, $this->events, $this->clock, $this->sleeper);
     }
 }
