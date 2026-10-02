@@ -43,6 +43,7 @@ final readonly class EmailSenderFactory
         private ?CancellationSignal $cancellation = null,
         private ?OperationDeadline $operationDeadline = null,
         private ?StreamWaiter $streamWaiter = null,
+        private ?RunwireBinding $runwireBinding = null,
     ) {
         $this->events = new BestEffortEventDispatcher($events ?? new NullEventDispatcher());
         $this->clock = $clock ?? Clock::system();
@@ -183,6 +184,12 @@ final readonly class EmailSenderFactory
         ?RequestContext $request = null,
         ?CoroutineScope $scope = null,
     ): self {
+        if ($this->runwireBinding !== null) {
+            $this->runwireBinding->assertSameContext($runtime, $request, $scope);
+
+            return $this;
+        }
+
         $binding = new RunwireBinding($runtime, $request, $scope);
         $deadline = $binding->deadline();
         if ($deadline !== null && $this->operationDeadline !== null) {
@@ -198,6 +205,7 @@ final readonly class EmailSenderFactory
             $binding->cancellation($this->cancellation),
             $deadline,
             $this->streamWaiter ?? $binding->streamWaiter(),
+            $binding,
         );
     }
 
