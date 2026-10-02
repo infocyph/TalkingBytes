@@ -79,6 +79,7 @@ final class Pop3SocketTransport implements Pop3Transport
             'POP3',
             $this->config->security === Pop3Security::Ssl,
             $this->streamWaiter,
+            $this->commandDeadline(),
         );
 
         try {
