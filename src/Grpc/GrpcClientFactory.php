@@ -4,15 +4,20 @@ declare(strict_types=1);
 
 namespace Infocyph\TalkingBytes\Grpc;
 
+use Infocyph\Runwire\Coroutine\CoroutineScope;
+use Infocyph\Runwire\RequestContext;
+use Infocyph\Runwire\RuntimeContext;
 use Infocyph\TalkingBytes\Core\Event\EventDispatcher;
 use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
 use Infocyph\TalkingBytes\Core\Support\Clock;
+use Infocyph\TalkingBytes\Core\Support\OperationDeadline;
 use Infocyph\TalkingBytes\Core\Support\Sleeper;
 use Infocyph\TalkingBytes\Grpc\Native\NativeGrpcInvoker;
 use Infocyph\TalkingBytes\Grpc\Native\NativeGrpcStreamingInvoker;
 use Infocyph\TalkingBytes\Grpc\Retry\GrpcRetryPolicy;
 use Infocyph\TalkingBytes\Grpc\Sender\GrpcRequest;
 use Infocyph\TalkingBytes\Grpc\Sender\GrpcResponse;
+use Infocyph\TalkingBytes\Integration\Runwire\RunwireBinding;
 use InvalidArgumentException;
 
 final readonly class GrpcClientFactory
@@ -22,6 +27,7 @@ final readonly class GrpcClientFactory
         private ?CancellationSignal $cancellation = null,
         private ?Clock $clock = null,
         private ?Sleeper $sleeper = null,
+        private ?OperationDeadline $operationDeadline = null,
     ) {}
 
     /**
@@ -70,6 +76,28 @@ final readonly class GrpcClientFactory
             : GrpcClient::usingNative($invoker, $this->events, $this->clock);
 
         return $this->applyResolvedConfig($client, $config);
+    }
+
+    public function withRunwire(
+        RuntimeContext $runtime,
+        ?RequestContext $request = null,
+        ?CoroutineScope $scope = null,
+    ): self {
+        $binding = new RunwireBinding($runtime, $request, $scope);
+        $deadline = $binding->deadline();
+        if ($deadline !== null && $this->operationDeadline !== null) {
+            $deadline = $this->operationDeadline->earliest($deadline);
+        } elseif ($deadline === null) {
+            $deadline = $this->operationDeadline;
+        }
+
+        return new self(
+            $this->events,
+            $binding->cancellation($this->cancellation),
+            $this->clock,
+            $binding->sleeper($this->sleeper),
+            $deadline,
+        );
     }
 
     /** @param array<string, mixed> $config */
@@ -175,6 +203,10 @@ final readonly class GrpcClientFactory
     {
         if ($this->cancellation !== null) {
             $client = $client->withCancellation($this->cancellation);
+        }
+
+        if ($this->operationDeadline !== null) {
+            $client = $client->withOperationDeadline($this->operationDeadline);
         }
 
         $retry = self::section($config, 'retry');
