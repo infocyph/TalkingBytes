@@ -8,6 +8,7 @@ use Infocyph\TalkingBytes\Core\Event\BestEffortEventDispatcher;
 use Infocyph\TalkingBytes\Core\Event\EventDispatcher;
 use Infocyph\TalkingBytes\Core\Event\NullEventDispatcher;
 use Infocyph\TalkingBytes\Core\Support\Clock;
+use Infocyph\TalkingBytes\Core\Support\OperationDeadline;
 use Infocyph\TalkingBytes\Core\Support\Sleeper;
 use Infocyph\TalkingBytes\Email\Config\ImapConfig;
 use Infocyph\TalkingBytes\Email\Enum\ImapSecurity;
@@ -456,7 +457,7 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
         return (int) $matches[1];
     }
 
-    private function readExact(int $bytes): string
+    private function readExact(int $bytes, ?OperationDeadline $deadline = null): string
     {
         if ($bytes < 0 || $bytes > $this->config->maxLiteralBytes) {
             throw new MailboxProtocolException(sprintf(
@@ -469,8 +470,15 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
         $connection = $this->requireConnection();
 
         while (strlen($buffer) < $bytes) {
+            if ($deadline !== null) {
+                $this->applyReadDeadline($connection, $deadline);
+            }
+
             $remaining = max(1, $bytes - strlen($buffer));
             $chunk = fread($connection, $remaining);
+            if ($deadline?->expired() === true) {
+                throw new MailboxConnectionException('IMAP command deadline exceeded.');
+            }
             if ($chunk === false || $chunk === '') {
                 /** @var array<string, mixed> $meta */
                 $meta = stream_get_meta_data($connection);
@@ -496,19 +504,29 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
         return SocketMailboxRuntime::readLine($this->requireConnection(), 'imap');
     }
 
+    private function readLineUntil(OperationDeadline $deadline): string
+    {
+        $connection = $this->requireConnection();
+        $this->applyReadDeadline($connection, $deadline);
+        $line = SocketMailboxRuntime::readLine($connection, 'imap');
+        if ($deadline->expired()) {
+            throw new MailboxConnectionException('IMAP command deadline exceeded.');
+        }
+
+        return $line;
+    }
+
     private function readTaggedResponse(string $tag): ImapResponse
     {
         $lines = [];
         $literals = [];
         $status = 'NO';
         $totalBytes = 0;
-        $deadline = $this->clock->monotonic() + $this->config->timeoutSeconds;
+        $deadline = OperationDeadline::after((float) $this->config->timeoutSeconds, $this->clock);
 
-        while (true) {
-            if ($this->clock->monotonic() >= $deadline) {
-                throw new MailboxConnectionException('IMAP command deadline exceeded.');
-            }
-            $line = $this->readLine();
+        try {
+            while (true) {
+                $line = $this->readLineUntil($deadline);
             $trimmed = rtrim($line, "\r\n");
             $lines[] = $trimmed;
             $totalBytes += strlen($line);
@@ -516,9 +534,9 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
                 throw new MailboxProtocolException('IMAP response exceeds configured bounds.');
             }
 
-            $literalSize = $this->parseLiteralSize($trimmed);
-            if ($literalSize !== null) {
-                $literal = $this->readExact($literalSize);
+                $literalSize = $this->parseLiteralSize($trimmed);
+                if ($literalSize !== null) {
+                    $literal = $this->readExact($literalSize, $deadline);
                 $totalBytes += strlen($literal);
                 if ($totalBytes > $this->config->maxResponseBytes) {
                     throw new MailboxProtocolException('IMAP response exceeds configured byte limit.');
@@ -526,14 +544,39 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
                 $literals[] = $literal;
             }
 
-            if (preg_match('/^' . preg_quote($tag, '/') . '\s+(OK|NO|BAD)\b/i', $trimmed, $matches) === 1) {
-                $status = strtoupper($matches[1]);
+                if (preg_match('/^' . preg_quote($tag, '/') . '\s+(OK|NO|BAD)\b/i', $trimmed, $matches) === 1) {
+                    $status = strtoupper($matches[1]);
 
-                break;
+                    break;
+                }
             }
+
+            return new ImapResponse($tag, $status, $lines, $literals);
+        } finally {
+            $this->restoreReadTimeout();
+        }
+    }
+
+    /**
+     * @param resource $connection
+     */
+    private function applyReadDeadline(mixed $connection, OperationDeadline $deadline): void
+    {
+        $remainingMicros = $deadline->remainingMicroseconds();
+        if ($remainingMicros === 0) {
+            throw new MailboxConnectionException('IMAP command deadline exceeded.');
         }
 
-        return new ImapResponse($tag, $status, $lines, $literals);
+        $seconds = intdiv($remainingMicros, 1_000_000);
+        $microseconds = $remainingMicros % 1_000_000;
+        stream_set_timeout($connection, $seconds, $microseconds);
+    }
+
+    private function restoreReadTimeout(): void
+    {
+        if (is_resource($this->connection)) {
+            stream_set_timeout($this->connection, $this->config->timeoutSeconds);
+        }
     }
 
     private function refreshCapabilities(): void
