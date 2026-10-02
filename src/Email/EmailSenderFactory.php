@@ -13,6 +13,7 @@ use Infocyph\TalkingBytes\Core\Event\NullEventDispatcher;
 use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
 use Infocyph\TalkingBytes\Core\Support\Clock;
 use Infocyph\TalkingBytes\Core\Support\OperationDeadline;
+use Infocyph\TalkingBytes\Core\Support\ResolvedConfig;
 use Infocyph\TalkingBytes\Core\Support\Sleeper;
 use Infocyph\TalkingBytes\Core\Support\StreamWaiter;
 use Infocyph\TalkingBytes\Email\Config\ConfigValue;
@@ -68,11 +69,11 @@ final readonly class EmailSenderFactory
         ?CancellationSignal $cancellation = null,
     ): Emailer {
         $cancellation = $this->combinedCancellation($cancellation);
-        $transport = self::section($config, 'transport', required: true);
+        $transport = ResolvedConfig::section($config, 'transport', 'Email', required: true);
         $emailer = $this->usingResolvedTransport($transport, $cancellation);
 
         $fallbackTransports = [];
-        foreach (self::sections($config, 'fallbacks') as $fallback) {
+        foreach (ResolvedConfig::sections($config, 'fallbacks', 'Email') as $fallback) {
             $fallbackTransports[] = $this->usingResolvedTransport($fallback, $cancellation)->transport();
         }
         if ($fallbackTransports !== []) {
@@ -83,7 +84,7 @@ final readonly class EmailSenderFactory
             );
         }
 
-        $retry = self::section($config, 'retry');
+        $retry = ResolvedConfig::section($config, 'retry', 'Email');
         if (ConfigValue::bool($retry, 'enabled', false)) {
             $attempts = ConfigValue::int($retry, 'max_attempts', 3);
             $delayMs = ConfigValue::int($retry, 'delay_ms', 250);
@@ -95,7 +96,7 @@ final readonly class EmailSenderFactory
             $emailer = $emailer->withRetry($policy, $cancellation, $this->operationDeadline);
         }
 
-        $rateLimit = self::section($config, 'rate_limit');
+        $rateLimit = ResolvedConfig::section($config, 'rate_limit', 'Email');
         if (ConfigValue::bool($rateLimit, 'enabled', false)) {
             $emailer = $emailer->withRateLimit(new RateLimiter(
                 ConfigValue::int($rateLimit, 'max_requests', 60),
@@ -104,7 +105,7 @@ final readonly class EmailSenderFactory
             ));
         }
 
-        $dkim = self::section($config, 'dkim');
+        $dkim = ResolvedConfig::section($config, 'dkim', 'Email');
         if (ConfigValue::bool($dkim, 'enabled', false)) {
             $emailer = $emailer->withDkim(DkimConfig::fromArray($dkim));
         }
@@ -198,64 +199,6 @@ final readonly class EmailSenderFactory
             $deadline,
             $this->streamWaiter ?? $binding->streamWaiter(),
         );
-    }
-
-    /**
-     * @param array<string, mixed> $config
-     * @return array<string, mixed>
-     */
-    private static function section(array $config, string $key, bool $required = false): array
-    {
-        $value = $config[$key] ?? null;
-        if ($value === null && !$required) {
-            return [];
-        }
-
-        if (!is_array($value)) {
-            throw new InvalidArgumentException(sprintf('Email resolved configuration section "%s" must be an array.', $key));
-        }
-
-        $section = [];
-        foreach ($value as $name => $item) {
-            if (is_string($name)) {
-                $section[$name] = $item;
-            }
-        }
-
-        if ($required && $section === []) {
-            throw new InvalidArgumentException(sprintf('Email resolved configuration section "%s" must not be empty.', $key));
-        }
-
-        return $section;
-    }
-
-    /**
-     * @param array<string, mixed> $config
-     * @return list<array<string, mixed>>
-     */
-    private static function sections(array $config, string $key): array
-    {
-        $value = $config[$key] ?? [];
-        if (!is_array($value)) {
-            throw new InvalidArgumentException(sprintf('Email resolved configuration section "%s" must be a list.', $key));
-        }
-
-        $sections = [];
-        foreach ($value as $item) {
-            if (!is_array($item)) {
-                throw new InvalidArgumentException(sprintf('Email resolved configuration section "%s" must contain arrays.', $key));
-            }
-
-            $section = [];
-            foreach ($item as $name => $entry) {
-                if (is_string($name)) {
-                    $section[$name] = $entry;
-                }
-            }
-            $sections[] = $section;
-        }
-
-        return $sections;
     }
 
     private function bindExecution(
