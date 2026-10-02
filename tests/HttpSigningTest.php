@@ -257,3 +257,41 @@ it('fails closed when a signed upload ends before its declared size', function (
 
     fclose($stream);
 });
+
+it('preserves the signed stream source offset across 307 redirects', function (): void {
+    $stream = fopen('php://temp', 'w+b');
+    expect($stream)->toBeResource();
+    fwrite($stream, 'SECRETPAYLOAD');
+    fseek($stream, 6);
+
+    $auth = new SignedRequestAuth(
+        new HmacSha256Signer('secret-key'),
+        static fn(): int => 1_700_000_000,
+        static fn(): string => 'nonce-redirect',
+    );
+    $prepared = HttpRequest::put('https://api.example.com/upload')
+        ->uploadFromStream($stream, 7)
+        ->withAuthenticator($auth)
+        ->prepareForTransport();
+
+    $snapshot = $prepared->metadata['_upload_handle'] ?? null;
+    expect($snapshot)->toBeResource();
+    fseek($snapshot, 0);
+    expect(stream_get_contents($snapshot))->toBe('PAYLOAD');
+    UploadHandleManager::cleanup($prepared);
+
+    $redirected = $prepared
+        ->redirectedTo('https://api.example.com/upload-next', 307, true)
+        ->prepareForTransport();
+
+    $redirectSnapshot = $redirected->metadata['_upload_handle'] ?? null;
+    expect($redirectSnapshot)->toBeResource();
+    fseek($redirectSnapshot, 0);
+
+    expect(stream_get_contents($redirectSnapshot))->toBe('PAYLOAD')
+        ->and($redirected->metadata['_upload_source_offset'] ?? null)->toBe(6)
+        ->and(ftell($stream))->toBe(6);
+
+    UploadHandleManager::cleanup($redirected);
+    fclose($stream);
+});
