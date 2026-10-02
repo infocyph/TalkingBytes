@@ -246,18 +246,7 @@ final class Pop3SocketTransport implements Pop3Transport
         }
     }
 
-    private function assertExecutionAllowed(): void
-    {
-        if ($this->cancellation?->isRequested() === true) {
-            throw new MailboxConnectionException('POP3 operation cancelled.');
-        }
-
-        if ($this->operationDeadline?->expired() === true) {
-            throw new MailboxConnectionException('POP3 operation deadline exceeded.');
-        }
-    }
-
-    /**
+/**
      * @param resource $connection
      */
     private function applyReadDeadline(mixed $connection, OperationDeadline $deadline): void
@@ -274,7 +263,18 @@ final class Pop3SocketTransport implements Pop3Transport
         );
     }
 
-    private function closeConnection(): void
+    private function assertExecutionAllowed(): void
+    {
+        if ($this->cancellation?->isRequested() === true) {
+            throw new MailboxConnectionException('POP3 operation cancelled.');
+        }
+
+        if ($this->operationDeadline?->expired() === true) {
+            throw new MailboxConnectionException('POP3 operation deadline exceeded.');
+        }
+    }
+
+        private function closeConnection(): void
     {
         if (is_resource($this->connection)) {
             fclose($this->connection);
