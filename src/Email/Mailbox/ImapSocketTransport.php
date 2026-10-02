@@ -527,47 +527,51 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
 
         while (strlen($buffer) < $bytes) {
             $this->assertExecutionAllowed();
-
             if ($deadline !== null) {
                 $this->applyReadDeadline($connection, $deadline);
             }
 
-            if ($this->streamWaiter !== null && !$this->streamWaiter->waitReadable($connection, $deadline)) {
-                $this->assertExecutionAllowed();
-                if ($deadline?->expired() === true) {
-                    throw new MailboxConnectionException('IMAP command deadline exceeded.');
-                }
-
-                throw new MailboxConnectionException('IMAP cooperative read wait was interrupted.');
-            }
-
-            $remaining = max(1, $bytes - strlen($buffer));
-            $chunk = fread($connection, $remaining);
-            $this->assertExecutionAllowed();
-            if ($deadline?->expired() === true) {
-                throw new MailboxConnectionException('IMAP command deadline exceeded.');
-            }
-            if ($chunk === false || $chunk === '') {
-                /** @var array<string, mixed> $meta */
-                $meta = stream_get_meta_data($connection);
-                if (($meta['timed_out'] ?? false) === true) {
-                    throw new MailboxConnectionException('IMAP literal read timed out.');
-                }
-                if ($this->streamWaiter !== null && !feof($connection)) {
-                    continue;
-                }
-
-                throw new MailboxProtocolException(sprintf(
-                    'Unexpected end of stream while reading IMAP literal (expected %d bytes, received %d bytes).',
-                    $bytes,
-                    strlen($buffer),
-                ));
+            $this->waitForLiteralRead($connection, $deadline);
+            $chunk = $this->readLiteralChunk(
+                $connection,
+                max(1, $bytes - strlen($buffer)),
+                $bytes,
+                strlen($buffer),
+                $deadline,
+            );
+            if ($chunk === null) {
+                continue;
             }
 
             $buffer .= $chunk;
         }
 
         return $buffer;
+    }
+
+    /**
+     * @param resource $socket
+     */
+    private function readIdleLineIfAvailable(mixed $socket): ?string
+    {
+        $read = [$socket];
+        $write = [];
+        $except = [];
+        $microseconds = $this->streamWaiter === null ? 250000 : 0;
+        $ready = stream_select($read, $write, $except, 0, $microseconds);
+        if ($ready === false) {
+            throw new MailboxConnectionException('IMAP IDLE stream_select failed.');
+        }
+
+        if ($ready < 1) {
+            if ($this->streamWaiter !== null) {
+                $this->sleeper->milliseconds(10);
+            }
+
+            return null;
+        }
+
+        return rtrim($this->readLine(), "\r\n");
     }
 
     private function readLine(): string
@@ -593,6 +597,42 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
         }
 
         return $line;
+    }
+
+    /**
+     * @param resource $connection
+     */
+    private function readLiteralChunk(
+        mixed $connection,
+        int $remaining,
+        int $expectedBytes,
+        int $receivedBytes,
+        ?OperationDeadline $deadline,
+    ): ?string {
+        $chunk = fread($connection, $remaining);
+        $this->assertExecutionAllowed();
+        if ($deadline?->expired() === true) {
+            throw new MailboxConnectionException('IMAP command deadline exceeded.');
+        }
+
+        if (is_string($chunk) && $chunk !== '') {
+            return $chunk;
+        }
+
+        /** @var array<string, mixed> $meta */
+        $meta = stream_get_meta_data($connection);
+        if (($meta['timed_out'] ?? false) === true) {
+            throw new MailboxConnectionException('IMAP literal read timed out.');
+        }
+        if ($this->streamWaiter !== null && !feof($connection)) {
+            return null;
+        }
+
+        throw new MailboxProtocolException(sprintf(
+            'Unexpected end of stream while reading IMAP literal (expected %d bytes, received %d bytes).',
+            $expectedBytes,
+            $receivedBytes,
+        ));
     }
 
     private function readTaggedResponse(string $tag): ImapResponse
@@ -740,6 +780,23 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
     }
 
     /**
+     * @param resource $connection
+     */
+    private function waitForLiteralRead(mixed $connection, ?OperationDeadline $deadline): void
+    {
+        if ($this->streamWaiter === null || $this->streamWaiter->waitReadable($connection, $deadline)) {
+            return;
+        }
+
+        $this->assertExecutionAllowed();
+        if ($deadline?->expired() === true) {
+            throw new MailboxConnectionException('IMAP command deadline exceeded.');
+        }
+
+        throw new MailboxConnectionException('IMAP cooperative read wait was interrupted.');
+    }
+
+    /**
      * @param callable(string):void $onEvent
      * @param callable():bool $stop
      */
@@ -760,25 +817,8 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
                 break;
             }
 
-            $read = [$socket];
-            $write = [];
-            $except = [];
-            $microseconds = $this->streamWaiter === null ? 250000 : 0;
-            $ready = stream_select($read, $write, $except, 0, $microseconds);
-            if ($ready === false) {
-                throw new MailboxConnectionException('IMAP IDLE stream_select failed.');
-            }
-
-            if ($ready < 1) {
-                if ($this->streamWaiter !== null) {
-                    $this->sleeper->milliseconds(10);
-                }
-
-                continue;
-            }
-
-            $line = rtrim($this->readLine(), "\r\n");
-            if (str_starts_with($line, '* ')) {
+            $line = $this->readIdleLineIfAvailable($socket);
+            if ($line !== null && str_starts_with($line, '* ')) {
                 $onEvent($line);
             }
         }
