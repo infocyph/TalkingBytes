@@ -237,8 +237,7 @@ final readonly class SustainedHttpPerformance
         int $concurrency,
         float $durationSeconds,
         bool $recordLatency,
-    ): array
-    {
+    ): array {
         /** @var list<float> $latencies */
         $latencies = [];
         $errors = 0;
