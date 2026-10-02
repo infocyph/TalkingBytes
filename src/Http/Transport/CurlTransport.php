@@ -190,6 +190,21 @@ final readonly class CurlTransport implements HttpTransport
         );
     }
 
+    private function cancellationFailure(HttpRequest $request): ?CommunicationResult
+    {
+        if ($request->cancellationSignal()?->isRequested() !== true) {
+            return null;
+        }
+
+        return CommunicationResult::failure(
+            'HTTP operation cancelled.',
+            metadata: [
+                'cancelled' => true,
+                'transport' => 'curl',
+            ],
+        );
+    }
+
     private function cleanupUploadHandle(HttpRequest $request): void
     {
         UploadHandleManager::cleanup($request);
@@ -258,21 +273,6 @@ final readonly class CurlTransport implements HttpTransport
         return $jar instanceof CookieJar ? $jar : null;
     }
 
-    private function cancellationFailure(HttpRequest $request): ?CommunicationResult
-    {
-        if ($request->cancellationSignal()?->isRequested() !== true) {
-            return null;
-        }
-
-        return CommunicationResult::failure(
-            'HTTP operation cancelled.',
-            metadata: [
-                'cancelled' => true,
-                'transport' => 'curl',
-            ],
-        );
-    }
-
     private function deadlineFailure(HttpRequest $request): ?CommunicationResult
     {
         if ($request->operationDeadline()?->expired() !== true) {
@@ -323,14 +323,9 @@ final readonly class CurlTransport implements HttpTransport
 
     private function executeSingle(HttpRequest $resolvedRequest, string $url): CommunicationResult
     {
-        $cancellationFailure = $this->cancellationFailure($resolvedRequest);
-        if ($cancellationFailure !== null) {
-            return $cancellationFailure;
-        }
-
-        $deadlineFailure = $this->deadlineFailure($resolvedRequest);
-        if ($deadlineFailure !== null) {
-            return $deadlineFailure;
+        $preflightFailure = $this->executionPreflightFailure($resolvedRequest);
+        if ($preflightFailure !== null) {
+            return $preflightFailure;
         }
 
         try {
@@ -339,18 +334,12 @@ final readonly class CurlTransport implements HttpTransport
             return CommunicationResult::failure($exception->getMessage(), metadata: ['transport' => 'curl']);
         }
 
-        $cancellationFailure = $this->cancellationFailure($resolvedRequest);
-        if ($cancellationFailure !== null) {
-            return $cancellationFailure;
-        }
-
-        $deadlineFailure = $this->deadlineFailure($resolvedRequest);
-        if ($deadlineFailure !== null) {
-            return $deadlineFailure;
+        $preflightFailure = $this->executionPreflightFailure($resolvedRequest);
+        if ($preflightFailure !== null) {
+            return $preflightFailure;
         }
 
         $handle = curl_init();
-
         if ($handle === false) {
             return CommunicationResult::failure('Unable to initialize cURL handle.', metadata: ['transport' => 'curl']);
         }
@@ -392,18 +381,11 @@ final readonly class CurlTransport implements HttpTransport
             );
         }
 
-        $cancellationFailure = $this->cancellationFailure($resolvedRequest);
-        if ($cancellationFailure !== null) {
+        $preflightFailure = $this->executionPreflightFailure($resolvedRequest);
+        if ($preflightFailure !== null) {
             $bodyCollector->abort();
 
-            return $cancellationFailure;
-        }
-
-        $deadlineFailure = $this->deadlineFailure($resolvedRequest);
-        if ($deadlineFailure !== null) {
-            $bodyCollector->abort();
-
-            return $deadlineFailure;
+            return $preflightFailure;
         }
 
         $result = $this->buildExecutionResult(
@@ -434,6 +416,11 @@ final readonly class CurlTransport implements HttpTransport
         }
 
         return $result;
+    }
+
+    private function executionPreflightFailure(HttpRequest $request): ?CommunicationResult
+    {
+        return $this->cancellationFailure($request) ?? $this->deadlineFailure($request);
     }
 
     private function prepareCookieContext(HttpRequest $request): HttpRequest
