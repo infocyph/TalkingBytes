@@ -596,7 +596,7 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
         return $this->connection;
     }
 
-        private function restoreReadTimeout(): void
+    private function restoreReadTimeout(): void
     {
         if (is_resource($this->connection)) {
             stream_set_timeout($this->connection, $this->config->timeoutSeconds);
