@@ -412,6 +412,7 @@ it('propagates injected sleepers through resolved http email and grpc retries', 
 
             return new GrpcResponse(
                 $grpcAttempts === 1 ? GrpcStatus::Unavailable : GrpcStatus::Ok,
+                null,
             );
         },
         [
@@ -487,7 +488,7 @@ it('honors resolved cancellation before http email and grpc side effects when re
             unset($request);
             $grpcCalls++;
 
-            return new GrpcResponse(GrpcStatus::Ok);
+            return new GrpcResponse(GrpcStatus::Ok, null);
         },
     );
     $grpcResult = $grpc->send(new GrpcRequest('/example.Service/Create', []));
