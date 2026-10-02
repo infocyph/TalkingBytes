@@ -8,6 +8,7 @@ use Closure;
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
 use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
 use Infocyph\TalkingBytes\Core\Support\RetryExecutor;
+use Infocyph\TalkingBytes\Core\Support\Sleeper;
 use Infocyph\TalkingBytes\Http\Contract\HttpMiddleware;
 use Infocyph\TalkingBytes\Http\Enum\HttpMethod;
 use Infocyph\TalkingBytes\Http\HttpRequest;
@@ -19,6 +20,7 @@ final readonly class RetryMiddleware implements HttpMiddleware
     public function __construct(
         private RetryPolicy $policy,
         private ?CancellationSignal $cancellation = null,
+        private ?Sleeper $sleeper = null,
     ) {}
 
     public function handle(HttpRequest $request, Closure $next): CommunicationResult
@@ -34,6 +36,7 @@ final readonly class RetryMiddleware implements HttpMiddleware
         return RetryExecutor::run(
             $this->policy,
             static fn(): CommunicationResult => $next($request),
+            sleeper: $this->sleeper,
             cancellation: $this->cancellation,
         );
     }
