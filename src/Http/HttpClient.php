@@ -14,6 +14,7 @@ use Infocyph\TalkingBytes\Core\Event\EventDispatcher;
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
 use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
 use Infocyph\TalkingBytes\Core\Support\Clock;
+use Infocyph\TalkingBytes\Core\Support\OperationDeadline;
 use Infocyph\TalkingBytes\Core\Support\Sleeper;
 use Infocyph\TalkingBytes\Http\Body\MultipartBody;
 use Infocyph\TalkingBytes\Http\Contract\HttpMiddleware;
@@ -378,6 +379,11 @@ final readonly class HttpClient
         $middlewares[] = $middleware;
 
         return new self($this->transport, $middlewares, $this->defaultOptions, $this->defaultHeaders, $this->authenticators, $this->cookieJar);
+    }
+
+    public function withOperationDeadline(OperationDeadline $deadline): self
+    {
+        return $this->withMiddleware(new OperationDeadlineMiddleware($deadline));
     }
 
     public function withOperationTimeout(float $seconds, ?Clock $clock = null): self
