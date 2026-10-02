@@ -4,13 +4,18 @@ declare(strict_types=1);
 
 namespace Infocyph\TalkingBytes\Http;
 
+use Infocyph\Runwire\Coroutine\CoroutineScope;
+use Infocyph\Runwire\RequestContext;
+use Infocyph\Runwire\RuntimeContext;
 use Infocyph\TalkingBytes\Core\Event\EventDispatcher;
 use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
 use Infocyph\TalkingBytes\Core\Support\Clock;
+use Infocyph\TalkingBytes\Core\Support\OperationDeadline;
 use Infocyph\TalkingBytes\Core\Support\Sleeper;
 use Infocyph\TalkingBytes\Http\Contract\HttpTransport;
 use Infocyph\TalkingBytes\Http\Cookie\CookieJar;
 use Infocyph\TalkingBytes\Http\Retry\HttpRetryPolicy;
+use Infocyph\TalkingBytes\Integration\Runwire\RunwireBinding;
 use Infocyph\TalkingBytes\Resilience\CircuitBreaker;
 use Infocyph\TalkingBytes\Resilience\RateLimiter;
 use InvalidArgumentException;
@@ -22,6 +27,7 @@ final readonly class HttpClientFactory
         private ?CancellationSignal $cancellation = null,
         private ?Clock $clock = null,
         private ?Sleeper $sleeper = null,
+        private ?OperationDeadline $operationDeadline = null,
     ) {}
 
     /**
@@ -63,6 +69,10 @@ final readonly class HttpClientFactory
 
         if ($this->cancellation !== null) {
             $client = $client->withCancellation($this->cancellation);
+        }
+
+        if ($this->operationDeadline !== null) {
+            $client = $client->withOperationDeadline($this->operationDeadline);
         }
 
         if (self::enabled(self::section($config, 'cookies'))) {
@@ -108,6 +118,28 @@ final readonly class HttpClientFactory
         }
 
         return $client;
+    }
+
+    public function withRunwire(
+        RuntimeContext $runtime,
+        ?RequestContext $request = null,
+        ?CoroutineScope $scope = null,
+    ): self {
+        $binding = new RunwireBinding($runtime, $request, $scope);
+        $deadline = $binding->deadline();
+        if ($deadline !== null && $this->operationDeadline !== null) {
+            $deadline = $this->operationDeadline->earliest($deadline);
+        } elseif ($deadline === null) {
+            $deadline = $this->operationDeadline;
+        }
+
+        return new self(
+            $this->events,
+            $binding->cancellation($this->cancellation),
+            $this->clock,
+            $binding->sleeper($this->sleeper),
+            $deadline,
+        );
     }
 
     /** @param array<string, mixed> $config */
