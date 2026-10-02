@@ -328,31 +328,39 @@ final class Pop3SocketTransport implements Pop3Transport
     /**
      * @return list<string>
      */
-    private function readMultilineResponse(OperationDeadline $deadline): array
+    /**
+     * @return list<string>
+     */
+    private function readMultilineResponse(?OperationDeadline $deadline = null): array
     {
+        $deadline ??= OperationDeadline::after((float) $this->config->timeoutSeconds, $this->clock);
         $lines = [];
         $bytes = 0;
 
-        while (true) {
-            $line = $this->readLineUntil($deadline);
-            $trimmed = rtrim($line, "\r\n");
+        try {
+            while (true) {
+                $line = $this->readLineUntil($deadline);
+                $trimmed = rtrim($line, "\r\n");
 
-            if ($trimmed === '.') {
-                break;
+                if ($trimmed === '.') {
+                    break;
+                }
+
+                if (str_starts_with($trimmed, '..')) {
+                    $trimmed = substr($trimmed, 1);
+                }
+
+                $lines[] = $trimmed;
+                $bytes += strlen($line);
+                if (count($lines) > $this->config->maxResponseLines || $bytes > $this->config->maxResponseBytes) {
+                    throw new MailboxProtocolException('POP3 multiline response exceeds configured bounds.');
+                }
             }
 
-            if (str_starts_with($trimmed, '..')) {
-                $trimmed = substr($trimmed, 1);
-            }
-
-            $lines[] = $trimmed;
-            $bytes += strlen($line);
-            if (count($lines) > $this->config->maxResponseLines || $bytes > $this->config->maxResponseBytes) {
-                throw new MailboxProtocolException('POP3 multiline response exceeds configured bounds.');
-            }
+            return $lines;
+        } finally {
+            $this->restoreReadTimeout();
         }
-
-        return $lines;
     }
 
     private function refreshCapabilities(): void
