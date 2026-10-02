@@ -9,6 +9,7 @@ use Infocyph\TalkingBytes\Auth\AuthenticatorInterface;
 use Infocyph\TalkingBytes\Auth\BasicAuth;
 use Infocyph\TalkingBytes\Auth\BearerTokenAuth;
 use Infocyph\TalkingBytes\Auth\SignedRequestAuth;
+use Infocyph\TalkingBytes\Core\Support\OperationDeadline;
 use Infocyph\TalkingBytes\Http\Body\FormBody;
 use Infocyph\TalkingBytes\Http\Body\HttpBody;
 use Infocyph\TalkingBytes\Http\Body\JsonBody;
@@ -678,6 +679,14 @@ final readonly class HttpRequest
             $this->authenticators,
             $this->metadata,
         );
+    }
+
+    public function withOperationDeadline(OperationDeadline $deadline): self
+    {
+        return $this->metadata([
+            ...$this->metadata,
+            '_operation_deadline' => $deadline,
+        ]);
     }
 
     public function withoutTlsVerification(): self
