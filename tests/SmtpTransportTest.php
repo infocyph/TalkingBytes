@@ -2,9 +2,15 @@
 
 declare(strict_types=1);
 
+use Infocyph\Runwire\Coroutine\CoroutineRuntime;
+use Infocyph\Runwire\Coroutine\CoroutineScope;
+use Infocyph\Runwire\Runtime\Enum\RuntimeDriver;
+use Infocyph\Runwire\RuntimeCapabilities;
+use Infocyph\Runwire\RuntimeContext;
 use Infocyph\TalkingBytes\Email\Config\SmtpConfig;
 use Infocyph\TalkingBytes\Email\Config\SmtpCredentials;
 use Infocyph\TalkingBytes\Email\EmailMessage;
+use Infocyph\TalkingBytes\Email\EmailSenderFactory;
 use Infocyph\TalkingBytes\Email\Enum\SmtpAuthMechanism;
 use Infocyph\TalkingBytes\Email\Enum\SmtpSecurity;
 use Infocyph\TalkingBytes\Email\Enum\SmtpUtf8Policy;
@@ -411,6 +417,23 @@ PHP;
     }
 }
 
+function smtpRunwireContext(): RuntimeContext
+{
+    return RuntimeContext::fromCapabilities(
+        new RuntimeCapabilities(
+            driver: RuntimeDriver::NATIVE,
+            persistentProcess: true,
+            persistentApplication: true,
+            ownsEventLoop: true,
+            runwireLoopAvailable: true,
+            supportsAsyncIo: true,
+            supportsRunwireCoroutines: true,
+        ),
+        mode: 'native',
+        concurrent: true,
+    );
+}
+
 function smtpMessage(string $text = 'Body'): EmailMessage
 {
     return EmailMessage::new()
@@ -446,6 +469,53 @@ function smtpTransportFor(
         ),
     );
 }
+
+it('lets Runwire peers progress while SMTP waits for a response', function (): void {
+    $server = FakeSmtpServerProcess::start([
+        'greeting_delay_ms' => 120,
+        'expect' => [
+            ['equals' => 'EHLO localhost', 'responses' => ['250 fake-smtp.local']],
+            ['equals' => 'MAIL FROM:<sender@example.com>', 'responses' => ['250 Sender OK']],
+            ['equals' => 'RCPT TO:<alice@example.com>', 'responses' => ['250 Recipient OK']],
+            ['equals' => 'DATA', 'responses' => ['354 End data']],
+            ['type' => 'data', 'responses' => ['250 Queued']],
+            ['equals' => 'QUIT', 'responses' => ['221 Bye']],
+        ],
+    ]);
+    $runtime = smtpRunwireContext();
+    $events = [];
+
+    try {
+        $result = (new CoroutineRuntime())->run(
+            static function (CoroutineScope $scope) use ($runtime, $server, &$events): \Infocyph\TalkingBytes\Core\Result\CommunicationResult {
+                $scope->spawn(static function () use ($scope, &$events): void {
+                    $scope->sleep(0.02);
+                    $events[] = 'peer';
+                });
+
+                $emailer = (new EmailSenderFactory())
+                    ->withRunwire($runtime, scope: $scope)
+                    ->usingSmtp(new SmtpConfig(
+                        host: '127.0.0.1',
+                        port: $server->port,
+                        security: SmtpSecurity::None,
+                        timeoutSeconds: 2,
+                        localDomain: 'localhost',
+                    ));
+
+                $result = $emailer->send(smtpMessage());
+                $events[] = 'smtp';
+
+                return $result;
+            },
+        );
+
+        expect($result->successful)->toBeTrue()
+            ->and($events)->toBe(['peer', 'smtp']);
+    } finally {
+        $server->stop();
+    }
+});
 
 it('fails when STARTTLS is required but not advertised', function (): void {
     $server = FakeSmtpServerProcess::start([
