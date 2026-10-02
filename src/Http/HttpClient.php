@@ -19,6 +19,7 @@ use Infocyph\TalkingBytes\Http\Body\MultipartBody;
 use Infocyph\TalkingBytes\Http\Contract\HttpMiddleware;
 use Infocyph\TalkingBytes\Http\Contract\HttpTransport;
 use Infocyph\TalkingBytes\Http\Cookie\CookieJar;
+use Infocyph\TalkingBytes\Http\Middleware\CancellationMiddleware;
 use Infocyph\TalkingBytes\Http\Middleware\CircuitBreakerMiddleware;
 use Infocyph\TalkingBytes\Http\Middleware\IdempotencyMiddleware;
 use Infocyph\TalkingBytes\Http\Middleware\LoggingMiddleware;
@@ -309,6 +310,11 @@ final readonly class HttpClient
     public function withBearerToken(#[\SensitiveParameter] string $token): self
     {
         return $this->withAuthenticator(new BearerTokenAuth($token));
+    }
+
+    public function withCancellation(CancellationSignal $cancellation): self
+    {
+        return $this->withMiddleware(new CancellationMiddleware($cancellation));
     }
 
     public function withCircuitBreaker(CircuitBreaker $circuitBreaker): self
