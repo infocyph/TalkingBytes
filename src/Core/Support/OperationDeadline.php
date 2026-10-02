@@ -28,21 +28,25 @@ final readonly class OperationDeadline
         return new self($clock, $deadlineAt);
     }
 
+    /** @phpstan-impure */
     public function expired(): bool
     {
         return $this->remainingSeconds() <= 0.0;
     }
 
+    /** @phpstan-impure */
     public function remainingMicroseconds(): int
     {
         return $this->remainingUnits(1_000_000);
     }
 
+    /** @phpstan-impure */
     public function remainingMilliseconds(): int
     {
         return $this->remainingUnits(1_000);
     }
 
+    /** @phpstan-impure */
     public function remainingSeconds(): float
     {
         return max(0.0, $this->deadlineAt - $this->clock->monotonic());
