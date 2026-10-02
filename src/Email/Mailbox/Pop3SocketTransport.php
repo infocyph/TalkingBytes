@@ -246,7 +246,7 @@ final class Pop3SocketTransport implements Pop3Transport
         }
     }
 
-/**
+    /**
      * @param resource $connection
      */
     private function applyReadDeadline(mixed $connection, OperationDeadline $deadline): void
@@ -274,7 +274,7 @@ final class Pop3SocketTransport implements Pop3Transport
         }
     }
 
-        private function closeConnection(): void
+    private function closeConnection(): void
     {
         if (is_resource($this->connection)) {
             fclose($this->connection);
