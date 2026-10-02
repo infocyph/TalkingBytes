@@ -79,13 +79,13 @@ final readonly class CompositeEmailTransport implements EmailTransport
         );
     }
 
-/** @phpstan-impure */
+    /** @phpstan-impure */
     private function cancellationRequested(): bool
     {
         return $this->cancellation !== null && $this->cancellation->isRequested();
     }
 
-/** @param list<class-string<EmailTransport>> $attemptedTransports */
+    /** @param list<class-string<EmailTransport>> $attemptedTransports */
     private function cancelled(array $attemptedTransports): CommunicationResult
     {
         return CommunicationResult::failure(
@@ -99,7 +99,7 @@ final readonly class CompositeEmailTransport implements EmailTransport
         );
     }
 
-/** @param list<class-string<EmailTransport>> $attemptedTransports */
+    /** @param list<class-string<EmailTransport>> $attemptedTransports */
     private function deadlineExceeded(array $attemptedTransports): CommunicationResult
     {
         return CommunicationResult::failure(
@@ -113,13 +113,13 @@ final readonly class CompositeEmailTransport implements EmailTransport
         );
     }
 
-private function isTerminalExecutionFailure(CommunicationResult $result): bool
+    private function isTerminalExecutionFailure(CommunicationResult $result): bool
     {
         return ($result->metadata['cancelled'] ?? false) === true
             || ($result->metadata['deadline_exceeded'] ?? false) === true;
     }
 
-/**
+    /**
      * @param list<class-string<EmailTransport>> $attemptedTransports
      */
     private function preflightFailure(array $attemptedTransports): ?CommunicationResult
@@ -135,7 +135,7 @@ private function isTerminalExecutionFailure(CommunicationResult $result): bool
         return null;
     }
 
-/**
+    /**
      * @param list<class-string<EmailTransport>> $attemptedTransports
      */
     private function terminalFailure(
