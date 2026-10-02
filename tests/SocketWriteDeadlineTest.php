@@ -22,11 +22,20 @@ it('bounds blocking SMTP and mailbox writes by their operation deadline', functi
         }
 
         $chunk = str_repeat('x', 65_536);
-        for ($attempt = 0; $attempt < 1_024; $attempt++) {
-            $written = @fwrite($pair[0], $chunk);
-            if ($written === false || $written === 0) {
-                break;
+        set_error_handler(
+            static fn(): bool => true,
+            E_NOTICE | E_WARNING,
+        );
+
+        try {
+            for ($attempt = 0; $attempt < 1_024; $attempt++) {
+                $written = fwrite($pair[0], $chunk);
+                if ($written === false || $written === 0) {
+                    break;
+                }
             }
+        } finally {
+            restore_error_handler();
         }
 
         if (!stream_set_blocking($pair[0], true)) {
