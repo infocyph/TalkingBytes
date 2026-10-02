@@ -2,12 +2,17 @@
 
 declare(strict_types=1);
 
+use Infocyph\Runwire\RequestContext;
+use Infocyph\Runwire\Runtime\Enum\RuntimeDriver;
+use Infocyph\Runwire\RuntimeCapabilities;
+use Infocyph\Runwire\RuntimeContext;
 use Infocyph\TalkingBytes\Email\Emailer;
 use Infocyph\TalkingBytes\Grpc\GrpcClient;
 use Infocyph\TalkingBytes\Grpc\GrpcStatus;
 use Infocyph\TalkingBytes\Grpc\Sender\GrpcRequest;
 use Infocyph\TalkingBytes\Grpc\Sender\GrpcResponse;
 use Infocyph\TalkingBytes\Http\HttpClient;
+use Infocyph\TalkingBytes\Http\HttpClientFactory;
 use Infocyph\TalkingBytes\Http\Testing\FakeHttpTransport;
 use Infocyph\TalkingBytes\Webhook\Replay\InMemoryWebhookReplayStore;
 
@@ -52,5 +57,44 @@ it('starts mutable test and replay state clean on every new graph', function ():
             ->and($replay->claim('soak', 'delivery', 60))->toBeTrue();
 
         unset($client, $transport, $replay);
+    }
+});
+
+
+it('does not retain completed Runwire request-bound graphs globally', function (): void {
+    $runtime = RuntimeContext::fromCapabilities(
+        new RuntimeCapabilities(
+            driver: RuntimeDriver::NATIVE,
+            persistentProcess: true,
+            persistentApplication: true,
+            ownsEventLoop: false,
+            runwireLoopAvailable: false,
+            supportsAsyncIo: false,
+            supportsRunwireCoroutines: false,
+        ),
+        mode: 'native',
+        concurrent: false,
+    );
+    $references = [];
+
+    for ($iteration = 0; $iteration < 100; $iteration++) {
+        $request = RequestContext::create($runtime);
+        $factory = (new HttpClientFactory())->withRunwire($runtime, $request);
+        $client = $factory->fromArray([], new FakeHttpTransport());
+
+        if ($iteration % 10 === 0) {
+            $references[] = WeakReference::create($request);
+            $references[] = WeakReference::create($factory);
+            $references[] = WeakReference::create($client);
+        }
+
+        $request->complete();
+        unset($request, $factory, $client);
+    }
+
+    gc_collect_cycles();
+
+    foreach ($references as $reference) {
+        expect($reference->get())->toBeNull();
     }
 });
