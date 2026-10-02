@@ -65,19 +65,26 @@ final readonly class SmtpIoRuntime
                 $this->applyBlockingTimeout($connection, $effectiveDeadline);
             }
 
-            $written = fwrite($connection, substr($data, $bytesWritten));
-            $this->assertExecutionAllowed($deadline);
-            if ($written === false) {
-                throw new RuntimeException('Failed to write to SMTP server socket.');
+            set_error_handler(
+                static fn(): bool => true,
+                E_NOTICE | E_WARNING,
+            );
+
+            try {
+                $written = fwrite($connection, substr($data, $bytesWritten));
+            } finally {
+                restore_error_handler();
             }
-            if ($written === 0) {
-                if ($this->streamWaiter !== null) {
+
+            if ($written === false || $written === 0) {
+                if ($written === 0 && $this->streamWaiter !== null) {
                     continue;
                 }
 
-                throw new RuntimeException('Failed to write to SMTP server socket.');
+                throw $this->writeFailure($connection, $effectiveDeadline, $deadline);
             }
 
+            $this->assertExecutionAllowed($deadline);
             $bytesWritten += $written;
         }
     }
@@ -157,5 +164,28 @@ final readonly class SmtpIoRuntime
         }
 
         throw new RuntimeException('SMTP response line exceeds 1023 bytes.');
+    }
+
+    /**
+     * @param resource $connection
+     */
+    private function writeFailure(
+        mixed $connection,
+        OperationDeadline $effectiveDeadline,
+        OperationDeadline $commandDeadline,
+    ): RuntimeException {
+        /** @var array<string, mixed> $metadata */
+        $metadata = stream_get_meta_data($connection);
+        if (($metadata['timed_out'] ?? false) === true) {
+            if ($this->operationDeadline !== null && $effectiveDeadline === $this->operationDeadline) {
+                return new RuntimeException('SMTP operation deadline exceeded.');
+            }
+
+            return new RuntimeException('SMTP command deadline exceeded.');
+        }
+
+        $this->assertExecutionAllowed($commandDeadline);
+
+        return new RuntimeException('Failed to write to SMTP server socket.');
     }
 }
