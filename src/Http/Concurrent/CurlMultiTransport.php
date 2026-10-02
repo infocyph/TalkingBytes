@@ -347,7 +347,9 @@ final readonly class CurlMultiTransport
             'curl-multi',
             $body,
             curl_errno($context['handle']),
-            $context['bodyCollector']->error() ?? curl_error($context['handle']),
+            $context['headerCollector']->error()
+                ?? $context['bodyCollector']->error()
+                ?? curl_error($context['handle']),
             $info,
             $context['headerCollector']->headers(),
         );
@@ -474,7 +476,10 @@ final readonly class CurlMultiTransport
             return null;
         }
 
-        $collector = new ResponseHeaderCollector();
+        $collector = new ResponseHeaderCollector(
+            $prepared->options->maxResponseHeaderBytes,
+            $prepared->options->maxResponseHeaderCount,
+        );
         $bodyCollector = null;
 
         try {
