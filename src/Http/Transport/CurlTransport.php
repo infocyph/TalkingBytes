@@ -258,6 +258,21 @@ final readonly class CurlTransport implements HttpTransport
         return $jar instanceof CookieJar ? $jar : null;
     }
 
+    private function deadlineFailure(HttpRequest $request): ?CommunicationResult
+    {
+        if ($request->operationDeadline()?->expired() !== true) {
+            return null;
+        }
+
+        return CommunicationResult::failure(
+            'HTTP operation deadline exceeded.',
+            metadata: [
+                'deadline_exceeded' => true,
+                'transport' => 'curl',
+            ],
+        );
+    }
+
     private function dispatchResultEvents(HttpRequest $request, CommunicationResult $result, float $startedAt): void
     {
         $payload = [
@@ -293,12 +308,22 @@ final readonly class CurlTransport implements HttpTransport
 
     private function executeSingle(HttpRequest $resolvedRequest, string $url): CommunicationResult
     {
+        $deadlineFailure = $this->deadlineFailure($resolvedRequest);
+        if ($deadlineFailure !== null) {
+            return $deadlineFailure;
+        }
 
         try {
             $pinnedResolution = RequestSecurityGuard::pinnedResolution($resolvedRequest, $url);
         } catch (InvalidArgumentException $exception) {
             return CommunicationResult::failure($exception->getMessage(), metadata: ['transport' => 'curl']);
         }
+
+        $deadlineFailure = $this->deadlineFailure($resolvedRequest);
+        if ($deadlineFailure !== null) {
+            return $deadlineFailure;
+        }
+
         $handle = curl_init();
 
         if ($handle === false) {
@@ -340,6 +365,13 @@ final readonly class CurlTransport implements HttpTransport
                 'cURL request failed: ' . $executionError->getMessage(),
                 metadata: ['transport' => 'curl', 'exception' => $executionError::class],
             );
+        }
+
+        $deadlineFailure = $this->deadlineFailure($resolvedRequest);
+        if ($deadlineFailure !== null) {
+            $bodyCollector->abort();
+
+            return $deadlineFailure;
         }
 
         $result = $this->buildExecutionResult(
