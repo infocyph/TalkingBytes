@@ -51,6 +51,11 @@ TalkingBytes objects are safe to reuse only according to the state they own.
 No global registry is introduced for cookies, resilience state, mailbox
 connections, native clients, cancellation, or protocol events.
 
+Runwire-bound factories retain the exact borrowed runtime/request/scope identity.
+Rebinding the same context is idempotent; rebinding a bound graph to a different
+context is rejected. Hosts should start each request/task from an unbound
+worker-scoped factory or pass an already-bound graph through intermediaries.
+
 Cancellation and host control
 -----------------------------
 
@@ -85,6 +90,7 @@ Module boundaries
 - ``Grpc``: typed pipeline plus callback/native gRPC invocation.
 - ``Webhook``: send/verify/receive workflows on top of HTTP.
 - ``Email``: outbound transports + inbound parser + mailbox operations.
+- ``Integration/Runwire``: optional host-context adapter used only by explicit composition entry points; mandatory protocol/core paths do not depend on Runwire.
 
 Testing strategy
 ----------------
