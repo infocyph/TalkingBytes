@@ -76,11 +76,11 @@ final readonly class CurlOptions
         public ?string $downloadPath = null,
         public ?string $streamDownloadPath = null,
         public ?int $maxResponseBytes = null,
-        public ?int $maxResponseHeaderBytes = null,
-        public ?int $maxResponseHeaderCount = null,
         public ?int $maxDownloadBytes = null,
         public ?int $maxUploadBytes = null,
         public ?int $httpVersion = null,
+        public ?int $maxResponseHeaderBytes = null,
+        public ?int $maxResponseHeaderCount = null,
         private array $explicit = [],
     ) {
         if ($this->timeoutSeconds < 1) {
