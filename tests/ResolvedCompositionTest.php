@@ -3,10 +3,13 @@
 declare(strict_types=1);
 
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
+use Infocyph\TalkingBytes\Core\Support\Clock;
+use Infocyph\TalkingBytes\Core\Support\Sleeper;
 use Infocyph\TalkingBytes\Email\Config\EmailLimits;
 use Infocyph\TalkingBytes\Email\EmailMessage;
 use Infocyph\TalkingBytes\Email\EmailSenderFactory;
 use Infocyph\TalkingBytes\Email\Transport\DkimSigningTransport;
+use Infocyph\TalkingBytes\Email\Transport\EmailTransport;
 use Infocyph\TalkingBytes\Grpc\GrpcClient;
 use Infocyph\TalkingBytes\Grpc\GrpcClientFactory;
 use Infocyph\TalkingBytes\Grpc\GrpcStatus;
@@ -18,6 +21,7 @@ use Infocyph\TalkingBytes\Http\HttpRequest;
 use Infocyph\TalkingBytes\Http\HttpResponse;
 use Infocyph\TalkingBytes\Http\Testing\FakeHttpTransport;
 use Infocyph\TalkingBytes\Http\Testing\SequenceHttpTransport;
+use Infocyph\TalkingBytes\Retry\FixedDelayRetryPolicy;
 use Infocyph\TalkingBytes\Webhook\Replay\InMemoryWebhookReplayStore;
 use Infocyph\TalkingBytes\Webhook\Support\WebhookHeaders;
 use Infocyph\TalkingBytes\Webhook\Webhook;
@@ -306,4 +310,148 @@ it('builds webhook signing retry and replay-aware receiver policies from resolve
         ->and($requests)->toHaveCount(2)
         ->and($requests[0]->headers->get(WebhookHeaders::SIGNATURE))->not->toBeNull()
         ->and($receiver)->toBeInstanceOf(\Infocyph\TalkingBytes\Webhook\WebhookReceiver::class);
+});
+
+
+it('propagates the injected clock to resolved http resilience owners', function (): void {
+    $now = 100.0;
+    $clock = new Clock(
+        static fn(): float => $now,
+        static function () use (&$now): float {
+            return $now;
+        },
+    );
+    $transport = new FakeHttpTransport();
+    $client = (new Infocyph\TalkingBytes\Http\HttpClientFactory(clock: $clock))->fromArray([
+        'rate_limit' => [
+            'enabled' => true,
+            'max_requests' => 1,
+            'per_seconds' => 1,
+        ],
+    ], $transport);
+
+    expect($client->get('https://example.test/one')->successful)->toBeTrue();
+    $now += 1.0;
+    expect($client->get('https://example.test/two')->successful)->toBeTrue();
+
+    $sequence = new SequenceHttpTransport([
+        CommunicationResult::failure('temporary', 503, new HttpResponse(503)),
+        CommunicationResult::success(200, new HttpResponse(200)),
+    ]);
+    $breaker = (new Infocyph\TalkingBytes\Http\HttpClientFactory(clock: $clock))->fromArray([
+        'circuit_breaker' => [
+            'enabled' => true,
+            'failure_threshold' => 1,
+            'cool_down_seconds' => 2,
+        ],
+    ], $sequence);
+
+    expect($breaker->get('https://example.test/fail')->successful)->toBeFalse();
+    expect(fn() => $breaker->get('https://example.test/blocked'))
+        ->toThrow(RuntimeException::class, 'Circuit breaker is open');
+
+    $now += 2.0;
+    expect($breaker->get('https://example.test/recovered')->successful)->toBeTrue();
+});
+
+it('propagates injected sleepers through resolved http email and grpc retries', function (): void {
+    $slept = [];
+    $sleeper = new Sleeper(static function (int $microseconds) use (&$slept): void {
+        $slept[] = $microseconds;
+    });
+
+    $http = HttpClient::fromResolvedConfig(
+        [
+            'retry' => [
+                'enabled' => true,
+                'attempts' => 2,
+                'base_delay_ms' => 100,
+                'max_retry_after_seconds' => 1,
+            ],
+        ],
+        transport: new SequenceHttpTransport([
+            CommunicationResult::failure('temporary', 503, new HttpResponse(503)),
+            CommunicationResult::success(200, new HttpResponse(200)),
+        ]),
+        sleeper: $sleeper,
+    );
+    expect($http->get('https://example.test/retry')->successful)->toBeTrue();
+
+    $emailAttempts = 0;
+    $emailTransport = new class($emailAttempts) implements EmailTransport {
+        public function __construct(private int &$attempts) {}
+
+        public function send(EmailMessage $message): CommunicationResult
+        {
+            unset($message);
+            $this->attempts++;
+
+            return $this->attempts === 1
+                ? CommunicationResult::failure('temporary')
+                : CommunicationResult::success();
+        }
+    };
+    $emailer = (new EmailSenderFactory(sleeper: $sleeper))
+        ->usingNull()
+        ->withTransport($emailTransport)
+        ->withRetry(new FixedDelayRetryPolicy(2, 125));
+
+    $message = EmailMessage::new()
+        ->from('sender@example.test')
+        ->to('recipient@example.test')
+        ->subject('Retry')
+        ->text('ok');
+    expect($emailer->send($message)->successful)->toBeTrue();
+
+    $grpcAttempts = 0;
+    $grpc = (new GrpcClientFactory(sleeper: $sleeper))->using(
+        static function (GrpcRequest $request) use (&$grpcAttempts): GrpcResponse {
+            unset($request);
+            $grpcAttempts++;
+
+            return new GrpcResponse(
+                $grpcAttempts === 1 ? GrpcStatus::Unavailable : GrpcStatus::Ok,
+            );
+        },
+        [
+            'retry' => [
+                'enabled' => true,
+                'attempts' => 2,
+                'base_delay_ms' => 150,
+                'jitter_ratio' => 0,
+            ],
+        ],
+    );
+    expect($grpc->send(
+        (new GrpcRequest('/example.Service/Retry', []))->withRetrySafety(),
+    )->successful)->toBeTrue();
+
+    expect($slept)->toBe([100_000, 125_000, 150_000]);
+});
+
+it('propagates the injected clock to resolved email rate limiting', function (): void {
+    $now = 200.0;
+    $clock = new Clock(
+        static fn(): float => $now,
+        static function () use (&$now): float {
+            return $now;
+        },
+    );
+    $emailer = (new EmailSenderFactory(clock: $clock))->fromResolvedConfig([
+        'transport' => ['driver' => 'null'],
+        'rate_limit' => [
+            'enabled' => true,
+            'max_requests' => 1,
+            'per_seconds' => 1,
+        ],
+    ]);
+    $message = EmailMessage::new()
+        ->from('sender@example.test')
+        ->to('recipient@example.test')
+        ->subject('Clock')
+        ->text('ok');
+
+    expect($emailer->send($message)->successful)->toBeTrue();
+    $now += 1.0;
+    expect($emailer->send($message)->successful)->toBeTrue();
 });
