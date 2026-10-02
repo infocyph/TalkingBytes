@@ -125,13 +125,13 @@ final class CookieJar
                 continue;
             }
 
-            if ($cookie->isExpired()) {
-                unset($this->cookies[$cookie->key()]);
-
+            if ($this->isInsecureOverlay($cookie, $context)) {
                 continue;
             }
 
-            if ($this->isInsecureOverlay($cookie, $context)) {
+            if ($cookie->isExpired()) {
+                unset($this->cookies[$cookie->key()]);
+
                 continue;
             }
 
