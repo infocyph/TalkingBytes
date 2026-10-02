@@ -336,8 +336,8 @@ it('propagates the injected clock to resolved http resilience owners', function 
     expect($client->get('https://example.test/two')->successful)->toBeTrue();
 
     $sequence = new SequenceHttpTransport([
-        CommunicationResult::failure('temporary', 503, new HttpResponse(503)),
-        CommunicationResult::success(200, new HttpResponse(200)),
+        CommunicationResult::failure('temporary', 503, new HttpResponse(503, '')),
+        CommunicationResult::success(200, new HttpResponse(200, '')),
     ]);
     $breaker = (new Infocyph\TalkingBytes\Http\HttpClientFactory(clock: $clock))->fromArray([
         'circuit_breaker' => [
@@ -371,8 +371,8 @@ it('propagates injected sleepers through resolved http email and grpc retries', 
             ],
         ],
         transport: new SequenceHttpTransport([
-            CommunicationResult::failure('temporary', 503, new HttpResponse(503)),
-            CommunicationResult::success(200, new HttpResponse(200)),
+            CommunicationResult::failure('temporary', 503, new HttpResponse(503, '')),
+            CommunicationResult::success(200, new HttpResponse(200, '')),
         ]),
         sleeper: $sleeper,
     );
