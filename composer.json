@@ -25,13 +25,14 @@
         }
     ],
     "require": {
-        "php": ">=8.4",
+        "php": "^8.4",
         "ext-curl": "*",
         "ext-fileinfo": "*",
         "ext-openssl": "*"
     },
     "require-dev": {
-        "infocyph/phpforge": "dev-main@dev"
+        "infocyph/phpforge": "dev-main@dev",
+        "infocyph/runwire": "^2.1"
     },
     "suggest": {
         "ext-grpc": "Required for native gRPC transport.",
