@@ -22,7 +22,7 @@ final readonly class CompositeEmailTransport implements EmailTransport
     public function send(EmailMessage $message): CommunicationResult
     {
         $attemptedTransports = [];
-        if ($this->cancellation?->isRequested() === true) {
+        if ($this->cancellationRequested()) {
             return $this->cancelled($attemptedTransports);
         }
 
@@ -34,7 +34,7 @@ final readonly class CompositeEmailTransport implements EmailTransport
         }
 
         foreach ($this->fallbackTransports as $transport) {
-            if ($this->cancellation?->isRequested() === true) {
+            if ($this->cancellationRequested()) {
                 return $this->cancelled($attemptedTransports);
             }
 
@@ -67,6 +67,12 @@ final readonly class CompositeEmailTransport implements EmailTransport
             response: $primaryResult->response,
             metadata: $metadata,
         );
+    }
+
+    /** @phpstan-impure */
+    private function cancellationRequested(): bool
+    {
+        return $this->cancellation !== null && $this->cancellation->isRequested();
     }
 
     /** @param list<class-string<EmailTransport>> $attemptedTransports */
