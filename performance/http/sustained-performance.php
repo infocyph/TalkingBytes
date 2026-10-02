@@ -11,30 +11,83 @@ use Infocyph\TalkingBytes\Http\Concurrent\RequestPool;
 use Infocyph\TalkingBytes\Http\HttpClient;
 use Infocyph\TalkingBytes\Http\HttpRequest;
 
-final class SustainedHttpPerformance
+/**
+ * @phpstan-type WindowResult array{
+ *     requests:int,
+ *     errors:int,
+ *     timeouts:int,
+ *     batch_latency_ms:list<float>,
+ *     max_resource_count:int
+ * }
+ * @phpstan-type TrialResult array{
+ *     requests:int,
+ *     errors:int,
+ *     timeouts:int,
+ *     batch_latency_ms:list<float>,
+ *     max_resource_count:int,
+ *     warmup_requests:int,
+ *     warmup_errors:int,
+ *     warmup_timeouts:int,
+ *     elapsed_seconds:float,
+ *     rpm:float,
+ *     cpu_percent:float,
+ *     memory_bytes:int,
+ *     resource_delta:int
+ * }
+ * @phpstan-type LevelResult array{
+ *     concurrency:int,
+ *     batch_size:int,
+ *     median_rpm:float,
+ *     p50_batch_latency_ms:float,
+ *     p95_batch_latency_ms:float,
+ *     p99_batch_latency_ms:float,
+ *     requests:int,
+ *     errors:int,
+ *     timeouts:int,
+ *     warmup_requests:int,
+ *     warmup_errors:int,
+ *     warmup_timeouts:int,
+ *     max_cpu_percent:float,
+ *     max_memory_bytes:int,
+ *     max_resource_count:int,
+ *     max_resource_delta:int,
+ *     trial_results:list<TrialResult>
+ * }
+ * @phpstan-type PerformanceReport array{
+ *     revision:string,
+ *     mode:string,
+ *     trials:int,
+ *     warmup_seconds:float,
+ *     steady_state_seconds:float,
+ *     server_delay_us:int,
+ *     levels:list<LevelResult>
+ * }
+ */
+final readonly class SustainedHttpPerformance
 {
-    private const BATCH_MULTIPLIER = 2;
+    private const int BATCH_MULTIPLIER = 2;
 
     /** @var list<int> */
-    private const CONCURRENCY_LEVELS = [5, 20, 50];
+    private const array CONCURRENCY_LEVELS = [5, 20, 50];
 
-    private const DELAY_MICROSECONDS = 10_000;
+    private const int DELAY_MICROSECONDS = 10_000;
 
-    private const STEADY_STATE_SECONDS = 5.0;
+    private const float STEADY_STATE_SECONDS = 5.0;
 
-    private const TRIALS = 3;
+    private const int TRIALS = 3;
 
-    private const WARMUP_SECONDS = 1.0;
+    private const float WARMUP_SECONDS = 1.0;
 
     public function __construct(
-        private readonly string $serverScript,
-        private readonly string $mode,
-        private readonly string $revision,
+        private string $serverScript,
+        private string $mode,
+        private string $revision,
     ) {}
 
-    /** @return array<string, mixed> */
+    /** @return PerformanceReport */
     public function run(): array
     {
+        /** @var list<LevelResult> $levels */
         $levels = [];
         foreach (self::CONCURRENCY_LEVELS as $concurrency) {
             $levels[] = $this->runConcurrency($concurrency);
@@ -51,26 +104,36 @@ final class SustainedHttpPerformance
         ];
     }
 
-    /** @param array<string, int> $usage */
+    /**
+     * @param array<string, int> $usage
+     */
     private static function cpuSeconds(array $usage): float
     {
         return (($usage['ru_utime.tv_sec'] ?? 0) + ($usage['ru_stime.tv_sec'] ?? 0))
             + (($usage['ru_utime.tv_usec'] ?? 0) + ($usage['ru_stime.tv_usec'] ?? 0)) / 1_000_000;
     }
 
-    /** @return array<string, mixed> */
+    /** @return TrialResult */
     private function executePoolTrial(RequestPool $pool, int $port, int $concurrency): array
     {
         $warmup = $this->executeWindow($pool, $port, $concurrency, self::WARMUP_SECONDS, false);
 
         $resourcesBefore = count(get_resources());
         $usageBefore = getrusage();
+        if ($usageBefore === false) {
+            throw new RuntimeException('Unable to read process resource usage before sustained HTTP trial.');
+        }
+
         $startedAt = hrtime(true);
         $steady = $this->executeWindow($pool, $port, $concurrency, self::STEADY_STATE_SECONDS, true);
         $elapsedSeconds = (hrtime(true) - $startedAt) / 1_000_000_000;
-        $usageAfter = getrusage();
-        $resourcesAfter = count(get_resources());
 
+        $usageAfter = getrusage();
+        if ($usageAfter === false) {
+            throw new RuntimeException('Unable to read process resource usage after sustained HTTP trial.');
+        }
+
+        $resourcesAfter = count(get_resources());
         $cpuSeconds = self::cpuSeconds($usageAfter) - self::cpuSeconds($usageBefore);
         $successfulRequests = max(0, $steady['requests'] - $steady['errors']);
 
@@ -91,7 +154,7 @@ final class SustainedHttpPerformance
         ];
     }
 
-    /** @return array<string, mixed> */
+    /** @return TrialResult */
     private function executeTrial(int $port, int $concurrency): array
     {
         if ($this->mode === 'unbound') {
@@ -119,26 +182,22 @@ final class SustainedHttpPerformance
             concurrent: true,
         );
 
-        return (new CoroutineRuntime())->run(
-            function (CoroutineScope $scope) use ($runtime, $port, $concurrency): array {
-                return $this->executePoolTrial(
-                    HttpClient::multi($concurrency)->withRunwire($runtime, scope: $scope),
-                    $port,
-                    $concurrency,
-                );
-            },
+        $result = new CoroutineRuntime()->run(
+            fn(CoroutineScope $scope): array => $this->executePoolTrial(
+                HttpClient::multi($concurrency)->withRunwire($runtime, scope: $scope),
+                $port,
+                $concurrency,
+            ),
         );
+        if (!is_array($result)) {
+            throw new RuntimeException('Runwire sustained HTTP trial returned an invalid result.');
+        }
+
+        /** @var TrialResult $result */
+        return $result;
     }
 
-    /**
-     * @return array{
-     *     requests:int,
-     *     errors:int,
-     *     timeouts:int,
-     *     batch_latency_ms:list<float>,
-     *     max_resource_count:int
-     * }
-     */
+    /** @return WindowResult */
     private function executeWindow(
         RequestPool $pool,
         int $port,
@@ -146,6 +205,7 @@ final class SustainedHttpPerformance
         float $durationSeconds,
         bool $recordLatency,
     ): array {
+        /** @var list<float> $latencies */
         $latencies = [];
         $errors = 0;
         $timeouts = 0;
@@ -196,7 +256,9 @@ final class SustainedHttpPerformance
         ];
     }
 
-    /** @param list<float|int> $values */
+    /**
+     * @param list<float|int> $values
+     */
     private static function percentile(array $values, int $percentile): float
     {
         if ($values === []) {
@@ -209,10 +271,12 @@ final class SustainedHttpPerformance
         return (float) $values[max(0, min(count($values) - 1, $index))];
     }
 
-    /** @return array<string, mixed> */
+    /** @return LevelResult */
     private function runConcurrency(int $concurrency): array
     {
+        /** @var list<TrialResult> $trials */
         $trials = [];
+        /** @var list<float> $batchLatencies */
         $batchLatencies = [];
 
         for ($trial = 0; $trial < self::TRIALS; $trial++) {
@@ -221,8 +285,12 @@ final class SustainedHttpPerformance
             array_push($batchLatencies, ...$result['batch_latency_ms']);
         }
 
+        /** @var list<float> $rpms */
         $rpms = array_column($trials, 'rpm');
-        sort($rpms, SORT_NUMERIC);
+        $cpuPercents = array_column($trials, 'cpu_percent');
+        $memoryValues = array_column($trials, 'memory_bytes');
+        $resourceCounts = array_column($trials, 'max_resource_count');
+        $resourceDeltas = array_column($trials, 'resource_delta');
 
         return [
             'concurrency' => $concurrency,
@@ -231,21 +299,21 @@ final class SustainedHttpPerformance
             'p50_batch_latency_ms' => self::percentile($batchLatencies, 50),
             'p95_batch_latency_ms' => self::percentile($batchLatencies, 95),
             'p99_batch_latency_ms' => self::percentile($batchLatencies, 99),
-            'requests' => array_sum(array_column($trials, 'requests')),
-            'errors' => array_sum(array_column($trials, 'errors')),
-            'timeouts' => array_sum(array_column($trials, 'timeouts')),
-            'warmup_requests' => array_sum(array_column($trials, 'warmup_requests')),
-            'warmup_errors' => array_sum(array_column($trials, 'warmup_errors')),
-            'warmup_timeouts' => array_sum(array_column($trials, 'warmup_timeouts')),
-            'max_cpu_percent' => max(array_column($trials, 'cpu_percent')),
-            'max_memory_bytes' => max(array_column($trials, 'memory_bytes')),
-            'max_resource_count' => max(array_column($trials, 'max_resource_count')),
-            'max_resource_delta' => max(array_column($trials, 'resource_delta')),
+            'requests' => (int) array_sum(array_column($trials, 'requests')),
+            'errors' => (int) array_sum(array_column($trials, 'errors')),
+            'timeouts' => (int) array_sum(array_column($trials, 'timeouts')),
+            'warmup_requests' => (int) array_sum(array_column($trials, 'warmup_requests')),
+            'warmup_errors' => (int) array_sum(array_column($trials, 'warmup_errors')),
+            'warmup_timeouts' => (int) array_sum(array_column($trials, 'warmup_timeouts')),
+            'max_cpu_percent' => (float) max($cpuPercents),
+            'max_memory_bytes' => (int) max($memoryValues),
+            'max_resource_count' => (int) max($resourceCounts),
+            'max_resource_delta' => (int) max($resourceDeltas),
             'trial_results' => $trials,
         ];
     }
 
-    /** @return array<string, mixed> */
+    /** @return TrialResult */
     private function runTrial(int $trial, int $concurrency): array
     {
         [$process, $pipes, $port, $readyPath] = $this->startServer($trial, $concurrency);
@@ -257,7 +325,9 @@ final class SustainedHttpPerformance
         }
     }
 
-    /** @return array{0:resource,1:array<int,resource>,2:int,3:string} */
+    /**
+     * @return array{0:resource,1:array<int, resource>,2:int,3:string}
+     */
     private function startServer(int $trial, int $concurrency): array
     {
         $readyPath = sprintf(
@@ -290,8 +360,10 @@ final class SustainedHttpPerformance
             throw new RuntimeException('Unable to start sustained HTTP performance server.');
         }
 
-        fclose($pipes[0]);
-        unset($pipes[0]);
+        if (is_resource($pipes[0] ?? null)) {
+            fclose($pipes[0]);
+            unset($pipes[0]);
+        }
 
         $deadline = microtime(true) + 3.0;
         while (!is_file($readyPath) && microtime(true) < $deadline) {
@@ -301,33 +373,35 @@ final class SustainedHttpPerformance
         $ready = is_file($readyPath)
             ? json_decode((string) file_get_contents($readyPath), true)
             : null;
-        $port = is_array($ready) ? ($ready['port'] ?? null) : null;
-        if (!is_int($port) || $port < 1) {
+        $port = is_array($ready) && is_int($ready['port'] ?? null)
+            ? $ready['port']
+            : 0;
+        if ($port < 1) {
             $this->stopServer($process, $pipes, $readyPath);
 
             throw new RuntimeException('Sustained HTTP performance server did not become ready.');
         }
 
+        /** @var array<int, resource> $pipes */
         return [$process, $pipes, $port, $readyPath];
     }
 
-    /** @param array<int, resource> $pipes */
+    /**
+     * @param resource $process
+     * @param array<int, resource> $pipes
+     */
     private function stopServer(mixed $process, array $pipes, string $readyPath): void
     {
-        if (is_resource($process)) {
-            $status = proc_get_status($process);
-            if (($status['running'] ?? false) === true) {
-                proc_terminate($process);
-            }
-
-            foreach ($pipes as $pipe) {
-                if (is_resource($pipe)) {
-                    fclose($pipe);
-                }
-            }
-
-            proc_close($process);
+        $status = proc_get_status($process);
+        if ($status['running']) {
+            proc_terminate($process);
         }
+
+        foreach ($pipes as $pipe) {
+            fclose($pipe);
+        }
+
+        proc_close($process);
 
         if (is_file($readyPath)) {
             unlink($readyPath);
@@ -349,7 +423,7 @@ if ($autoloadPath === '' || $serverScript === '' || $outputPath === '' || $revis
 
 require $autoloadPath;
 
-$report = (new SustainedHttpPerformance($serverScript, $mode, $revision))->run();
+$report = new SustainedHttpPerformance($serverScript, $mode, $revision)->run();
 file_put_contents(
     $outputPath,
     json_encode($report, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR) . PHP_EOL,
