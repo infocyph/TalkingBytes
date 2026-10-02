@@ -46,7 +46,6 @@ final readonly class RequestPool
             $this->stopOnFailure,
             $this->cancellation,
             $this->operationDeadline,
-            $this->runwireBinding,
         );
     }
 
