@@ -159,7 +159,7 @@ final readonly class GrpcClient
         }
 
         $result = $this->pipeline->send($request);
-        if ($this->operationDeadline?->expired() === true
+        if ($this->operationDeadlineExpired()
             && ($result->metadata['deadline_exceeded'] ?? false) !== true
         ) {
             return $this->deadlineExceeded();
@@ -334,6 +334,12 @@ final readonly class GrpcClient
         );
     }
 
+    /** @phpstan-impure */
+    private function operationDeadlineExpired(): bool
+    {
+        return $this->operationDeadline?->expired() === true;
+    }
+
     /**
      * @param iterable<mixed> $messages
      * @param array<string, mixed> $metadata
@@ -386,7 +392,7 @@ final readonly class GrpcClient
             return $this->cancelled($method, $streamType);
         }
 
-        if ($this->operationDeadline?->expired() === true) {
+        if ($this->operationDeadlineExpired()) {
             return $this->deadlineExceeded($streamType);
         }
 
@@ -440,7 +446,7 @@ final readonly class GrpcClient
             );
         }
 
-        if ($this->operationDeadline?->expired() === true) {
+        if ($this->operationDeadlineExpired()) {
             return $this->deadlineExceeded($streamType);
         }
 
