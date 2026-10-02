@@ -186,7 +186,7 @@ final class RedirectResolver
     /**
      * @param array<string, int|string> $base
      * @param array<string, int|string> $reference
-     * @return array{scheme:string, authority:string, path:string, query?:string, fragment?:string}
+     * @return array{scheme:string, authority?:string, path:string, query?:string, fragment?:string}
      */
     private static function resolveAuthorityReference(array $base, array $reference): array
     {
@@ -219,7 +219,7 @@ final class RedirectResolver
     /**
      * @param array<string, int|string> $base
      * @param array<string, int|string> $reference
-     * @return array{scheme:string, authority:string, path:string, query?:string, fragment?:string}
+     * @return array{scheme:string, authority?:string, path:string, query?:string, fragment?:string}
      */
     private static function resolveRelativeReference(array $base, array $reference): array
     {
