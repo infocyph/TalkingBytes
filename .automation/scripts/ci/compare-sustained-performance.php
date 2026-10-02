@@ -44,8 +44,8 @@ function validateMeasurementShape(array $report): void
     if ((float) ($report['steady_state_seconds'] ?? 0.0) < 5.0) {
         throw new RuntimeException('Sustained performance steady state must be at least five seconds.');
     }
-    if ((int) ($report['trials'] ?? 0) < 2) {
-        throw new RuntimeException('Sustained performance requires at least two trials per concurrency level.');
+    if ((int) ($report['trials'] ?? 0) < 3) {
+        throw new RuntimeException('Sustained performance requires at least three trials per concurrency level.');
     }
 
     $levels = indexLevels($report);
@@ -56,7 +56,7 @@ function validateMeasurementShape(array $report): void
     $minimumElapsed = (float) $report['steady_state_seconds'];
     foreach ($levels as $level) {
         $trials = $level['trial_results'] ?? null;
-        if (!is_array($trials) || count($trials) < 2) {
+        if (!is_array($trials) || count($trials) < 3) {
             throw new RuntimeException('Sustained performance level is missing repeated trial evidence.');
         }
 
