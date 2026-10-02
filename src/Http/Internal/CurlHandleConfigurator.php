@@ -103,6 +103,15 @@ final class CurlHandleConfigurator
         }
     }
 
+    private static function secondsToMilliseconds(int $seconds): int
+    {
+        if ($seconds > intdiv(PHP_INT_MAX, 1000)) {
+            return PHP_INT_MAX;
+        }
+
+        return $seconds * 1000;
+    }
+
     private function applyBodyAndContentType(HttpRequest $request, \CurlHandle $handle): HttpRequest
     {
         if (isset($request->metadata['upload_file_path']) || isset($request->metadata['upload_stream'])) {
@@ -252,15 +261,6 @@ final class CurlHandleConfigurator
         }
 
         return $resource;
-    }
-
-    private static function secondsToMilliseconds(int $seconds): int
-    {
-        if ($seconds > intdiv(PHP_INT_MAX, 1000)) {
-            return PHP_INT_MAX;
-        }
-
-        return $seconds * 1000;
     }
 
     private function setOption(\CurlHandle $handle, int $option, mixed $value, string $error): void
