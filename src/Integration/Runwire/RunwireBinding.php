@@ -109,12 +109,6 @@ final readonly class RunwireBinding
         );
     }
 
-    private function supportsCooperativeScope(): bool
-    {
-        return $this->runtime->supports(RuntimeCapability::RUNWIRE_COROUTINES)
-            && $this->runtime->supports(RuntimeCapability::RUNWIRE_LOOP_AVAILABLE);
-    }
-
     private static function tokenCancelledOutsideDeadline(CancellationToken $token): bool
     {
         if (!$token->isCancelled()) {
@@ -123,4 +117,11 @@ final readonly class RunwireBinding
 
         return $token->reason() !== CancellationReason::DEADLINE_EXCEEDED;
     }
+
+    private function supportsCooperativeScope(): bool
+    {
+        return $this->runtime->supports(RuntimeCapability::RUNWIRE_COROUTINES)
+            && $this->runtime->supports(RuntimeCapability::RUNWIRE_LOOP_AVAILABLE);
+    }
+
 }
