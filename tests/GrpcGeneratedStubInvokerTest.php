@@ -590,3 +590,32 @@ it('documents that generated bidi flow is write-then-read rather than interactiv
     expect($result->error)->toContain('interactive peer requires an inbound read');
     expect($cancelled)->toBeTrue();
 });
+
+
+it('does not invoke a generated unary stub when cancellation is already requested', function (): void {
+    $stub = new class {
+        public int $calls = 0;
+
+        public function Create(mixed $message, array $metadata = [], array $options = []): object
+        {
+            unset($message, $metadata, $options);
+            $this->calls++;
+
+            return new class {
+                public function wait(): array
+                {
+                    return [['ok' => true], ['code' => 0]];
+                }
+            };
+        }
+    };
+
+    $result = GrpcClient::usingGeneratedStub(
+        $stub,
+        cancellation: CancellationSignal::fromCallable(static fn(): bool => true),
+    )->send(new GrpcRequest('Orders/Create', ['id' => 1]));
+
+    expect($result->successful)->toBeFalse()
+        ->and($result->metadata['cancelled'] ?? false)->toBeTrue()
+        ->and($stub->calls)->toBe(0);
+});
