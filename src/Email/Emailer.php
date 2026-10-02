@@ -13,6 +13,7 @@ use Infocyph\TalkingBytes\Core\Support\Clock;
 use Infocyph\TalkingBytes\Core\Support\ObservabilitySanitizer;
 use Infocyph\TalkingBytes\Core\Support\OperationDeadline;
 use Infocyph\TalkingBytes\Core\Support\Sleeper;
+use Infocyph\TalkingBytes\Core\Support\StreamWaiter;
 use Infocyph\TalkingBytes\Email\Config\DkimConfig;
 use Infocyph\TalkingBytes\Email\Config\LogEmailConfig;
 use Infocyph\TalkingBytes\Email\Config\SendmailConfig;
@@ -115,8 +116,22 @@ final readonly class Emailer
         ?EventDispatcher $events = null,
         ?Clock $clock = null,
         ?Sleeper $sleeper = null,
+        ?CancellationSignal $cancellation = null,
+        ?OperationDeadline $operationDeadline = null,
+        ?StreamWaiter $streamWaiter = null,
     ): self {
-        return new self(new SmtpTransport($config, clock: $clock), $events, $clock, $sleeper);
+        return new self(
+            new SmtpTransport(
+                $config,
+                clock: $clock,
+                cancellation: $cancellation,
+                operationDeadline: $operationDeadline,
+                streamWaiter: $streamWaiter,
+            ),
+            $events,
+            $clock,
+            $sleeper,
+        );
     }
 
     public static function usingSpool(
