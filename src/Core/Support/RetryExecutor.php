@@ -19,6 +19,7 @@ final class RetryExecutor
         callable $attempt,
         ?Sleeper $sleeper = null,
         ?CancellationSignal $cancellation = null,
+        ?OperationDeadline $deadline = null,
     ): CommunicationResult {
         $sleeper ??= Sleeper::system();
         $count = 1;
@@ -26,6 +27,9 @@ final class RetryExecutor
         while (true) {
             if ($cancellation?->isRequested() === true) {
                 return self::cancelled($count - 1);
+            }
+            if ($deadline?->expired() === true) {
+                return self::deadlineExceeded($count - 1);
             }
 
             try {
@@ -36,8 +40,15 @@ final class RetryExecutor
                     throw $throwable;
                 }
 
-                if (!self::wait($sleeper, $decision->delayMs, $cancellation)) {
+                $wait = self::boundedWaitMs($decision->delayMs, $deadline);
+                if ($wait === null) {
+                    return self::deadlineExceeded($count);
+                }
+                if (!self::wait($sleeper, $wait['delay_ms'], $cancellation)) {
                     return self::cancelled($count);
+                }
+                if ($wait['deadline_limited'] || $deadline?->expired() === true) {
+                    return self::deadlineExceeded($count);
                 }
                 $count++;
 
@@ -49,11 +60,38 @@ final class RetryExecutor
                 return $result;
             }
 
-            if (!self::wait($sleeper, $decision->delayMs, $cancellation)) {
+            $wait = self::boundedWaitMs($decision->delayMs, $deadline);
+            if ($wait === null) {
+                return self::deadlineExceeded($count);
+            }
+            if (!self::wait($sleeper, $wait['delay_ms'], $cancellation)) {
                 return self::cancelled($count);
+            }
+            if ($wait['deadline_limited'] || $deadline?->expired() === true) {
+                return self::deadlineExceeded($count);
             }
             $count++;
         }
+    }
+
+    /**
+     * @return array{delay_ms:int,deadline_limited:bool}|null
+     */
+    private static function boundedWaitMs(int $delayMs, ?OperationDeadline $deadline): ?array
+    {
+        if ($deadline === null) {
+            return ['delay_ms' => $delayMs, 'deadline_limited' => false];
+        }
+
+        $remainingMs = $deadline->remainingMilliseconds();
+        if ($remainingMs === 0) {
+            return null;
+        }
+
+        return [
+            'delay_ms' => min($delayMs, $remainingMs),
+            'deadline_limited' => $delayMs >= $remainingMs,
+        ];
     }
 
     private static function cancelled(int $attempts): CommunicationResult
@@ -61,6 +99,17 @@ final class RetryExecutor
         return CommunicationResult::failure(
             'Operation cancelled.',
             metadata: ['cancelled' => true, 'attempts' => max(0, $attempts)],
+        );
+    }
+
+    private static function deadlineExceeded(int $attempts): CommunicationResult
+    {
+        return CommunicationResult::failure(
+            'Operation deadline exceeded.',
+            metadata: [
+                'deadline_exceeded' => true,
+                'attempts' => max(0, $attempts),
+            ],
         );
     }
 
