@@ -50,6 +50,16 @@ it('bounds blocking SMTP and mailbox writes by their operation deadline', functi
     };
 
     $smtpPair = $saturatedPair();
+    $smtpNotices = 0;
+    set_error_handler(
+        static function () use (&$smtpNotices): bool {
+            $smtpNotices++;
+
+            return true;
+        },
+        E_NOTICE | E_WARNING,
+    );
+
     try {
         $startedAt = hrtime(true);
 
@@ -60,10 +70,31 @@ it('bounds blocking SMTP and mailbox writes by their operation deadline', functi
         ))->toThrow(RuntimeException::class, 'SMTP command deadline exceeded');
 
         $elapsedSeconds = (hrtime(true) - $startedAt) / 1_000_000_000;
-        expect($elapsedSeconds)->toBeLessThan(0.15);
+        expect($elapsedSeconds)->toBeLessThan(0.15)
+            ->and($smtpNotices)->toBe(0);
     } finally {
+        restore_error_handler();
         fclose($smtpPair[0]);
         fclose($smtpPair[1]);
+    }
+
+    $smtpOperationPair = $saturatedPair();
+    try {
+        $startedAt = hrtime(true);
+
+        expect(fn() => (new SmtpIoRuntime(
+            operationDeadline: OperationDeadline::after(0.03),
+        ))->write(
+            $smtpOperationPair[0],
+            'x',
+            OperationDeadline::after(0.20),
+        ))->toThrow(RuntimeException::class, 'SMTP operation deadline exceeded');
+
+        $elapsedSeconds = (hrtime(true) - $startedAt) / 1_000_000_000;
+        expect($elapsedSeconds)->toBeLessThan(0.15);
+    } finally {
+        fclose($smtpOperationPair[0]);
+        fclose($smtpOperationPair[1]);
     }
 
     $mailboxPair = $saturatedPair();
