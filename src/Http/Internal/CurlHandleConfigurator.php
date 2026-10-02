@@ -176,14 +176,18 @@ final class CurlHandleConfigurator
             $resolvedRequest = $resolvedRequest->header('Content-Type', 'application/octet-stream');
         }
 
-        $resource = $this->openUploadResource($request, $uploadPath, $uploadStream);
+        $preparedHandle = $request->metadata['_upload_handle'] ?? null;
+        $resource = is_resource($preparedHandle)
+            ? $this->rewindUploadResource($request, $preparedHandle)
+            : $this->openUploadResource($request, $uploadPath, $uploadStream);
+        $openedByConfigurator = !is_resource($preparedHandle) && is_string($uploadPath);
 
         try {
             $this->setOption($handle, CURLOPT_UPLOAD, true, 'Unable to configure cURL upload mode.');
             $this->setOption($handle, CURLOPT_INFILE, $resource, 'Unable to configure the cURL upload source.');
             $this->setOption($handle, CURLOPT_INFILESIZE, $size, 'Unable to configure the cURL upload size.');
         } catch (Throwable $throwable) {
-            if (is_string($uploadPath)) {
+            if ($openedByConfigurator) {
                 fclose($resource);
             }
 
@@ -193,7 +197,7 @@ final class CurlHandleConfigurator
         return $resolvedRequest->metadata([
             ...$resolvedRequest->metadata,
             '_upload_handle' => $resource,
-            '_upload_opened_by_configurator' => is_string($uploadPath),
+            '_upload_opened_by_configurator' => $openedByConfigurator,
         ]);
     }
 
@@ -213,12 +217,21 @@ final class CurlHandleConfigurator
             throw new InvalidArgumentException('Upload source must be a file path or stream resource.');
         }
 
+        return $this->rewindUploadResource($request, $uploadStream);
+    }
+
+    /**
+     * @param resource $resource
+     * @return resource
+     */
+    private function rewindUploadResource(HttpRequest $request, mixed $resource): mixed
+    {
         $offset = $request->metadata['upload_offset'] ?? null;
-        if (!is_int($offset) || fseek($uploadStream, $offset) !== 0) {
+        if (!is_int($offset) || fseek($resource, $offset) !== 0) {
             throw new InvalidArgumentException('Unable to rewind HTTP upload stream to its starting position.');
         }
 
-        return $uploadStream;
+        return $resource;
     }
 
     private function setOption(\CurlHandle $handle, int $option, mixed $value, string $error): void
