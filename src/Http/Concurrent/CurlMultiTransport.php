@@ -454,6 +454,7 @@ final readonly class CurlMultiTransport
             }
             $pinnedResolution = RequestSecurityGuard::pinnedResolution($prepared, $prepared->buildUrl());
         } catch (InvalidArgumentException $exception) {
+            UploadHandleManager::cleanup($prepared);
             $results[$index] = CommunicationResult::failure(
                 $exception->getMessage(),
                 metadata: ['transport' => 'curl-multi'],
@@ -464,6 +465,7 @@ final readonly class CurlMultiTransport
 
         $handle = curl_init();
         if ($handle === false) {
+            UploadHandleManager::cleanup($prepared);
             $results[$index] = CommunicationResult::failure(
                 'Unable to initialize cURL handle.',
                 metadata: ['transport' => 'curl-multi'],
