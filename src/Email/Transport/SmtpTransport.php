@@ -132,6 +132,23 @@ final readonly class SmtpTransport implements EmailTransport
         }
     }
 
+/**
+     * @param resource $connection
+     */
+    private function applyReadDeadline(mixed $connection, OperationDeadline $deadline): void
+    {
+        $remainingMicros = $deadline->remainingMicroseconds();
+        if ($remainingMicros === 0) {
+            throw new RuntimeException('SMTP command deadline exceeded.');
+        }
+
+        stream_set_timeout(
+            $connection,
+            intdiv($remainingMicros, 1_000_000),
+            $remainingMicros % 1_000_000,
+        );
+    }
+
     private function assertSizeWithinLimit(SmtpCapabilities $capabilities, int $messageSizeBytes): ?int
     {
         $sizeLimit = $capabilities->sizeLimit();
@@ -336,24 +353,7 @@ final readonly class SmtpTransport implements EmailTransport
         return $connection;
     }
 
-    /**
-     * @param resource $connection
-     */
-    private function applyReadDeadline(mixed $connection, OperationDeadline $deadline): void
-    {
-        $remainingMicros = $deadline->remainingMicroseconds();
-        if ($remainingMicros === 0) {
-            throw new RuntimeException('SMTP command deadline exceeded.');
-        }
-
-        stream_set_timeout(
-            $connection,
-            intdiv($remainingMicros, 1_000_000),
-            $remainingMicros % 1_000_000,
-        );
-    }
-
-    /**
+            /**
      * @param resource $connection
      * @param list<string> $transcript
      * @return array{0:int,1:string,2:list<string>}
@@ -367,22 +367,7 @@ final readonly class SmtpTransport implements EmailTransport
 
         try {
             while (true) {
-                $this->applyReadDeadline($connection, $deadline);
-                $line = fgets($connection, 1024);
-                if ($line === false) {
-                    $metadata = stream_get_meta_data($connection);
-                    if ($metadata['timed_out']) {
-                        throw new RuntimeException('SMTP server response timed out.');
-                    }
-                    if ($deadline->expired()) {
-                        throw new RuntimeException('SMTP command deadline exceeded.');
-                    }
-
-                    throw new RuntimeException('Failed to read SMTP server response.');
-                }
-                if ($deadline->expired()) {
-                    throw new RuntimeException('SMTP command deadline exceeded.');
-                }
+                $line = $this->readResponseLine($connection, $deadline);
 
                 if (!str_ends_with($line, "\n") && !feof($connection)) {
                     throw new RuntimeException('SMTP response line exceeds 1023 bytes.');
@@ -411,6 +396,32 @@ final readonly class SmtpTransport implements EmailTransport
         }
     }
 
+    /**
+     * @param resource $connection
+     */
+    private function readResponseLine($connection, OperationDeadline $deadline): string
+    {
+        $this->applyReadDeadline($connection, $deadline);
+        $line = fgets($connection, 1024);
+        if ($line === false) {
+            $metadata = stream_get_meta_data($connection);
+            if ($metadata['timed_out']) {
+                throw new RuntimeException('SMTP server response timed out.');
+            }
+
+            if ($deadline->expired()) {
+                throw new RuntimeException('SMTP command deadline exceeded.');
+            }
+
+            throw new RuntimeException('Failed to read SMTP server response.');
+        }
+
+        if ($deadline->expired()) {
+            throw new RuntimeException('SMTP command deadline exceeded.');
+        }
+
+        return $line;
+    }
 
     /**
      * @param list<string> $transcript
