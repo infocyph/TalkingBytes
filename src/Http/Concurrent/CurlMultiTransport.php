@@ -158,15 +158,7 @@ final readonly class CurlMultiTransport
                     break;
                 }
 
-                if ($operationDeadline?->expired() === true) {
-                    $deadlineExceeded = true;
-                    $stoppedScheduling = true;
-                    $this->expireOutstanding($multiHandle, $keys, $nextIndex, $contexts, $results);
-
-                    break;
-                }
-
-                if ($contexts !== [] && $completed['count'] === 0 && $execution['running'] > 0) {
+                if (self::shouldWaitForActivity($contexts, $completed['count'], $execution['running'])) {
                     $this->waitForActivity($multiHandle, $cancellation, $operationDeadline);
                 }
             }
@@ -215,6 +207,14 @@ final readonly class CurlMultiTransport
                 'started' => $started,
             ],
         );
+    }
+
+    /**
+     * @param array<int, array{key:int|string, handle:\CurlHandle, request:HttpRequest, headerCollector:ResponseHeaderCollector, bodyCollector:ResponseBodyCollector}> $contexts
+     */
+    private static function shouldWaitForActivity(array $contexts, int $completed, int $running): bool
+    {
+        return $contexts !== [] && $completed === 0 && $running > 0;
     }
 
     /**
