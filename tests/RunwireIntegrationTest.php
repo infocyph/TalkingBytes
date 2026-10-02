@@ -31,6 +31,8 @@ use Infocyph\TalkingBytes\Http\HttpRequest;
 use Infocyph\TalkingBytes\Http\HttpResponse;
 use Infocyph\TalkingBytes\Http\Testing\FakeHttpTransport;
 use Infocyph\TalkingBytes\Integration\Runwire\RunwireBinding;
+use Infocyph\TalkingBytes\Resilience\CircuitBreaker;
+use Infocyph\TalkingBytes\Resilience\RateLimiter;
 use Infocyph\TalkingBytes\Webhook\Webhook;
 use Infocyph\TalkingBytes\Webhook\WebhookMessage;
 
@@ -198,6 +200,101 @@ it('keeps sequential Runwire request bindings isolated when reusing an unbound f
     expect($resultA->metadata['cancelled'] ?? false)->toBeTrue()
         ->and($transportA->sentRequests())->toBe([])
         ->and($resultB->successful)->toBeTrue()
+        ->and($transportB->sentRequests())->toHaveCount(1)
+        ->and($requestB->completed())->toBeFalse();
+
+    $requestA->complete();
+    $requestB->complete();
+});
+
+it('keeps explicitly shared resilience state across independent request bindings', function (): void {
+    $runtime = talkingBytesRunwireContext();
+    $requestA = talkingBytesRunwireRequest($runtime);
+    $requestB = talkingBytesRunwireRequest($runtime);
+
+    $rateLimiter = new RateLimiter(1, 60);
+    $rateClientA = (new HttpClientFactory())
+        ->withRunwire($runtime, $requestA)
+        ->fromArray([], new FakeHttpTransport())
+        ->withRateLimit($rateLimiter);
+    $rateClientB = (new HttpClientFactory())
+        ->withRunwire($runtime, $requestB)
+        ->fromArray([], new FakeHttpTransport())
+        ->withRateLimit($rateLimiter);
+
+    expect($rateClientA->get('https://tenant-a.example.test/rate')->successful)->toBeTrue()
+        ->and(fn() => $rateClientB->get('https://tenant-b.example.test/rate'))
+        ->toThrow(RuntimeException::class, 'Rate limit exceeded');
+
+    $breaker = new CircuitBreaker(1, 60);
+    $failingTransport = new class implements HttpTransport {
+        public function send(HttpRequest $request): CommunicationResult
+        {
+            unset($request);
+
+            return CommunicationResult::failure(
+                'temporary',
+                503,
+                new HttpResponse(503, ''),
+            );
+        }
+    };
+    $breakerClientA = (new HttpClientFactory())
+        ->withRunwire($runtime, $requestA)
+        ->fromArray([], $failingTransport)
+        ->withCircuitBreaker($breaker);
+    $breakerClientB = (new HttpClientFactory())
+        ->withRunwire($runtime, $requestB)
+        ->fromArray([], new FakeHttpTransport())
+        ->withCircuitBreaker($breaker);
+
+    expect($breakerClientA->get('https://tenant-a.example.test/circuit')->successful)->toBeFalse()
+        ->and(fn() => $breakerClientB->get('https://tenant-b.example.test/circuit'))
+        ->toThrow(RuntimeException::class, 'Circuit breaker is open');
+
+    $requestA->complete();
+    $requestB->complete();
+});
+
+it('keeps interleaved tenant request cancellation isolated', function (): void {
+    $runtime = talkingBytesRunwireContext();
+    $requestA = talkingBytesRunwireRequest($runtime);
+    $requestB = talkingBytesRunwireRequest($runtime);
+    $transportA = new FakeHttpTransport();
+    $transportB = new FakeHttpTransport();
+    $results = [];
+
+    (new CoroutineRuntime())->run(
+        static function (CoroutineScope $scope) use (
+            $runtime,
+            $requestA,
+            $requestB,
+            $transportA,
+            $transportB,
+            &$results,
+        ): void {
+            $scope->spawn(static function () use ($runtime, $requestA, $transportA, &$results): void {
+                $requestA->cancel(CancellationReason::HOST_CANCELLED);
+                $results['a'] = (new HttpClientFactory())
+                    ->withRunwire($runtime, $requestA)
+                    ->fromArray([], $transportA)
+                    ->get('https://tenant-a.example.test/interleaved');
+            });
+
+            $scope->spawn(static function () use ($runtime, $requestB, $transportB, &$results): void {
+                $results['b'] = (new HttpClientFactory())
+                    ->withRunwire($runtime, $requestB)
+                    ->fromArray([], $transportB)
+                    ->get('https://tenant-b.example.test/interleaved');
+            });
+
+            $scope->yieldNow();
+        },
+    );
+
+    expect($results['a']->metadata['cancelled'] ?? false)->toBeTrue()
+        ->and($transportA->sentRequests())->toBe([])
+        ->and($results['b']->successful)->toBeTrue()
         ->and($transportB->sentRequests())->toHaveCount(1)
         ->and($requestB->completed())->toBeFalse();
 
