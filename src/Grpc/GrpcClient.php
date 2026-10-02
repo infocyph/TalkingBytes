@@ -44,6 +44,7 @@ final readonly class GrpcClient
         private ?NativeGrpcStreamingInvoker $streamingInvoker = null,
         ?EventDispatcher $events = null,
         ?Clock $clock = null,
+        private ?CancellationSignal $cancellation = null,
     ) {
         $this->pipeline = new GrpcPipeline($transport, $middlewares);
         $this->events = new BestEffortEventDispatcher($events ?? new NullEventDispatcher());
@@ -69,8 +70,9 @@ final readonly class GrpcClient
         ?Clock $clock = null,
     ): self {
         $invoker = new GeneratedStubGrpcInvoker($stubClient, $methodMap, $cancellation);
+        $client = self::usingNativeStreaming($invoker, $invoker, $events, $clock);
 
-        return self::usingNativeStreaming($invoker, $invoker, $events, $clock);
+        return $cancellation === null ? $client : $client->withCancellation($cancellation);
     }
 
     public static function usingNative(
@@ -145,6 +147,10 @@ final readonly class GrpcClient
 
     public function send(GrpcRequest $request): CommunicationResult
     {
+        if ($this->cancellation?->isRequested() === true) {
+            return $this->cancelled($request->method);
+        }
+
         return $this->pipeline->send($request);
     }
 
@@ -171,6 +177,18 @@ final readonly class GrpcClient
         return $this->streamingInvoker !== null;
     }
 
+    public function withCancellation(CancellationSignal $cancellation): self
+    {
+        return new self(
+            $this->transport,
+            $this->middlewares,
+            $this->streamingInvoker,
+            $this->events,
+            $this->clock,
+            $cancellation,
+        );
+    }
+
     public function withGrpcRetry(
         ?GrpcRetryPolicy $policy = null,
         ?CancellationSignal $cancellation = null,
@@ -184,7 +202,14 @@ final readonly class GrpcClient
         $middlewares = $this->middlewares;
         $middlewares[] = $middleware;
 
-        return new self($this->transport, $middlewares, $this->streamingInvoker, $this->events, $this->clock);
+        return new self(
+            $this->transport,
+            $middlewares,
+            $this->streamingInvoker,
+            $this->events,
+            $this->clock,
+            $this->cancellation,
+        );
     }
 
     /**
@@ -201,6 +226,24 @@ final readonly class GrpcClient
         ?Sleeper $sleeper = null,
     ): self {
         return $this->withMiddleware(new RetryMiddleware($policy, $cancellation, $this->clock, $sleeper));
+    }
+
+    private function cancelled(string $method, ?string $streamType = null): CommunicationResult
+    {
+        $metadata = [
+            'cancelled' => true,
+            'attempts' => 0,
+            'transport' => 'grpc',
+            'method' => $method,
+        ];
+        if ($streamType !== null) {
+            $metadata['stream_type'] = $streamType;
+        }
+
+        return CommunicationResult::failure(
+            'gRPC operation cancelled.',
+            metadata: $metadata,
+        );
     }
 
     /**
@@ -246,6 +289,10 @@ final readonly class GrpcClient
      */
     private function runStream(string $streamType, string $method, callable $execute): CommunicationResult
     {
+        if ($this->cancellation?->isRequested() === true) {
+            return $this->cancelled($method, $streamType);
+        }
+
         if ($this->streamingInvoker === null) {
             return CommunicationResult::failure(
                 sprintf('gRPC %s streaming is unavailable for this client.', $streamType),
