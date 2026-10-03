@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Infocyph\TalkingBytes\Email\Transport;
 
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
+use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
+use Infocyph\TalkingBytes\Core\Support\OperationDeadline;
 use Infocyph\TalkingBytes\Email\EmailMessage;
 
 final readonly class CompositeEmailTransport implements EmailTransport
@@ -15,11 +17,17 @@ final readonly class CompositeEmailTransport implements EmailTransport
     public function __construct(
         private EmailTransport $primaryTransport,
         private array $fallbackTransports = [],
+        private ?CancellationSignal $cancellation = null,
+        private ?OperationDeadline $deadline = null,
     ) {}
 
     public function send(EmailMessage $message): CommunicationResult
     {
         $attemptedTransports = [];
+        $preflight = $this->preflightFailure($attemptedTransports);
+        if ($preflight !== null) {
+            return $preflight;
+        }
 
         $primaryResult = $this->primaryTransport->send($message);
         $attemptedTransports[] = $this->primaryTransport::class;
@@ -27,8 +35,16 @@ final readonly class CompositeEmailTransport implements EmailTransport
         if ($primaryResult->successful) {
             return $primaryResult;
         }
+        if ($this->isTerminalExecutionFailure($primaryResult)) {
+            return $this->terminalFailure($primaryResult, $attemptedTransports);
+        }
 
         foreach ($this->fallbackTransports as $transport) {
+            $preflight = $this->preflightFailure($attemptedTransports);
+            if ($preflight !== null) {
+                return $preflight;
+            }
+
             $attemptedTransports[] = $transport::class;
             $result = $transport->send($message);
 
@@ -45,6 +61,9 @@ final readonly class CompositeEmailTransport implements EmailTransport
                     $metadata,
                 );
             }
+            if ($this->isTerminalExecutionFailure($result)) {
+                return $this->terminalFailure($result, $attemptedTransports);
+            }
 
             $primaryResult = $result;
         }
@@ -57,6 +76,80 @@ final readonly class CompositeEmailTransport implements EmailTransport
             statusCode: $primaryResult->statusCode,
             response: $primaryResult->response,
             metadata: $metadata,
+        );
+    }
+
+    /** @phpstan-impure */
+    private function cancellationRequested(): bool
+    {
+        return $this->cancellation !== null && $this->cancellation->isRequested();
+    }
+
+    /** @param list<class-string<EmailTransport>> $attemptedTransports */
+    private function cancelled(array $attemptedTransports): CommunicationResult
+    {
+        return CommunicationResult::failure(
+            'Email operation cancelled.',
+            metadata: [
+                'cancelled' => true,
+                'attempts' => count($attemptedTransports),
+                'attempted_transports' => $attemptedTransports,
+                'transport' => 'email',
+            ],
+        );
+    }
+
+    /** @param list<class-string<EmailTransport>> $attemptedTransports */
+    private function deadlineExceeded(array $attemptedTransports): CommunicationResult
+    {
+        return CommunicationResult::failure(
+            'Email operation deadline exceeded.',
+            metadata: [
+                'deadline_exceeded' => true,
+                'attempts' => count($attemptedTransports),
+                'attempted_transports' => $attemptedTransports,
+                'transport' => 'email',
+            ],
+        );
+    }
+
+    private function isTerminalExecutionFailure(CommunicationResult $result): bool
+    {
+        return ($result->metadata['cancelled'] ?? false) === true
+            || ($result->metadata['deadline_exceeded'] ?? false) === true;
+    }
+
+    /**
+     * @param list<class-string<EmailTransport>> $attemptedTransports
+     */
+    private function preflightFailure(array $attemptedTransports): ?CommunicationResult
+    {
+        if ($this->cancellationRequested()) {
+            return $this->cancelled($attemptedTransports);
+        }
+
+        if ($this->deadline?->expired() === true) {
+            return $this->deadlineExceeded($attemptedTransports);
+        }
+
+        return null;
+    }
+
+    /**
+     * @param list<class-string<EmailTransport>> $attemptedTransports
+     */
+    private function terminalFailure(
+        CommunicationResult $result,
+        array $attemptedTransports,
+    ): CommunicationResult {
+        return CommunicationResult::failure(
+            $result->error ?? 'Email operation terminated.',
+            statusCode: $result->statusCode,
+            response: $result->response,
+            metadata: [
+                ...$result->metadata,
+                'attempted_transports' => $attemptedTransports,
+            ],
         );
     }
 }

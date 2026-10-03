@@ -2,14 +2,40 @@
 
 declare(strict_types=1);
 
+use Infocyph\Runwire\Coroutine\CoroutineRuntime;
+use Infocyph\Runwire\Coroutine\CoroutineScope;
+use Infocyph\Runwire\RequestContext;
+use Infocyph\Runwire\Runtime\Enum\RuntimeDriver;
+use Infocyph\Runwire\Runtime\RequestExecutionPolicy;
+use Infocyph\Runwire\RuntimeCapabilities;
+use Infocyph\Runwire\RuntimeContext;
+use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
 use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
 use Infocyph\TalkingBytes\Email\Config\SendmailConfig;
 use Infocyph\TalkingBytes\Email\Config\SpoolConfig;
 use Infocyph\TalkingBytes\Email\EmailMessage;
+use Infocyph\TalkingBytes\Email\EmailSenderFactory;
 use Infocyph\TalkingBytes\Email\Result\EmailSendResult;
 use Infocyph\TalkingBytes\Email\Transport\MailFunctionTransport;
 use Infocyph\TalkingBytes\Email\Transport\SendmailTransport;
 use Infocyph\TalkingBytes\Email\Transport\SpoolEmailTransport;
+
+function sendmailRunwireContext(): RuntimeContext
+{
+    return RuntimeContext::fromCapabilities(
+        new RuntimeCapabilities(
+            driver: RuntimeDriver::NATIVE,
+            persistentProcess: true,
+            persistentApplication: true,
+            ownsEventLoop: true,
+            runwireLoopAvailable: true,
+            supportsAsyncIo: true,
+            supportsRunwireCoroutines: true,
+        ),
+        mode: 'native',
+        concurrent: true,
+    );
+}
 
 it('captures sendmail stderr on non-zero exit', function (): void {
     $script = createSendmailTestScript();
@@ -39,6 +65,61 @@ it('cancels a running sendmail process cooperatively', function (): void {
 
     expect($result->successful)->toBeFalse();
     expect($result->error)->toContain('cancelled');
+});
+
+it('lets Runwire peers progress while sendmail process polling waits', function (): void {
+    $script = createSendmailTestScript();
+    $runtime = sendmailRunwireContext();
+    $events = [];
+
+    $result = (new CoroutineRuntime())->run(
+        static function (CoroutineScope $scope) use ($script, $runtime, &$events): CommunicationResult {
+            $scope->spawn(static function () use ($scope, &$events): void {
+                $scope->sleep(0.02);
+                $events[] = 'peer';
+            });
+
+            $emailer = (new EmailSenderFactory())
+                ->withRunwire($runtime, scope: $scope)
+                ->usingSendmail(new SendmailConfig($script, ['delay_ms', '120'], 2));
+
+            $result = $emailer->send(testMessage());
+            $events[] = 'sendmail';
+
+            return $result;
+        },
+    );
+
+    expect($result->successful)->toBeTrue()
+        ->and($events)->toBe(['peer', 'sendmail']);
+});
+
+it('caps sendmail process lifetime by the Runwire request deadline', function (): void {
+    $script = createSendmailTestScript();
+    $runtime = sendmailRunwireContext();
+    $request = RequestContext::create(
+        $runtime,
+        new RequestExecutionPolicy(maxExecutionSeconds: 0.05),
+    );
+
+    try {
+        $startedAt = microtime(true);
+        $result = (new CoroutineRuntime())->run(
+            static function (CoroutineScope $scope) use ($script, $runtime, $request): CommunicationResult {
+                return (new EmailSenderFactory())
+                    ->withRunwire($runtime, $request, $scope)
+                    ->usingSendmail(new SendmailConfig($script, ['delay_ms', '500'], 2))
+                    ->send(testMessage());
+            },
+        );
+        $elapsed = microtime(true) - $startedAt;
+
+        expect($result->successful)->toBeFalse()
+            ->and($result->error)->toContain('deadline exceeded')
+            ->and($elapsed)->toBeLessThan(0.4);
+    } finally {
+        $request->complete();
+    }
 });
 
 it('fails sendmail transport on timeout', function (): void {
@@ -180,6 +261,11 @@ $stdin = stream_get_contents(STDIN);
 if ($mode === 'sleep') {
     $seconds = (int) ($argv[2] ?? 2);
     sleep(max(1, $seconds));
+}
+
+if ($mode === 'delay_ms') {
+    $milliseconds = (int) ($argv[2] ?? 100);
+    usleep(max(1, $milliseconds) * 1000);
 }
 
 if ($mode === 'fail') {

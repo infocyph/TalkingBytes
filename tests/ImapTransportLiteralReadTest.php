@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+use Infocyph\TalkingBytes\Core\Support\Clock;
+use Infocyph\TalkingBytes\Core\Support\OperationDeadline;
 use Infocyph\TalkingBytes\Email\Config\ImapConfig;
 use Infocyph\TalkingBytes\Email\Enum\ImapSecurity;
 use Infocyph\TalkingBytes\Email\Exception\MailboxConnectionException;
@@ -188,4 +190,34 @@ it('fails with timeout-specific error while reading literal bytes', function ():
     fclose($peer);
     fclose($stream);
     $property->setValue($transport, null);
+});
+
+
+it('fails a literal read when the shared command deadline expires during the read', function (): void {
+    $times = [0.0, 0.2, 1.1];
+    $clock = new Clock(
+        static fn(): float => 0.0,
+        static function () use (&$times): float {
+            return array_shift($times) ?? 1.1;
+        },
+    );
+    $transport = new ImapSocketTransport(
+        new ImapConfig(
+            host: '127.0.0.1',
+            port: 143,
+            security: ImapSecurity::None,
+            username: 'user',
+            password: 'pass',
+            timeoutSeconds: 1,
+        ),
+        clock: $clock,
+    );
+    $stream = setImapTransportConnection($transport, 'abcdef');
+    $deadline = OperationDeadline::after(1.0, $clock);
+    $readExact = new ReflectionMethod($transport, 'readExact');
+
+    expect(fn() => $readExact->invoke($transport, 6, $deadline))
+        ->toThrow(MailboxConnectionException::class, 'command deadline exceeded');
+
+    teardownImapTransportConnection($transport, $stream);
 });

@@ -4,15 +4,21 @@ declare(strict_types=1);
 
 namespace Infocyph\TalkingBytes\Grpc;
 
+use Infocyph\Runwire\Coroutine\CoroutineScope;
+use Infocyph\Runwire\RequestContext;
+use Infocyph\Runwire\RuntimeContext;
 use Infocyph\TalkingBytes\Core\Event\EventDispatcher;
 use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
 use Infocyph\TalkingBytes\Core\Support\Clock;
+use Infocyph\TalkingBytes\Core\Support\OperationDeadline;
+use Infocyph\TalkingBytes\Core\Support\ResolvedConfig;
+use Infocyph\TalkingBytes\Core\Support\Sleeper;
 use Infocyph\TalkingBytes\Grpc\Native\NativeGrpcInvoker;
 use Infocyph\TalkingBytes\Grpc\Native\NativeGrpcStreamingInvoker;
 use Infocyph\TalkingBytes\Grpc\Retry\GrpcRetryPolicy;
 use Infocyph\TalkingBytes\Grpc\Sender\GrpcRequest;
 use Infocyph\TalkingBytes\Grpc\Sender\GrpcResponse;
-use InvalidArgumentException;
+use Infocyph\TalkingBytes\Integration\Runwire\RunwireBinding;
 
 final readonly class GrpcClientFactory
 {
@@ -20,6 +26,9 @@ final readonly class GrpcClientFactory
         private ?EventDispatcher $events = null,
         private ?CancellationSignal $cancellation = null,
         private ?Clock $clock = null,
+        private ?Sleeper $sleeper = null,
+        private ?OperationDeadline $operationDeadline = null,
+        private ?RunwireBinding $runwireBinding = null,
     ) {}
 
     /**
@@ -70,100 +79,33 @@ final readonly class GrpcClientFactory
         return $this->applyResolvedConfig($client, $config);
     }
 
-    /** @param array<string, mixed> $config */
-    private static function bool(array $config, string $key, bool $default): bool
-    {
-        if (!array_key_exists($key, $config)) {
-            return $default;
+    public function withRunwire(
+        RuntimeContext $runtime,
+        ?RequestContext $request = null,
+        ?CoroutineScope $scope = null,
+    ): self {
+        if ($this->runwireBinding !== null) {
+            $this->runwireBinding->assertSameContext($runtime, $request, $scope);
+
+            return $this;
         }
 
-        $value = $config[$key];
-        if (is_bool($value)) {
-            return $value;
+        $binding = new RunwireBinding($runtime, $request, $scope);
+        $deadline = $binding->deadline();
+        if ($deadline !== null && $this->operationDeadline !== null) {
+            $deadline = $this->operationDeadline->earliest($deadline);
+        } elseif ($deadline === null) {
+            $deadline = $this->operationDeadline;
         }
 
-        if (is_int($value) && ($value === 0 || $value === 1)) {
-            return $value === 1;
-        }
-
-        if (is_string($value)) {
-            $parsed = filter_var($value, FILTER_VALIDATE_BOOL, FILTER_NULL_ON_FAILURE);
-            if (is_bool($parsed)) {
-                return $parsed;
-            }
-        }
-
-        throw new InvalidArgumentException(sprintf('gRPC resolved configuration key "%s" must be a boolean.', $key));
-    }
-
-    /** @param array<string, mixed> $config */
-    private static function float(array $config, string $key, float $default): float
-    {
-        $value = $config[$key] ?? $default;
-        if (is_float($value) || is_int($value) || (is_string($value) && is_numeric($value))) {
-            return (float) $value;
-        }
-
-        throw new InvalidArgumentException(sprintf('gRPC resolved configuration key "%s" must be numeric.', $key));
-    }
-
-    /** @param array<string, mixed> $config */
-    private static function int(array $config, string $key, int $default): int
-    {
-        $value = $config[$key] ?? $default;
-        if (is_int($value)) {
-            return $value;
-        }
-
-        if (is_string($value) && preg_match('/^-?\d+$/D', $value) === 1) {
-            $parsed = filter_var($value, FILTER_VALIDATE_INT);
-            if (is_int($parsed)) {
-                return $parsed;
-            }
-        }
-
-        throw new InvalidArgumentException(sprintf('gRPC resolved configuration key "%s" must be an integer.', $key));
-    }
-
-    private static function nullableInt(mixed $value, string $key): ?int
-    {
-        if ($value === null || $value === '') {
-            return null;
-        }
-
-        if (is_int($value)) {
-            return $value;
-        }
-
-        if (is_string($value) && preg_match('/^-?\d+$/D', $value) === 1) {
-            $parsed = filter_var($value, FILTER_VALIDATE_INT);
-            if (is_int($parsed)) {
-                return $parsed;
-            }
-        }
-
-        throw new InvalidArgumentException(sprintf('gRPC resolved configuration key "%s" must be an integer or null.', $key));
-    }
-
-    /**
-     * @param array<string, mixed> $config
-     * @return array<string, mixed>
-     */
-    private static function section(array $config, string $key): array
-    {
-        $value = $config[$key] ?? [];
-        if (!is_array($value)) {
-            throw new InvalidArgumentException(sprintf('gRPC resolved configuration section "%s" must be an array.', $key));
-        }
-
-        $section = [];
-        foreach ($value as $name => $item) {
-            if (is_string($name)) {
-                $section[$name] = $item;
-            }
-        }
-
-        return $section;
+        return new self(
+            $this->events,
+            $binding->cancellation($this->cancellation),
+            $this->clock,
+            $binding->sleeper($this->sleeper),
+            $deadline,
+            $binding,
+        );
     }
 
     /**
@@ -171,8 +113,16 @@ final readonly class GrpcClientFactory
      */
     private function applyResolvedConfig(GrpcClient $client, array $config): GrpcClient
     {
-        $retry = self::section($config, 'retry');
-        if (!self::bool($retry, 'enabled', false)) {
+        if ($this->cancellation !== null) {
+            $client = $client->withCancellation($this->cancellation);
+        }
+
+        if ($this->operationDeadline !== null) {
+            $client = $client->withOperationDeadline($this->operationDeadline);
+        }
+
+        $retry = ResolvedConfig::section($config, 'retry', 'gRPC');
+        if (!ResolvedConfig::bool($retry, 'enabled', false, 'gRPC')) {
             return $client;
         }
 
@@ -180,12 +130,13 @@ final readonly class GrpcClientFactory
 
         return $client->withGrpcRetry(
             GrpcRetryPolicy::standard(
-                self::int($retry, 'attempts', 3),
-                self::int($retry, 'base_delay_ms', 100),
-                self::nullableInt($maxDelay, 'max_delay_ms'),
-                self::float($retry, 'jitter_ratio', 0.0),
+                ResolvedConfig::int($retry, 'attempts', 3, 'gRPC'),
+                ResolvedConfig::int($retry, 'base_delay_ms', 100, 'gRPC'),
+                ResolvedConfig::nullableInt($maxDelay, 'max_delay_ms', 'gRPC'),
+                ResolvedConfig::float($retry, 'jitter_ratio', 0.0, 'gRPC'),
             ),
             $this->cancellation,
+            $this->sleeper,
         );
     }
 }

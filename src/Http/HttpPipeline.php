@@ -8,7 +8,10 @@ use Closure;
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
 use Infocyph\TalkingBytes\Http\Contract\HttpMiddleware;
 use Infocyph\TalkingBytes\Http\Contract\HttpTransport;
+use Infocyph\TalkingBytes\Http\Internal\UploadHandleManager;
+use Infocyph\TalkingBytes\Http\Middleware\CancellationMiddleware;
 use Infocyph\TalkingBytes\Http\Middleware\IdempotencyMiddleware;
+use Infocyph\TalkingBytes\Http\Middleware\OperationDeadlineMiddleware;
 
 final readonly class HttpPipeline
 {
@@ -18,20 +21,35 @@ final readonly class HttpPipeline
     /** @param list<HttpMiddleware> $middlewares */
     public function __construct(HttpTransport $transport, array $middlewares = [])
     {
+        $preflight = [];
+        $idempotency = [];
         $ordered = [];
         foreach ($middlewares as $middleware) {
+            if ($middleware instanceof CancellationMiddleware || $middleware instanceof OperationDeadlineMiddleware) {
+                $preflight[] = $middleware;
+
+                continue;
+            }
+
             if ($middleware instanceof IdempotencyMiddleware) {
-                array_unshift($ordered, $middleware);
+                $idempotency[] = $middleware;
 
                 continue;
             }
 
             $ordered[] = $middleware;
         }
+        $ordered = [...$preflight, ...$idempotency, ...$ordered];
 
-        $next = static fn(HttpRequest $request): CommunicationResult => $transport->send(
-            $request->prepareForTransport(),
-        );
+        $next = static function (HttpRequest $request) use ($transport): CommunicationResult {
+            $prepared = $request->prepareForTransport();
+
+            try {
+                return $transport->send($prepared);
+            } finally {
+                UploadHandleManager::cleanup($prepared);
+            }
+        };
 
         foreach (array_reverse($ordered) as $middleware) {
             $currentNext = $next;

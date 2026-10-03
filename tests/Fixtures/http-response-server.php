@@ -2,7 +2,6 @@
 
 declare(strict_types=1);
 
-$readyPath = $argv[1] ?? '';
 $server = stream_socket_server('tcp://127.0.0.1:0', $errno, $errstr);
 if ($server === false) {
     throw new RuntimeException(sprintf('Unable to bind HTTP response fixture: %s (%d)', $errstr, $errno));
@@ -15,7 +14,8 @@ if (!is_string($address) || !str_contains($address, ':')) {
 }
 
 $port = (int) substr(strrchr($address, ':'), 1);
-file_put_contents($readyPath, json_encode(['port' => $port], JSON_THROW_ON_ERROR));
+fwrite(STDOUT, json_encode(['port' => $port], JSON_THROW_ON_ERROR) . "\n");
+fflush(STDOUT);
 
 $deadline = microtime(true) + 5.0;
 $handled = 0;
@@ -40,14 +40,17 @@ while ($handled < 32 && microtime(true) < $deadline) {
     }
 
     $requestLine = strtok($buffer, "\r\n") ?: '';
+    $method = 'GET';
     $path = '/';
-    if (preg_match('/^[A-Z]+\s+(\S+)\s+HTTP\//', $requestLine, $m) === 1) {
-        $parsed = parse_url($m[1], PHP_URL_PATH);
+    if (preg_match('/^(?<method>[A-Z]+)\s+(?<target>\S+)\s+HTTP\//', $requestLine, $m) === 1) {
+        $method = $m['method'];
+        $parsed = parse_url($m['target'], PHP_URL_PATH);
         $path = is_string($parsed) ? $parsed : '/';
     }
 
     $hostHeader = '';
     $cookieHeader = '';
+    $contentLength = 0;
     foreach (preg_split('/\r\n/', $buffer) ?: [] as $line) {
         if (str_starts_with(strtolower($line), 'host:')) {
             $hostHeader = trim(substr($line, 5));
@@ -55,6 +58,22 @@ while ($handled < 32 && microtime(true) < $deadline) {
         if (str_starts_with(strtolower($line), 'cookie:')) {
             $cookieHeader = trim(substr($line, 7));
         }
+        if (str_starts_with(strtolower($line), 'content-length:')) {
+            $contentLength = max(0, (int) trim(substr($line, 15)));
+        }
+    }
+
+    $headerEnd = strpos($buffer, "\r\n\r\n");
+    $requestBody = $headerEnd === false ? '' : substr($buffer, $headerEnd + 4);
+    while (strlen($requestBody) < $contentLength && !feof($client)) {
+        $chunk = fread($client, $contentLength - strlen($requestBody));
+        if (!is_string($chunk) || $chunk === '') {
+            break;
+        }
+        $requestBody .= $chunk;
+    }
+    if (strlen($requestBody) > $contentLength) {
+        $requestBody = substr($requestBody, 0, $contentLength);
     }
 
     $status = 200;
@@ -68,6 +87,14 @@ while ($handled < 32 && microtime(true) < $deadline) {
     } elseif ($path === '/redirect') {
         $status = 302;
         $headers['Location'] = sprintf('http://127.0.0.1:%d/zero', $port);
+    } elseif ($path === '/upload-303') {
+        $status = 303;
+        $headers['Location'] = sprintf('http://127.0.0.1:%d/upload-final', $port);
+    } elseif ($path === '/upload-cross-303') {
+        $status = 303;
+        $headers['Location'] = sprintf('http://localhost:%d/upload-final', $port);
+    } elseif ($path === '/upload-final') {
+        $body = $method . ':' . $requestBody;
     } elseif ($path === '/download-redirect-success') {
         $status = 302;
         $body = 'REDIRECT-BODY';
@@ -113,6 +140,7 @@ while ($handled < 32 && microtime(true) < $deadline) {
     $reason = match ($status) {
         204 => 'No Content',
         302 => 'Found',
+        303 => 'See Other',
         304 => 'Not Modified',
         500 => 'Internal Server Error',
         default => 'OK',

@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
+use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
 use Infocyph\TalkingBytes\Email\Config\LogEmailConfig;
 use Infocyph\TalkingBytes\Email\Config\SendmailConfig;
 use Infocyph\TalkingBytes\Email\Config\SpoolConfig;
@@ -193,4 +194,88 @@ it('blocks when rate limited transport exceeds quota', function (): void {
 
     expect($first->successful)->toBeTrue();
     expect(fn () => $transport->send(baselineEmail()))->toThrow(RuntimeException::class, 'Rate limit exceeded');
+});
+
+
+it('does not enter an email fallback after cancellation is requested', function (): void {
+    $state = (object) ['cancelled' => false, 'fallback_calls' => 0];
+
+    $primary = new class($state) implements EmailTransport
+    {
+        public function __construct(private object $state) {}
+
+        public function send(EmailMessage $message): CommunicationResult
+        {
+            unset($message);
+            $this->state->cancelled = true;
+
+            return CommunicationResult::failure('primary failed');
+        }
+    };
+
+    $fallback = new class($state) implements EmailTransport
+    {
+        public function __construct(private object $state) {}
+
+        public function send(EmailMessage $message): CommunicationResult
+        {
+            unset($message);
+            $this->state->fallback_calls++;
+
+            return CommunicationResult::success();
+        }
+    };
+
+    $result = (new FallbackEmailTransport(
+        $primary,
+        [$fallback],
+        CancellationSignal::fromCallable(static fn(): bool => $state->cancelled),
+    ))->send(baselineEmail());
+
+    expect($result->successful)->toBeFalse()
+        ->and($result->metadata['cancelled'] ?? false)->toBeTrue()
+        ->and($result->metadata['attempts'] ?? null)->toBe(1)
+        ->and($state->fallback_calls)->toBe(0);
+});
+
+it('treats cancellation and deadline results as terminal for email fallbacks', function (): void {
+    foreach ([
+        ['cancelled' => true],
+        ['deadline_exceeded' => true],
+    ] as $terminalMetadata) {
+        $fallbackCalls = 0;
+
+        $primary = new class($terminalMetadata) implements EmailTransport
+        {
+            /** @param array<string, bool> $metadata */
+            public function __construct(private array $metadata) {}
+
+            public function send(EmailMessage $message): CommunicationResult
+            {
+                unset($message);
+
+                return CommunicationResult::failure('terminal execution outcome', metadata: $this->metadata);
+            }
+        };
+
+        $fallback = new class($fallbackCalls) implements EmailTransport
+        {
+            public function __construct(private int &$calls) {}
+
+            public function send(EmailMessage $message): CommunicationResult
+            {
+                unset($message);
+                $this->calls++;
+
+                return CommunicationResult::success();
+            }
+        };
+
+        $result = (new FallbackEmailTransport($primary, [$fallback]))->send(baselineEmail());
+
+        expect($result->successful)->toBeFalse()
+            ->and($result->metadata)->toMatchArray($terminalMetadata)
+            ->and($result->metadata['attempted_transports'] ?? [])->toHaveCount(1)
+            ->and($fallbackCalls)->toBe(0);
+    }
 });

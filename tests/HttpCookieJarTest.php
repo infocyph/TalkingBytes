@@ -6,6 +6,7 @@ use Infocyph\TalkingBytes\Http\Cookie\Cookie;
 use Infocyph\TalkingBytes\Http\Cookie\CookieJar;
 use Infocyph\TalkingBytes\Http\HttpClient;
 use Infocyph\TalkingBytes\Http\HttpRequest;
+use Infocyph\TalkingBytes\Http\HttpResponse;
 use Infocyph\TalkingBytes\Http\Testing\FakeHttpTransport;
 
 it('stores set-cookie headers and applies cookies to next matching request', function (): void {
@@ -172,4 +173,59 @@ it('accepts only explicitly allowed domain-cookie scopes', function (): void {
     $request = $jar->applyToRequest(HttpRequest::get('https://www.example.test/orders'));
 
     expect((string) $request->headers->get('Cookie'))->toContain('shared=1');
+});
+
+
+it('prevents insecure origins from overwriting or deleting secure cookies', function (): void {
+    $jar = new CookieJar();
+    $jar->storeFromResponse(
+        new HttpResponse(200, '', ['Set-Cookie' => 'session=secret; Path=/; Secure']),
+        'https://api.example.test/login',
+    );
+
+    $jar->storeFromResponse(
+        new HttpResponse(200, '', ['Set-Cookie' => 'session=attacker; Path=/']),
+        'http://api.example.test/login',
+    );
+    $jar->storeFromResponse(
+        new HttpResponse(200, '', ['Set-Cookie' => 'session=gone; Path=/; Max-Age=0']),
+        'http://api.example.test/login',
+    );
+
+    $request = $jar->applyToRequest(HttpRequest::get('https://api.example.test/orders'));
+    expect((string) $request->headers->get('Cookie'))->toContain('session=secret')
+        ->and((string) $request->headers->get('Cookie'))->not->toContain('attacker');
+});
+
+it('rejects Secure cookies delivered by insecure origins', function (): void {
+    $jar = new CookieJar();
+    $jar->storeFromResponse(
+        new HttpResponse(200, '', ['Set-Cookie' => 'session=attacker; Path=/; Secure']),
+        'http://api.example.test/login',
+    );
+
+    expect($jar->count())->toBe(0);
+});
+
+it('enforces __Secure- and __Host- cookie prefixes', function (): void {
+    $jar = new CookieJar(
+        allowDomainCookies: true,
+        allowedParentDomains: ['example.test'],
+    );
+
+    $response = new HttpResponse(200, '', ['Set-Cookie' => [
+        '__Secure-good=1; Path=/; Secure',
+        '__Secure-no-flag=1; Path=/',
+        '__Host-good=1; Path=/; Secure',
+        '__Host-domain=1; Domain=example.test; Path=/; Secure',
+        '__Host-path=1; Path=/api; Secure',
+    ]]);
+    $jar->storeFromResponse($response, 'https://api.example.test/login');
+
+    $cookies = $jar->all();
+    expect($cookies)->toHaveKey('api.example.test|/|__Secure-good')
+        ->and($cookies)->toHaveKey('api.example.test|/|__Host-good')
+        ->and($cookies)->not->toHaveKey('api.example.test|/|__Secure-no-flag')
+        ->and($cookies)->not->toHaveKey('example.test|/|__Host-domain')
+        ->and($cookies)->not->toHaveKey('api.example.test|/api|__Host-path');
 });

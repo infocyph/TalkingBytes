@@ -7,7 +7,9 @@ namespace Infocyph\TalkingBytes\Email\Mailbox;
 use Infocyph\TalkingBytes\Core\Event\EventDispatcher;
 use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
 use Infocyph\TalkingBytes\Core\Support\Clock;
+use Infocyph\TalkingBytes\Core\Support\OperationDeadline;
 use Infocyph\TalkingBytes\Core\Support\Sleeper;
+use Infocyph\TalkingBytes\Core\Support\StreamWaiter;
 use Infocyph\TalkingBytes\Email\Config\ImapConfig;
 use Infocyph\TalkingBytes\Email\Parser\EmailParser;
 use Infocyph\TalkingBytes\Email\Parser\RawEmailParser;
@@ -24,8 +26,19 @@ final readonly class Mailbox
         ?EventDispatcher $events = null,
         ?Clock $clock = null,
         ?Sleeper $sleeper = null,
+        ?CancellationSignal $cancellation = null,
+        ?OperationDeadline $operationDeadline = null,
+        ?StreamWaiter $streamWaiter = null,
     ): self {
-        return new self(new ImapSocketTransport($config, events: $events, clock: $clock, sleeper: $sleeper));
+        return new self(new ImapSocketTransport(
+            $config,
+            events: $events,
+            clock: $clock,
+            sleeper: $sleeper,
+            cancellation: $cancellation,
+            operationDeadline: $operationDeadline,
+            streamWaiter: $streamWaiter,
+        ));
     }
 
     public function archive(string $sourceFolder, int $uid, ?string $archiveFolder = null): void

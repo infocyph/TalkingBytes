@@ -30,8 +30,7 @@ final class CurlHandleConfigurator
 
             $this->setOption($handle, CURLOPT_RETURNTRANSFER, true, 'Unable to configure cURL response handling.');
             $this->setOption($handle, CURLOPT_FOLLOWLOCATION, false, 'Unable to disable automatic cURL redirects.');
-            $this->setOption($handle, CURLOPT_TIMEOUT, $resolvedRequest->options->timeoutSeconds, 'Unable to configure cURL timeout.');
-            $this->setOption($handle, CURLOPT_CONNECTTIMEOUT, $resolvedRequest->options->connectTimeoutSeconds, 'Unable to configure cURL connection timeout.');
+            $this->applyTimeouts($handle, $resolvedRequest);
             $this->setOption($handle, CURLOPT_SSL_VERIFYPEER, $resolvedRequest->options->verifyPeer, 'Unable to configure cURL TLS peer verification.');
             $this->setOption($handle, CURLOPT_SSL_VERIFYHOST, $resolvedRequest->options->verifyHost ? 2 : 0, 'Unable to configure cURL TLS host verification.');
             if ($pinnedResolution !== null) {
@@ -104,6 +103,15 @@ final class CurlHandleConfigurator
         }
     }
 
+    private static function secondsToMilliseconds(int $seconds): int
+    {
+        if ($seconds > intdiv(PHP_INT_MAX, 1000)) {
+            return PHP_INT_MAX;
+        }
+
+        return $seconds * 1000;
+    }
+
     private function applyBodyAndContentType(HttpRequest $request, \CurlHandle $handle): HttpRequest
     {
         if (isset($request->metadata['upload_file_path']) || isset($request->metadata['upload_stream'])) {
@@ -153,6 +161,27 @@ final class CurlHandleConfigurator
         ]);
     }
 
+    private function applyTimeouts(\CurlHandle $handle, HttpRequest $request): void
+    {
+        $deadline = $request->operationDeadline();
+        if ($deadline === null) {
+            $this->setOption($handle, CURLOPT_TIMEOUT, $request->options->timeoutSeconds, 'Unable to configure cURL timeout.');
+            $this->setOption($handle, CURLOPT_CONNECTTIMEOUT, $request->options->connectTimeoutSeconds, 'Unable to configure cURL connection timeout.');
+
+            return;
+        }
+
+        $remainingMs = $deadline->remainingMilliseconds();
+        if ($remainingMs === 0) {
+            throw new InvalidArgumentException('HTTP operation deadline exceeded.');
+        }
+
+        $timeoutMs = min(self::secondsToMilliseconds($request->options->timeoutSeconds), $remainingMs);
+        $connectTimeoutMs = min(self::secondsToMilliseconds($request->options->connectTimeoutSeconds), $remainingMs);
+        $this->setOption($handle, CURLOPT_TIMEOUT_MS, $timeoutMs, 'Unable to configure cURL operation timeout.');
+        $this->setOption($handle, CURLOPT_CONNECTTIMEOUT_MS, $connectTimeoutMs, 'Unable to configure cURL connection timeout.');
+    }
+
     private function applyUpload(HttpRequest $request, \CurlHandle $handle): HttpRequest
     {
         $uploadPath = $request->metadata['upload_file_path'] ?? null;
@@ -176,14 +205,18 @@ final class CurlHandleConfigurator
             $resolvedRequest = $resolvedRequest->header('Content-Type', 'application/octet-stream');
         }
 
-        $resource = $this->openUploadResource($request, $uploadPath, $uploadStream);
+        $preparedHandle = $request->metadata['_upload_handle'] ?? null;
+        $resource = is_resource($preparedHandle)
+            ? $this->rewindUploadResource($request, $preparedHandle)
+            : $this->openUploadResource($request, $uploadPath, $uploadStream);
+        $openedByConfigurator = !is_resource($preparedHandle) && is_string($uploadPath);
 
         try {
             $this->setOption($handle, CURLOPT_UPLOAD, true, 'Unable to configure cURL upload mode.');
             $this->setOption($handle, CURLOPT_INFILE, $resource, 'Unable to configure the cURL upload source.');
             $this->setOption($handle, CURLOPT_INFILESIZE, $size, 'Unable to configure the cURL upload size.');
         } catch (Throwable $throwable) {
-            if (is_string($uploadPath)) {
+            if ($openedByConfigurator) {
                 fclose($resource);
             }
 
@@ -193,7 +226,7 @@ final class CurlHandleConfigurator
         return $resolvedRequest->metadata([
             ...$resolvedRequest->metadata,
             '_upload_handle' => $resource,
-            '_upload_opened_by_configurator' => is_string($uploadPath),
+            '_upload_opened_by_configurator' => $openedByConfigurator,
         ]);
     }
 
@@ -213,12 +246,21 @@ final class CurlHandleConfigurator
             throw new InvalidArgumentException('Upload source must be a file path or stream resource.');
         }
 
+        return $this->rewindUploadResource($request, $uploadStream);
+    }
+
+    /**
+     * @param resource $resource
+     * @return resource
+     */
+    private function rewindUploadResource(HttpRequest $request, mixed $resource): mixed
+    {
         $offset = $request->metadata['upload_offset'] ?? null;
-        if (!is_int($offset) || fseek($uploadStream, $offset) !== 0) {
+        if (!is_int($offset) || fseek($resource, $offset) !== 0) {
             throw new InvalidArgumentException('Unable to rewind HTTP upload stream to its starting position.');
         }
 
-        return $uploadStream;
+        return $resource;
     }
 
     private function setOption(\CurlHandle $handle, int $option, mixed $value, string $error): void

@@ -2,8 +2,14 @@
 
 declare(strict_types=1);
 
+use Infocyph\Runwire\Coroutine\CoroutineRuntime;
+use Infocyph\Runwire\Coroutine\CoroutineScope;
+use Infocyph\Runwire\Runtime\Enum\RuntimeDriver;
+use Infocyph\Runwire\RuntimeCapabilities;
+use Infocyph\Runwire\RuntimeContext;
 use Infocyph\TalkingBytes\Core\Event\CallableEventDispatcher;
 use Infocyph\TalkingBytes\Email\Config\Pop3Config;
+use Infocyph\TalkingBytes\Email\EmailMailboxFactory;
 use Infocyph\TalkingBytes\Email\Enum\Pop3Security;
 use Infocyph\TalkingBytes\Email\Exception\MailboxAuthenticationException;
 use Infocyph\TalkingBytes\Email\Exception\MailboxConnectionException;
@@ -201,6 +207,11 @@ foreach ($expect as $entry) {
         $transcript['mismatches'][] = sprintf('regex mismatch "%s" for "%s"', $entry['regex'], $command);
     }
 
+    $delayMs = (int) ($entry['delay_ms'] ?? 0);
+    if ($delayMs > 0) {
+        usleep($delayMs * 1000);
+    }
+
     $status = (string) ($entry['status'] ?? '+OK');
     $text = (string) ($entry['text'] ?? 'done');
     fwrite($client, sprintf("%s %s\r\n", $status, $text));
@@ -282,6 +293,69 @@ PHP;
         throw new RuntimeException('Fake POP3 server reported an invalid port.');
     }
 }
+
+function pop3RunwireContext(): RuntimeContext
+{
+    return RuntimeContext::fromCapabilities(
+        new RuntimeCapabilities(
+            driver: RuntimeDriver::NATIVE,
+            persistentProcess: true,
+            persistentApplication: true,
+            ownsEventLoop: true,
+            runwireLoopAvailable: true,
+            supportsAsyncIo: true,
+            supportsRunwireCoroutines: true,
+        ),
+        mode: 'native',
+        concurrent: true,
+    );
+}
+
+it('lets Runwire peers progress while POP3 waits for a response', function (): void {
+    $server = FakePop3ServerProcess::start([
+        'expect' => [
+            ['regex' => '/^CAPA$/', 'multiline' => ['UIDL']],
+            ['regex' => '/^USER user$/'],
+            ['regex' => '/^PASS pass$/'],
+            ['regex' => '/^STAT$/', 'text' => '1 123', 'delay_ms' => 120],
+            ['regex' => '/^QUIT$/'],
+        ],
+    ]);
+    $runtime = pop3RunwireContext();
+    $events = [];
+
+    try {
+        $status = (new CoroutineRuntime())->run(
+            static function (CoroutineScope $scope) use ($runtime, $server, &$events): \Infocyph\TalkingBytes\Email\Mailbox\MailboxStatus {
+                $scope->spawn(static function () use ($scope, &$events): void {
+                    $scope->sleep(0.02);
+                    $events[] = 'peer';
+                });
+
+                $mailbox = (new EmailMailboxFactory())
+                    ->withRunwire($runtime, scope: $scope)
+                    ->usingPop3(new Pop3Config(
+                        host: '127.0.0.1',
+                        port: $server->port,
+                        security: Pop3Security::None,
+                        username: 'user',
+                        password: 'pass',
+                    ));
+
+                $status = $mailbox->status();
+                $events[] = 'pop3';
+                $mailbox->logout();
+
+                return $status;
+            },
+        );
+
+        expect($status->messages)->toBe(1)
+            ->and($events)->toBe(['peer', 'pop3']);
+    } finally {
+        $server->stop();
+    }
+});
 
 it('fetches status, list and parsed message over pop3 socket transport', function (): void {
     $rawLines = [

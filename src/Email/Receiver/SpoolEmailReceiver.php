@@ -8,7 +8,9 @@ use FilesystemIterator;
 use Infocyph\TalkingBytes\Core\Event\BestEffortEventDispatcher;
 use Infocyph\TalkingBytes\Core\Event\EventDispatcher;
 use Infocyph\TalkingBytes\Core\Event\NullEventDispatcher;
+use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
 use Infocyph\TalkingBytes\Core\Support\Clock;
+use Infocyph\TalkingBytes\Core\Support\OperationDeadline;
 use Infocyph\TalkingBytes\Email\Config\SpoolConfig;
 use Infocyph\TalkingBytes\Email\Parser\EmailParser;
 use Infocyph\TalkingBytes\Email\Parser\RawEmailParser;
@@ -30,6 +32,8 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
         private ?string $failedDirectory = null,
         ?EventDispatcher $events = null,
         ?Clock $clock = null,
+        private ?CancellationSignal $cancellation = null,
+        private ?OperationDeadline $operationDeadline = null,
     ) {
         $this->events = new BestEffortEventDispatcher($events ?? new NullEventDispatcher());
         $this->clock = $clock ?? Clock::system();
@@ -86,6 +90,17 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
     public function receiveParsed(): ?ParsedEmail
     {
         return $this->readNext(consume: true);
+    }
+
+    private function assertExecutionAllowed(): void
+    {
+        if ($this->cancellation?->isRequested() === true) {
+            throw new RuntimeException('Email receive operation cancelled.');
+        }
+
+        if ($this->operationDeadline?->expired() === true) {
+            throw new RuntimeException('Email receive operation deadline exceeded.');
+        }
     }
 
     private function beginProcessing(string $file, bool $consume): ?string
@@ -323,6 +338,7 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
 
     private function readNext(bool $consume): ?ParsedEmail
     {
+        $this->assertExecutionAllowed();
         $sourceFile = $this->firstSpoolFile();
         if ($sourceFile === null) {
             return null;

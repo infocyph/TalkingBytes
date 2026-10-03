@@ -14,13 +14,17 @@ use Infocyph\TalkingBytes\Core\Event\EventDispatcher;
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
 use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
 use Infocyph\TalkingBytes\Core\Support\Clock;
+use Infocyph\TalkingBytes\Core\Support\OperationDeadline;
+use Infocyph\TalkingBytes\Core\Support\Sleeper;
 use Infocyph\TalkingBytes\Http\Body\MultipartBody;
 use Infocyph\TalkingBytes\Http\Contract\HttpMiddleware;
 use Infocyph\TalkingBytes\Http\Contract\HttpTransport;
 use Infocyph\TalkingBytes\Http\Cookie\CookieJar;
+use Infocyph\TalkingBytes\Http\Middleware\CancellationMiddleware;
 use Infocyph\TalkingBytes\Http\Middleware\CircuitBreakerMiddleware;
 use Infocyph\TalkingBytes\Http\Middleware\IdempotencyMiddleware;
 use Infocyph\TalkingBytes\Http\Middleware\LoggingMiddleware;
+use Infocyph\TalkingBytes\Http\Middleware\OperationDeadlineMiddleware;
 use Infocyph\TalkingBytes\Http\Middleware\RateLimitMiddleware;
 use Infocyph\TalkingBytes\Http\Middleware\RetryMiddleware;
 use Infocyph\TalkingBytes\Http\Middleware\TimeoutMiddleware;
@@ -87,6 +91,8 @@ final readonly class HttpClient
                 caBundle: $config->caBundle,
                 userAgent: $config->userAgent,
                 maxResponseBytes: $config->maxResponseBytes,
+                maxResponseHeaderBytes: $config->maxResponseHeaderBytes,
+                maxResponseHeaderCount: $config->maxResponseHeaderCount,
             ),
             defaultHeaders: $config->defaultHeaders,
         );
@@ -102,8 +108,9 @@ final readonly class HttpClient
         ?HttpTransport $transport = null,
         ?Clock $clock = null,
         ?HttpClientConfig $baseConfig = null,
+        ?Sleeper $sleeper = null,
     ): self {
-        $factory = new HttpClientFactory($events, $cancellation, $clock);
+        $factory = new HttpClientFactory($events, $cancellation, $clock, $sleeper);
 
         return $baseConfig === null
             ? $factory->fromArray($config, $transport)
@@ -307,6 +314,11 @@ final readonly class HttpClient
         return $this->withAuthenticator(new BearerTokenAuth($token));
     }
 
+    public function withCancellation(CancellationSignal $cancellation): self
+    {
+        return $this->withMiddleware(new CancellationMiddleware($cancellation));
+    }
+
     public function withCircuitBreaker(CircuitBreaker $circuitBreaker): self
     {
         return $this->withMiddleware(new CircuitBreakerMiddleware($circuitBreaker));
@@ -343,8 +355,9 @@ final readonly class HttpClient
     public function withHttpRetry(
         ?HttpRetryPolicy $policy = null,
         ?CancellationSignal $cancellation = null,
+        ?Sleeper $sleeper = null,
     ): self {
-        return $this->withRetry($policy ?? HttpRetryPolicy::standard(), $cancellation);
+        return $this->withRetry($policy ?? HttpRetryPolicy::standard(), $cancellation, $sleeper);
     }
 
     public function withIdempotency(string $headerName = 'Idempotency-Key'): self
@@ -368,6 +381,16 @@ final readonly class HttpClient
         return new self($this->transport, $middlewares, $this->defaultOptions, $this->defaultHeaders, $this->authenticators, $this->cookieJar);
     }
 
+    public function withOperationDeadline(OperationDeadline $deadline): self
+    {
+        return $this->withMiddleware(new OperationDeadlineMiddleware($deadline));
+    }
+
+    public function withOperationTimeout(float $seconds, ?Clock $clock = null): self
+    {
+        return $this->withMiddleware(new OperationDeadlineMiddleware($seconds, $clock));
+    }
+
     public function withQueryAuth(string $key, string $value): self
     {
         return $this->withApiKeyQuery($key, $value);
@@ -378,9 +401,12 @@ final readonly class HttpClient
         return $this->withMiddleware(new RateLimitMiddleware($rateLimiter));
     }
 
-    public function withRetry(RetryPolicy $policy, ?CancellationSignal $cancellation = null): self
-    {
-        return $this->withMiddleware(new RetryMiddleware($policy, $cancellation));
+    public function withRetry(
+        RetryPolicy $policy,
+        ?CancellationSignal $cancellation = null,
+        ?Sleeper $sleeper = null,
+    ): self {
+        return $this->withMiddleware(new RetryMiddleware($policy, $cancellation, $sleeper));
     }
 
     public function withSigner(RequestSigner $signer): self
@@ -462,7 +488,7 @@ final readonly class HttpClient
         return $request;
     }
 
-    private function applyOptionalOptionDefaults(HttpRequest $request): HttpRequest
+    private function applyOptionalConnectionDefaults(HttpRequest $request): HttpRequest
     {
         if ($this->defaultOptions->proxy !== null && !$request->options->isExplicit('proxy')) {
             $request = $request->proxy($this->defaultOptions->proxy);
@@ -485,11 +511,37 @@ final readonly class HttpClient
             $request = $request->userAgent($this->defaultOptions->userAgent);
         }
 
+        return $request;
+    }
+
+    private function applyOptionalOptionDefaults(HttpRequest $request): HttpRequest
+    {
+        $request = $this->applyOptionalConnectionDefaults($request);
+
+        return $this->applyResponseLimitDefaults($request);
+    }
+
+    private function applyResponseLimitDefaults(HttpRequest $request): HttpRequest
+    {
         if (
             $this->defaultOptions->maxResponseBytes !== null
             && !$request->options->isExplicit('maxResponseBytes')
         ) {
             $request = $request->maxResponseBytes($this->defaultOptions->maxResponseBytes);
+        }
+
+        if (
+            $this->defaultOptions->maxResponseHeaderBytes !== null
+            && !$request->options->isExplicit('maxResponseHeaderBytes')
+        ) {
+            $request = $request->maxResponseHeaderBytes($this->defaultOptions->maxResponseHeaderBytes);
+        }
+
+        if (
+            $this->defaultOptions->maxResponseHeaderCount !== null
+            && !$request->options->isExplicit('maxResponseHeaderCount')
+        ) {
+            $request = $request->maxResponseHeaderCount($this->defaultOptions->maxResponseHeaderCount);
         }
 
         return $request;

@@ -9,17 +9,21 @@ use Infocyph\TalkingBytes\Auth\AuthenticatorInterface;
 use Infocyph\TalkingBytes\Auth\BasicAuth;
 use Infocyph\TalkingBytes\Auth\BearerTokenAuth;
 use Infocyph\TalkingBytes\Auth\SignedRequestAuth;
+use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
+use Infocyph\TalkingBytes\Core\Support\OperationDeadline;
 use Infocyph\TalkingBytes\Http\Body\FormBody;
 use Infocyph\TalkingBytes\Http\Body\HttpBody;
 use Infocyph\TalkingBytes\Http\Body\JsonBody;
 use Infocyph\TalkingBytes\Http\Body\MultipartBody;
 use Infocyph\TalkingBytes\Http\Body\RawBody;
 use Infocyph\TalkingBytes\Http\Enum\HttpMethod;
+use Infocyph\TalkingBytes\Http\Internal\UploadHandleManager;
 use Infocyph\TalkingBytes\Http\Options\CurlOptions;
 use Infocyph\TalkingBytes\Http\Signing\RequestSigner;
 use Infocyph\TalkingBytes\Http\Support\HeaderBag;
 use Infocyph\TalkingBytes\Http\Support\QueryParams;
 use InvalidArgumentException;
+use Throwable;
 
 final readonly class HttpRequest
 {
@@ -217,6 +221,13 @@ final readonly class HttpRequest
         return $this->withOptions($this->options->withCaBundle($path));
     }
 
+    public function cancellationSignal(): ?CancellationSignal
+    {
+        $cancellation = $this->metadata['_cancellation_signal'] ?? null;
+
+        return $cancellation instanceof CancellationSignal ? $cancellation : null;
+    }
+
     public function connectTimeout(int $seconds): self
     {
         return $this->withOptions($this->options->withConnectTimeoutSeconds($seconds));
@@ -345,6 +356,16 @@ final readonly class HttpRequest
         return $this->withOptions($this->options->withMaxResponseBytes($bytes));
     }
 
+    public function maxResponseHeaderBytes(int $bytes): self
+    {
+        return $this->withOptions($this->options->withMaxResponseHeaderBytes($bytes));
+    }
+
+    public function maxResponseHeaderCount(int $count): self
+    {
+        return $this->withOptions($this->options->withMaxResponseHeaderCount($count));
+    }
+
     public function maxUploadBytes(int $bytes): self
     {
         return $this->withOptions($this->options->withMaxUploadBytes($bytes));
@@ -377,18 +398,32 @@ final readonly class HttpRequest
         return $this->body($multipartBody ?? MultipartBody::new());
     }
 
+    public function operationDeadline(): ?OperationDeadline
+    {
+        $deadline = $this->metadata['_operation_deadline'] ?? null;
+
+        return $deadline instanceof OperationDeadline ? $deadline : null;
+    }
+
     public function prepareForTransport(): self
     {
         if (($this->metadata['_transport_prepared'] ?? false) === true) {
             return $this;
         }
 
-        $request = $this;
-        if ($request->body !== null && !$request->headers->has('Content-Type')) {
-            $request = $request->header('Content-Type', $request->body->contentType());
-        }
+        $request = $this->prepareUploadForTransport();
 
-        $request = $request->applyAuthenticators();
+        try {
+            if ($request->body !== null && !$request->headers->has('Content-Type')) {
+                $request = $request->header('Content-Type', $request->body->contentType());
+            }
+
+            $request = $request->applyAuthenticators();
+        } catch (Throwable $throwable) {
+            $request->releasePreparedUploadHandle();
+
+            throw $throwable;
+        }
 
         return $request->metadata([...$request->metadata, '_transport_prepared' => true]);
     }
@@ -454,8 +489,7 @@ final readonly class HttpRequest
     {
         $headers = $this->headers;
         $authenticators = $this->authenticators;
-        $metadata = $this->metadata;
-        unset($metadata['_transport_prepared']);
+        $metadata = UploadHandleManager::prepareRedirectMetadata($this->metadata);
         if (!$preserveAuthentication) {
             foreach (array_unique([
                 'Authorization',
@@ -482,7 +516,18 @@ final readonly class HttpRequest
         if ($switchToGet) {
             $method = HttpMethod::Get;
             $body = null;
-            $headers = $headers->without('Content-Type')->without('Content-Length');
+            unset(
+                $metadata['upload_file_path'],
+                $metadata['upload_stream'],
+                $metadata['upload_size'],
+                $metadata['upload_offset'],
+                $metadata['_upload_source_offset'],
+            );
+            $headers = $headers
+                ->without('Content-Type')
+                ->without('Content-Length')
+                ->without('Transfer-Encoding')
+                ->without('Expect');
         }
 
         return new self(
@@ -619,6 +664,22 @@ final readonly class HttpRequest
         return $this->withAuthenticator(new BearerTokenAuth(token: $token));
     }
 
+    public function withCancellationSignal(CancellationSignal $cancellation): self
+    {
+        return $this->metadata([
+            ...$this->metadata,
+            '_cancellation_signal' => $cancellation,
+        ]);
+    }
+
+    public function withOperationDeadline(OperationDeadline $deadline): self
+    {
+        return $this->metadata([
+            ...$this->metadata,
+            '_operation_deadline' => $deadline,
+        ]);
+    }
+
     public function withoutHeader(string $name): self
     {
         return new self(
@@ -693,6 +754,61 @@ final readonly class HttpRequest
     }
 
     /**
+     * @param resource $source
+     * @param resource $snapshot
+     */
+    private function copyUploadBytes(mixed $source, mixed $snapshot, int $size): void
+    {
+        $remaining = $size;
+        while ($remaining > 0) {
+            $chunk = fread($source, min(8192, $remaining));
+            if ($chunk === false || $chunk === '') {
+                throw new InvalidArgumentException('HTTP upload ended before the declared upload size.');
+            }
+            if (fwrite($snapshot, $chunk) !== strlen($chunk)) {
+                throw new InvalidArgumentException('Unable to snapshot HTTP upload for signing.');
+            }
+
+            $remaining -= strlen($chunk);
+        }
+    }
+
+    /**
+     * @param resource $snapshot
+     * @param resource|null $uploadStream
+     */
+    private function copyUploadToSnapshot(
+        mixed $snapshot,
+        ?string $uploadPath,
+        mixed $uploadStream,
+        int $size,
+    ): void {
+        [$source, $closeSource, $offset] = $this->openUploadSource($uploadPath, $uploadStream);
+        $originalOffset = ftell($source);
+        if (!is_int($originalOffset) || fseek($source, $offset) !== 0) {
+            if ($closeSource) {
+                fclose($source);
+            }
+
+            throw new InvalidArgumentException('Unable to position HTTP upload stream for signing.');
+        }
+
+        try {
+            $this->copyUploadBytes($source, $snapshot, $size);
+        } finally {
+            $this->restoreUploadSource($source, $closeSource, $originalOffset);
+        }
+    }
+
+    private function hasSignedAuthenticator(): bool
+    {
+        return array_any(
+            $this->authenticators,
+            static fn(AuthenticatorInterface $authenticator): bool => $authenticator instanceof SignedRequestAuth,
+        );
+    }
+
+    /**
      * @param string|array<int, mixed> $value
      * @return string|list<string>
      */
@@ -738,6 +854,91 @@ final readonly class HttpRequest
         }
 
         return $normalized;
+    }
+
+    /**
+     * @param resource|null $uploadStream
+     * @return array{0: resource, 1: bool, 2: int}
+     */
+    private function openUploadSource(?string $uploadPath, mixed $uploadStream): array
+    {
+        if ($uploadPath !== null) {
+            $source = fopen($uploadPath, 'rb');
+            if ($source === false) {
+                throw new InvalidArgumentException(sprintf('Failed to open upload file: %s', $uploadPath));
+            }
+
+            return [$source, true, 0];
+        }
+
+        if (!is_resource($uploadStream)) {
+            throw new InvalidArgumentException('Prepared HTTP upload source is invalid.');
+        }
+
+        $offset = $this->metadata['upload_offset'] ?? null;
+        if (!is_int($offset) || $offset < 0) {
+            throw new InvalidArgumentException('Prepared HTTP upload offset is invalid.');
+        }
+
+        return [$uploadStream, false, $offset];
+    }
+
+    private function prepareUploadForTransport(): self
+    {
+        $rawUploadPath = $this->metadata['upload_file_path'] ?? null;
+        $rawUploadStream = $this->metadata['upload_stream'] ?? null;
+        $uploadPath = is_string($rawUploadPath) ? $rawUploadPath : null;
+        $uploadStream = is_resource($rawUploadStream) ? $rawUploadStream : null;
+        if (($uploadPath === null && $uploadStream === null) || !$this->hasSignedAuthenticator()) {
+            return $this;
+        }
+
+        $size = $this->metadata['upload_size'] ?? null;
+        if (!is_int($size) || $size < 0) {
+            throw new InvalidArgumentException('Upload size metadata is missing or invalid.');
+        }
+
+        $snapshot = tmpfile();
+        if ($snapshot === false) {
+            throw new InvalidArgumentException('Unable to create a temporary HTTP upload snapshot.');
+        }
+
+        try {
+            $this->copyUploadToSnapshot($snapshot, $uploadPath, $uploadStream, $size);
+            rewind($snapshot);
+
+            return $this->metadata(
+                UploadHandleManager::prepareSnapshotMetadata($this->metadata, $snapshot),
+            );
+        } catch (Throwable $throwable) {
+            fclose($snapshot);
+
+            throw $throwable;
+        }
+    }
+
+    private function releasePreparedUploadHandle(): void
+    {
+        $resource = $this->metadata['_upload_handle'] ?? null;
+        if (($this->metadata['_upload_handle_owned'] ?? false) === true && is_resource($resource)) {
+            fclose($resource);
+        }
+    }
+
+    /**
+     * @param resource $source
+     */
+    private function restoreUploadSource(mixed $source, bool $closeSource, int $originalOffset): void
+    {
+        if ($closeSource) {
+            fclose($source);
+
+            return;
+        }
+
+        if (fseek($source, $originalOffset) !== 0) {
+            throw new InvalidArgumentException('Unable to restore HTTP upload stream after signing.');
+        }
     }
 
     /**

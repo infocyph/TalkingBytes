@@ -5,7 +5,10 @@ declare(strict_types=1);
 namespace Infocyph\TalkingBytes\Email\Transport;
 
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
+use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
 use Infocyph\TalkingBytes\Core\Support\Clock;
+use Infocyph\TalkingBytes\Core\Support\OperationDeadline;
+use Infocyph\TalkingBytes\Core\Support\StreamWaiter;
 use Infocyph\TalkingBytes\Email\Config\SmtpConfig;
 use Infocyph\TalkingBytes\Email\EmailMessage;
 use Infocyph\TalkingBytes\Email\Enum\SmtpAuthMechanism;
@@ -16,6 +19,7 @@ use Infocyph\TalkingBytes\Email\System\RawEmailBuilder;
 use Infocyph\TalkingBytes\Email\System\SmtpCapabilities;
 use Infocyph\TalkingBytes\Email\System\SmtpCapabilityParser;
 use Infocyph\TalkingBytes\Email\System\SmtpEnvelopePlanner;
+use Infocyph\TalkingBytes\Email\System\SmtpIoRuntime;
 use Infocyph\TalkingBytes\Email\System\SmtpMessageStreamPreparer;
 use Infocyph\TalkingBytes\Email\System\SmtpTlsContext;
 use Infocyph\TalkingBytes\Email\ValueObject\EmailHeaders;
@@ -25,6 +29,8 @@ final readonly class SmtpTransport implements EmailTransport
 {
     private Clock $clock;
 
+    private SmtpIoRuntime $io;
+
     public function __construct(
         private SmtpConfig $config,
         private RawEmailBuilder $rawEmailBuilder = new RawEmailBuilder(),
@@ -32,8 +38,12 @@ final readonly class SmtpTransport implements EmailTransport
         private ?SmtpEnvelopePlanner $envelopePlanner = null,
         private SmtpTlsContext $tlsContext = new SmtpTlsContext(),
         ?Clock $clock = null,
+        ?CancellationSignal $cancellation = null,
+        private ?OperationDeadline $operationDeadline = null,
+        private ?StreamWaiter $streamWaiter = null,
     ) {
         $this->clock = $clock ?? Clock::system();
+        $this->io = new SmtpIoRuntime($cancellation, $operationDeadline, $streamWaiter);
     }
 
     public function send(EmailMessage $message): CommunicationResult
@@ -51,6 +61,8 @@ final readonly class SmtpTransport implements EmailTransport
         $transcript = [];
 
         try {
+            $this->io->assertExecutionAllowed();
+
             $prepared = new SmtpMessageStreamPreparer(
                 $this->rawEmailBuilder,
                 $this->config->maxMessageBytes,
@@ -129,6 +141,23 @@ final readonly class SmtpTransport implements EmailTransport
                 fclose($messageStream);
             }
         }
+    }
+
+    /**
+     * @param resource $connection
+     */
+    private function applyReadDeadline(mixed $connection, OperationDeadline $deadline): void
+    {
+        $remainingMicros = $deadline->remainingMicroseconds();
+        if ($remainingMicros === 0) {
+            throw new RuntimeException('SMTP command deadline exceeded.');
+        }
+
+        stream_set_timeout(
+            $connection,
+            intdiv($remainingMicros, 1_000_000),
+            $remainingMicros % 1_000_000,
+        );
     }
 
     private function assertSizeWithinLimit(SmtpCapabilities $capabilities, int $messageSizeBytes): ?int
@@ -213,6 +242,40 @@ final readonly class SmtpTransport implements EmailTransport
         return array_merge($base, $metadata);
     }
 
+    private function commandDeadline(): OperationDeadline
+    {
+        $deadline = OperationDeadline::after((float) $this->config->timeoutSeconds, $this->clock);
+
+        return $this->operationDeadline?->earliest($deadline) ?? $deadline;
+    }
+
+    /**
+     * @param resource $connection
+     */
+    private function enableTls(mixed $connection): void
+    {
+        $deadline = $this->commandDeadline();
+        $this->io->assertExecutionAllowed($deadline);
+        $this->applyReadDeadline($connection, $deadline);
+
+        if ($this->streamWaiter !== null && !stream_set_blocking($connection, true)) {
+            throw new RuntimeException('Unable to enter blocking mode for SMTP STARTTLS negotiation.');
+        }
+
+        try {
+            $enabled = stream_socket_enable_crypto($connection, true, STREAM_CRYPTO_METHOD_TLS_CLIENT);
+        } finally {
+            if ($this->streamWaiter !== null && !stream_set_blocking($connection, false)) {
+                throw new RuntimeException('Unable to restore cooperative SMTP socket mode after STARTTLS.');
+            }
+        }
+
+        $this->io->assertExecutionAllowed($deadline);
+        if ($enabled !== true) {
+            throw new RuntimeException('STARTTLS negotiation failed.');
+        }
+    }
+
     /**
      * @param resource $connection
      * @param list<int> $expectedCodes
@@ -282,9 +345,7 @@ final readonly class SmtpTransport implements EmailTransport
         $this->write($connection, "STARTTLS\r\n", $transcript);
         $this->expect($connection, [220], 'STARTTLS', $transcript);
 
-        if (!stream_socket_enable_crypto($connection, true, STREAM_CRYPTO_METHOD_TLS_CLIENT)) {
-            throw new RuntimeException('STARTTLS negotiation failed.');
-        }
+        $this->enableTls($connection);
 
         $this->write($connection, sprintf("EHLO %s\r\n", $this->config->localDomain), $transcript);
         [, , $secureEhloLines] = $this->expect($connection, [250], 'EHLO after STARTTLS', $transcript);
@@ -297,6 +358,8 @@ final readonly class SmtpTransport implements EmailTransport
      */
     private function openConnection()
     {
+        $deadline = $this->commandDeadline();
+        $this->io->assertExecutionAllowed($deadline);
         $host = sprintf(
             '%s://%s:%d',
             $this->config->security === SmtpSecurity::Ssl ? 'ssl' : 'tcp',
@@ -318,7 +381,7 @@ final readonly class SmtpTransport implements EmailTransport
                 $host,
                 $errno,
                 $errstr,
-                $this->config->timeoutSeconds,
+                max(0.001, min((float) $this->config->timeoutSeconds, $deadline->remainingSeconds())),
                 STREAM_CLIENT_CONNECT,
                 stream_context_create(['ssl' => $this->tlsContext->options($this->config)]),
             );
@@ -330,7 +393,13 @@ final readonly class SmtpTransport implements EmailTransport
             throw new RuntimeException(sprintf('Failed to connect to SMTP server: %s (%d)', $errstr, $errno));
         }
 
-        stream_set_timeout($connection, $this->config->timeoutSeconds);
+        $this->io->assertExecutionAllowed($deadline);
+        $this->applyReadDeadline($connection, $deadline);
+        if ($this->streamWaiter !== null && !stream_set_blocking($connection, false)) {
+            fclose($connection);
+
+            throw new RuntimeException('Unable to configure SMTP socket for cooperative I/O.');
+        }
 
         return $connection;
     }
@@ -345,45 +414,47 @@ final readonly class SmtpTransport implements EmailTransport
         $response = '';
         $lines = [];
         $code = 0;
-        $deadline = $this->clock->monotonic() + $this->config->timeoutSeconds;
+        $deadline = $this->commandDeadline();
 
-        while (true) {
-            if ($this->clock->monotonic() >= $deadline) {
-                throw new RuntimeException('SMTP command deadline exceeded.');
-            }
+        try {
+            while (true) {
+                $line = $this->readResponseLine($connection, $deadline);
 
-            $line = fgets($connection, 1024);
-            if ($line === false) {
-                $metadata = stream_get_meta_data($connection);
-                if ($metadata['timed_out']) {
-                    throw new RuntimeException('SMTP server response timed out.');
+                if (!str_ends_with($line, "\n") && !feof($connection)) {
+                    throw new RuntimeException('SMTP response line exceeds 1023 bytes.');
                 }
 
-                throw new RuntimeException('Failed to read SMTP server response.');
+                $response .= $line;
+                $this->recordTranscriptResponse($transcript, $line);
+                $lines[] = rtrim($line, "\r\n");
+                if (count($lines) > 100 || strlen($response) > 65_536) {
+                    throw new RuntimeException('SMTP response exceeds protocol bounds.');
+                }
+
+                if (preg_match('/^(\d{3})([\s-])/', $line, $matches) !== 1) {
+                    continue;
+                }
+
+                $code = (int) $matches[1];
+                if ($matches[2] === ' ') {
+                    break;
+                }
             }
 
-            if (!str_ends_with($line, "\n") && !feof($connection)) {
-                throw new RuntimeException('SMTP response line exceeds 1023 bytes.');
-            }
-
-            $response .= $line;
-            $this->recordTranscriptResponse($transcript, $line);
-            $lines[] = rtrim($line, "\r\n");
-            if (count($lines) > 100 || strlen($response) > 65_536) {
-                throw new RuntimeException('SMTP response exceeds protocol bounds.');
-            }
-
-            if (preg_match('/^(\d{3})([\s-])/', $line, $matches) !== 1) {
-                continue;
-            }
-
-            $code = (int) $matches[1];
-            if ($matches[2] === ' ') {
-                break;
-            }
+            return [$code, $response, $lines];
+        } finally {
+            stream_set_timeout($connection, $this->config->timeoutSeconds);
         }
+    }
 
-        return [$code, $response, $lines];
+    /**
+     * @param resource $connection
+     */
+    private function readResponseLine($connection, OperationDeadline $deadline): string
+    {
+        $this->applyReadDeadline($connection, $deadline);
+
+        return $this->io->readLine($connection, $deadline);
     }
 
     /**
@@ -745,20 +816,7 @@ final readonly class SmtpTransport implements EmailTransport
     private function write($connection, string $data, array &$transcript = [], bool $sensitive = false, bool $dataPayload = false): void
     {
         $this->recordTranscriptCommand($transcript, $data, $sensitive, $dataPayload);
-
-        $dataLength = strlen($data);
-        $bytesWritten = 0;
-
-        while ($bytesWritten < $dataLength) {
-            $chunk = substr($data, $bytesWritten);
-            $written = fwrite($connection, $chunk);
-
-            if ($written === false || $written === 0) {
-                throw new RuntimeException('Failed to write to SMTP server socket.');
-            }
-
-            $bytesWritten += $written;
-        }
+        $this->io->write($connection, $data, $this->commandDeadline());
     }
 
     /**

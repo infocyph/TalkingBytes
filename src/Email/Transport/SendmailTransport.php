@@ -7,6 +7,7 @@ namespace Infocyph\TalkingBytes\Email\Transport;
 use Infocyph\TalkingBytes\Core\Result\CommunicationResult;
 use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
 use Infocyph\TalkingBytes\Core\Support\Clock;
+use Infocyph\TalkingBytes\Core\Support\OperationDeadline;
 use Infocyph\TalkingBytes\Core\Support\Sleeper;
 use Infocyph\TalkingBytes\Email\Config\SendmailConfig;
 use Infocyph\TalkingBytes\Email\EmailMessage;
@@ -28,6 +29,7 @@ final readonly class SendmailTransport implements EmailTransport
         private ?CancellationSignal $cancellation = null,
         ?Clock $clock = null,
         ?Sleeper $sleeper = null,
+        private ?OperationDeadline $operationDeadline = null,
     ) {
         $this->clock = $clock ?? Clock::system();
         $this->sleeper = $sleeper ?? Sleeper::system();
@@ -90,6 +92,7 @@ final readonly class SendmailTransport implements EmailTransport
             $this->cancellation,
             $this->clock,
             $this->sleeper,
+            $this->operationDeadline,
         );
 
         try {

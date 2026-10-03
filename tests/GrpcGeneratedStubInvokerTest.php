@@ -590,3 +590,88 @@ it('documents that generated bidi flow is write-then-read rather than interactiv
     expect($result->error)->toContain('interactive peer requires an inbound read');
     expect($cancelled)->toBeTrue();
 });
+
+
+it('does not invoke a generated unary stub when cancellation is already requested', function (): void {
+    $stub = new class {
+        public int $calls = 0;
+
+        public function Create(mixed $message, array $metadata = [], array $options = []): object
+        {
+            unset($message, $metadata, $options);
+            $this->calls++;
+
+            return new class {
+                public function wait(): array
+                {
+                    return [['ok' => true], ['code' => 0]];
+                }
+            };
+        }
+    };
+
+    $result = GrpcClient::usingGeneratedStub(
+        $stub,
+        cancellation: CancellationSignal::fromCallable(static fn(): bool => true),
+    )->send(new GrpcRequest('Orders/Create', ['id' => 1]));
+
+    expect($result->successful)->toBeFalse()
+        ->and($result->metadata['cancelled'] ?? false)->toBeTrue()
+        ->and($stub->calls)->toBe(0);
+});
+
+
+it('does not open generated grpc streams when cancellation is already requested', function (): void {
+    $stub = new class {
+        public int $calls = 0;
+
+        public function Chat(array $metadata = [], array $options = []): never
+        {
+            unset($metadata, $options);
+            $this->calls++;
+
+            throw new RuntimeException('bidi stream should not open');
+        }
+
+        public function List(mixed $message, array $metadata = [], array $options = []): never
+        {
+            unset($message, $metadata, $options);
+            $this->calls++;
+
+            throw new RuntimeException('server stream should not open');
+        }
+
+        public function Upload(array $metadata = [], array $options = []): never
+        {
+            unset($metadata, $options);
+            $this->calls++;
+
+            throw new RuntimeException('client stream should not open');
+        }
+    };
+
+    $client = GrpcClient::usingGeneratedStub(
+        $stub,
+        cancellation: CancellationSignal::fromCallable(static fn(): bool => true),
+    );
+
+    $server = $client->serverStream(
+        new GrpcRequest('Orders/List', []),
+        static function (mixed $message): void {
+            unset($message);
+        },
+    );
+    $clientStream = $client->clientStream('Orders/Upload', [['id' => 1]]);
+    $bidi = $client->bidiStream(
+        'Orders/Chat',
+        [['id' => 1]],
+        static function (mixed $message): void {
+            unset($message);
+        },
+    );
+
+    expect($server->metadata['cancelled'] ?? false)->toBeTrue()
+        ->and($clientStream->metadata['cancelled'] ?? false)->toBeTrue()
+        ->and($bidi->metadata['cancelled'] ?? false)->toBeTrue()
+        ->and($stub->calls)->toBe(0);
+});

@@ -27,6 +27,8 @@ final readonly class HttpClientConfig
         public ?string $userAgent = null,
         public ?int $maxResponseBytes = null,
         public array $defaultHeaders = [],
+        public ?int $maxResponseHeaderBytes = null,
+        public ?int $maxResponseHeaderCount = null,
     ) {
         new CurlOptions(
             timeoutSeconds: $this->timeoutSeconds,
@@ -39,6 +41,8 @@ final readonly class HttpClientConfig
             caBundle: $this->caBundle,
             userAgent: $this->userAgent,
             maxResponseBytes: $this->maxResponseBytes,
+            maxResponseHeaderBytes: $this->maxResponseHeaderBytes,
+            maxResponseHeaderCount: $this->maxResponseHeaderCount,
         );
 
         new HeaderBag($this->defaultHeaders);
@@ -62,6 +66,12 @@ final readonly class HttpClientConfig
             proxyPassword: is_string($config['proxyPassword'] ?? null) ? $config['proxyPassword'] : null,
             userAgent: is_string($config['userAgent'] ?? null) ? $config['userAgent'] : null,
             maxResponseBytes: isset($config['maxResponseBytes']) ? self::intFrom($config, 'maxResponseBytes', 0) : null,
+            maxResponseHeaderBytes: isset($config['maxResponseHeaderBytes'])
+                ? self::intFrom($config, 'maxResponseHeaderBytes', 0)
+                : null,
+            maxResponseHeaderCount: isset($config['maxResponseHeaderCount'])
+                ? self::intFrom($config, 'maxResponseHeaderCount', 0)
+                : null,
             defaultHeaders: self::parseDefaultHeaders($config['defaultHeaders'] ?? null),
         );
     }

@@ -217,3 +217,75 @@ it('rejects recursive-looking multipart payloads when depth limit is exceeded', 
 
     expect(fn () => $parser->parse($raw))->toThrow(EmailParseException::class, 'MIME nesting depth exceeds limit');
 });
+
+
+it('rejects oversized headers in nested MIME parts', function (): void {
+    $limits = new EmailLimits(maxHeaderBytes: 1024, maxHeaderCount: 10, maxHeaderLineBytes: 80);
+    $parser = new RawEmailParser(limits: $limits);
+
+    $raw = implode("\r\n", [
+        'From: a@example.com',
+        'To: b@example.com',
+        'Content-Type: multipart/mixed; boundary="mix"',
+        '',
+        '--mix',
+        'Content-Type: text/plain',
+        'X-Large: ' . str_repeat('x', 100),
+        '',
+        'payload',
+        '--mix--',
+    ]);
+
+    expect(fn() => $parser->parse($raw))
+        ->toThrow(EmailParseException::class, 'Header line exceeds limit');
+});
+
+it('rejects excessive header fields in nested MIME parts', function (): void {
+    $limits = new EmailLimits(maxHeaderBytes: 1024, maxHeaderCount: 2, maxHeaderLineBytes: 998);
+    $parser = new RawEmailParser(limits: $limits);
+
+    $raw = implode("\r\n", [
+        'From: a@example.com',
+        'To: b@example.com',
+        'Content-Type: multipart/mixed; boundary="mix"',
+        '',
+        '--mix',
+        'Content-Type: text/plain',
+        'X-One: 1',
+        'X-Two: 2',
+        '',
+        'payload',
+        '--mix--',
+    ]);
+
+    expect(fn() => $parser->parse($raw))
+        ->toThrow(EmailParseException::class, 'Header count exceeds limit');
+});
+
+it('bounds multipart enumeration before materializing excessive child parts', function (): void {
+    $limits = new EmailLimits(maxMimeParts: 2);
+    $parser = new RawEmailParser(limits: $limits);
+
+    $raw = implode("\r\n", [
+        'From: a@example.com',
+        'To: b@example.com',
+        'Content-Type: multipart/mixed; boundary="mix"',
+        '',
+        '--mix',
+        'Content-Type: text/plain',
+        '',
+        'one',
+        '--mix',
+        'Content-Type: text/plain',
+        '',
+        'two',
+        '--mix',
+        'Content-Type: text/plain',
+        '',
+        'three',
+        '--mix--',
+    ]);
+
+    expect(fn() => $parser->parse($raw))
+        ->toThrow(EmailParseException::class, 'MIME part count exceeds limit');
+});

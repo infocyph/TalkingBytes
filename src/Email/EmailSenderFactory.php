@@ -4,18 +4,25 @@ declare(strict_types=1);
 
 namespace Infocyph\TalkingBytes\Email;
 
+use Infocyph\Runwire\Coroutine\CoroutineScope;
+use Infocyph\Runwire\RequestContext;
+use Infocyph\Runwire\RuntimeContext;
 use Infocyph\TalkingBytes\Core\Event\BestEffortEventDispatcher;
 use Infocyph\TalkingBytes\Core\Event\EventDispatcher;
 use Infocyph\TalkingBytes\Core\Event\NullEventDispatcher;
 use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
 use Infocyph\TalkingBytes\Core\Support\Clock;
+use Infocyph\TalkingBytes\Core\Support\OperationDeadline;
+use Infocyph\TalkingBytes\Core\Support\ResolvedConfig;
 use Infocyph\TalkingBytes\Core\Support\Sleeper;
+use Infocyph\TalkingBytes\Core\Support\StreamWaiter;
 use Infocyph\TalkingBytes\Email\Config\ConfigValue;
 use Infocyph\TalkingBytes\Email\Config\DkimConfig;
 use Infocyph\TalkingBytes\Email\Config\LogEmailConfig;
 use Infocyph\TalkingBytes\Email\Config\SendmailConfig;
 use Infocyph\TalkingBytes\Email\Config\SmtpConfig;
 use Infocyph\TalkingBytes\Email\Config\SpoolConfig;
+use Infocyph\TalkingBytes\Integration\Runwire\RunwireBinding;
 use Infocyph\TalkingBytes\Resilience\RateLimiter;
 use Infocyph\TalkingBytes\Retry\ExponentialBackoffRetryPolicy;
 use Infocyph\TalkingBytes\Retry\FixedDelayRetryPolicy;
@@ -33,6 +40,10 @@ final readonly class EmailSenderFactory
         ?EventDispatcher $events = null,
         ?Clock $clock = null,
         ?Sleeper $sleeper = null,
+        private ?CancellationSignal $cancellation = null,
+        private ?OperationDeadline $operationDeadline = null,
+        private ?StreamWaiter $streamWaiter = null,
+        private ?RunwireBinding $runwireBinding = null,
     ) {
         $this->events = new BestEffortEventDispatcher($events ?? new NullEventDispatcher());
         $this->clock = $clock ?? Clock::system();
@@ -41,7 +52,9 @@ final readonly class EmailSenderFactory
 
     public function fake(): Emailer
     {
-        return Emailer::fake($this->events, $this->clock);
+        return $this->bindExecution(
+            Emailer::fake($this->events, $this->clock, $this->sleeper),
+        );
     }
 
     /**
@@ -56,18 +69,23 @@ final readonly class EmailSenderFactory
         array $config,
         ?CancellationSignal $cancellation = null,
     ): Emailer {
-        $transport = self::section($config, 'transport', required: true);
+        $cancellation = $this->combinedCancellation($cancellation);
+        $transport = ResolvedConfig::section($config, 'transport', 'Email', required: true);
         $emailer = $this->usingResolvedTransport($transport, $cancellation);
 
         $fallbackTransports = [];
-        foreach (self::sections($config, 'fallbacks') as $fallback) {
+        foreach (ResolvedConfig::sections($config, 'fallbacks', 'Email') as $fallback) {
             $fallbackTransports[] = $this->usingResolvedTransport($fallback, $cancellation)->transport();
         }
         if ($fallbackTransports !== []) {
-            $emailer = $emailer->withFallback($fallbackTransports);
+            $emailer = $emailer->withFallback(
+                $fallbackTransports,
+                $cancellation,
+                $this->operationDeadline,
+            );
         }
 
-        $retry = self::section($config, 'retry');
+        $retry = ResolvedConfig::section($config, 'retry', 'Email');
         if (ConfigValue::bool($retry, 'enabled', false)) {
             $attempts = ConfigValue::int($retry, 'max_attempts', 3);
             $delayMs = ConfigValue::int($retry, 'delay_ms', 250);
@@ -76,119 +94,152 @@ final readonly class EmailSenderFactory
                 'fixed' => new FixedDelayRetryPolicy($attempts, $delayMs),
                 default => throw new InvalidArgumentException('Unsupported email retry policy.'),
             };
-            $emailer = $emailer->withRetry($policy, $cancellation);
+            $emailer = $emailer->withRetry($policy, $cancellation, $this->operationDeadline);
         }
 
-        $rateLimit = self::section($config, 'rate_limit');
+        $rateLimit = ResolvedConfig::section($config, 'rate_limit', 'Email');
         if (ConfigValue::bool($rateLimit, 'enabled', false)) {
             $emailer = $emailer->withRateLimit(new RateLimiter(
                 ConfigValue::int($rateLimit, 'max_requests', 60),
                 ConfigValue::int($rateLimit, 'per_seconds', 60),
+                $this->clock,
             ));
         }
 
-        $dkim = self::section($config, 'dkim');
+        $dkim = ResolvedConfig::section($config, 'dkim', 'Email');
         if (ConfigValue::bool($dkim, 'enabled', false)) {
             $emailer = $emailer->withDkim(DkimConfig::fromArray($dkim));
         }
 
-        return $emailer;
+        return $this->bindExecution($emailer, $cancellation);
     }
 
     public function usingLog(LogEmailConfig $config): Emailer
     {
-        return Emailer::usingLog($config, $this->events, $this->clock);
+        return $this->bindExecution(
+            Emailer::usingLog($config, $this->events, $this->clock, $this->sleeper),
+        );
     }
 
     public function usingMailFunction(): Emailer
     {
-        return Emailer::usingMailFunction($this->events, $this->clock);
+        return $this->bindExecution(
+            Emailer::usingMailFunction($this->events, $this->clock, $this->sleeper),
+        );
     }
 
     public function usingNull(): Emailer
     {
-        return Emailer::usingNull($this->events, $this->clock);
+        return $this->bindExecution(
+            Emailer::usingNull($this->events, $this->clock, $this->sleeper),
+        );
     }
 
     public function usingSendmail(
         SendmailConfig $config = new SendmailConfig(),
         ?CancellationSignal $cancellation = null,
     ): Emailer {
-        return Emailer::usingSendmail(
-            $config,
-            $this->events,
-            $this->clock,
+        $cancellation = $this->combinedCancellation($cancellation);
+
+        return $this->bindExecution(
+            Emailer::usingSendmail(
+                $config,
+                $this->events,
+                $this->clock,
+                $cancellation,
+                $this->sleeper,
+                $this->operationDeadline,
+            ),
             $cancellation,
-            $this->sleeper,
         );
     }
 
     public function usingSmtp(SmtpConfig $config): Emailer
     {
-        return Emailer::usingSmtp($config, $this->events, $this->clock);
+        $cancellation = $this->combinedCancellation(null);
+
+        return $this->bindExecution(
+            Emailer::usingSmtp(
+                $config,
+                $this->events,
+                $this->clock,
+                $this->sleeper,
+                $cancellation,
+                $this->operationDeadline,
+                $this->streamWaiter,
+            ),
+            $cancellation,
+        );
     }
 
     public function usingSpool(SpoolConfig $config): Emailer
     {
-        return Emailer::usingSpool($config, $this->events, $this->clock);
+        return $this->bindExecution(
+            Emailer::usingSpool($config, $this->events, $this->clock, $this->sleeper),
+        );
     }
 
-    /**
-     * @param array<string, mixed> $config
-     * @return array<string, mixed>
-     */
-    private static function section(array $config, string $key, bool $required = false): array
-    {
-        $value = $config[$key] ?? null;
-        if ($value === null && !$required) {
-            return [];
+    public function withRunwire(
+        RuntimeContext $runtime,
+        ?RequestContext $request = null,
+        ?CoroutineScope $scope = null,
+    ): self {
+        if ($this->runwireBinding !== null) {
+            $this->runwireBinding->assertSameContext($runtime, $request, $scope);
+
+            return $this;
         }
 
-        if (!is_array($value)) {
-            throw new InvalidArgumentException(sprintf('Email resolved configuration section "%s" must be an array.', $key));
+        $binding = new RunwireBinding($runtime, $request, $scope);
+        $deadline = $binding->deadline();
+        if ($deadline !== null && $this->operationDeadline !== null) {
+            $deadline = $this->operationDeadline->earliest($deadline);
+        } elseif ($deadline === null) {
+            $deadline = $this->operationDeadline;
         }
 
-        $section = [];
-        foreach ($value as $name => $item) {
-            if (is_string($name)) {
-                $section[$name] = $item;
-            }
-        }
-
-        if ($required && $section === []) {
-            throw new InvalidArgumentException(sprintf('Email resolved configuration section "%s" must not be empty.', $key));
-        }
-
-        return $section;
+        return new self(
+            $this->events,
+            $this->clock,
+            $binding->sleeper($this->sleeper),
+            $binding->cancellation($this->cancellation),
+            $deadline,
+            $this->streamWaiter ?? $binding->streamWaiter(),
+            $binding,
+        );
     }
 
-    /**
-     * @param array<string, mixed> $config
-     * @return list<array<string, mixed>>
-     */
-    private static function sections(array $config, string $key): array
+    private function bindExecution(
+        Emailer $emailer,
+        ?CancellationSignal $cancellation = null,
+    ): Emailer {
+        if ($this->operationDeadline !== null) {
+            $emailer = $emailer->withOperationDeadline($this->operationDeadline);
+        }
+
+        $cancellation = $this->combinedCancellation($cancellation);
+        if ($cancellation !== null) {
+            $emailer = $emailer->withCancellation($cancellation);
+        }
+
+        return $emailer;
+    }
+
+    private function combinedCancellation(?CancellationSignal $explicit): ?CancellationSignal
     {
-        $value = $config[$key] ?? [];
-        if (!is_array($value)) {
-            throw new InvalidArgumentException(sprintf('Email resolved configuration section "%s" must be a list.', $key));
+        if ($this->cancellation === null) {
+            return $explicit;
         }
 
-        $sections = [];
-        foreach ($value as $item) {
-            if (!is_array($item)) {
-                throw new InvalidArgumentException(sprintf('Email resolved configuration section "%s" must contain arrays.', $key));
-            }
-
-            $section = [];
-            foreach ($item as $name => $entry) {
-                if (is_string($name)) {
-                    $section[$name] = $entry;
-                }
-            }
-            $sections[] = $section;
+        if ($explicit === null || $explicit === $this->cancellation) {
+            return $this->cancellation;
         }
 
-        return $sections;
+        $factory = $this->cancellation;
+
+        return CancellationSignal::fromCallable(
+            static fn(): bool => $factory->isRequested() || $explicit->isRequested(),
+        );
     }
 
     /**

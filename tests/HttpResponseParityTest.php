@@ -15,7 +15,6 @@ final class HttpResponseParityServer
     private function __construct(
         private mixed $process,
         private array $pipes,
-        private string $directory,
         public int $port,
     ) {}
 
@@ -26,12 +25,8 @@ final class HttpResponseParityServer
 
     public static function start(): self
     {
-        $directory = sys_get_temp_dir() . '/tb-http-response-' . bin2hex(random_bytes(6));
-        mkdir($directory, 0775, true);
-        $ready = $directory . '/ready.json';
-
         $process = proc_open(
-            [PHP_BINARY, __DIR__ . '/Fixtures/http-response-server.php', $ready],
+            [PHP_BINARY, __DIR__ . '/Fixtures/http-response-server.php'],
             [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
             $pipes,
         );
@@ -44,18 +39,60 @@ final class HttpResponseParityServer
             $pipes[0] = null;
         }
 
-        $deadline = microtime(true) + 2.0;
-        while (!is_file($ready) && microtime(true) < $deadline) {
+        if (!is_resource($pipes[1] ?? null)) {
+            proc_terminate($process);
+            proc_close($process);
+
+            throw new RuntimeException('HTTP response fixture readiness pipe is unavailable.');
+        }
+
+        stream_set_blocking($pipes[1], false);
+        $readyPayload = null;
+        $deadline = microtime(true) + 15.0;
+        while (microtime(true) < $deadline) {
+            $line = fgets($pipes[1]);
+            if (is_string($line) && trim($line) !== '') {
+                $readyPayload = trim($line);
+
+                break;
+            }
+
+            $status = proc_get_status($process);
+            if (!$status['running']) {
+                break;
+            }
+
             usleep(10_000);
         }
 
-        $decoded = is_file($ready) ? json_decode((string) file_get_contents($ready), true) : null;
+        fclose($pipes[1]);
+        $pipes[1] = null;
+
+        $decoded = is_string($readyPayload) ? json_decode($readyPayload, true) : null;
         $port = is_array($decoded) ? ($decoded['port'] ?? null) : null;
         if (!is_int($port) || $port < 1) {
-            throw new RuntimeException('HTTP response fixture did not become ready.');
+            $status = proc_get_status($process);
+            if ($status['running']) {
+                proc_terminate($process);
+            }
+
+            $error = '';
+            if (is_resource($pipes[2] ?? null)) {
+                stream_set_blocking($pipes[2], false);
+                $error = trim((string) stream_get_contents($pipes[2]));
+                fclose($pipes[2]);
+                $pipes[2] = null;
+            }
+            proc_close($process);
+
+            throw new RuntimeException(
+                $error === ''
+                    ? 'HTTP response fixture did not become ready.'
+                    : 'HTTP response fixture failed: ' . $error,
+            );
         }
 
-        return new self($process, $pipes, $directory, $port);
+        return new self($process, $pipes, $port);
     }
 
     public function stop(): void
@@ -76,14 +113,6 @@ final class HttpResponseParityServer
             $this->process = null;
         }
 
-        foreach (glob($this->directory . '/*') ?: [] as $path) {
-            if (is_file($path)) {
-                unlink($path);
-            }
-        }
-        if (is_dir($this->directory)) {
-            rmdir($this->directory);
-        }
     }
 }
 
@@ -245,6 +274,37 @@ it('preserves cookie provenance through supported native transport decoration', 
             expect($targetEcho->successful)->toBeTrue()
                 ->and($targetEcho->response?->body)->toContain('target_cookie=target-value')
                 ->and($targetEcho->response?->body)->not->toContain('origin_cookie=origin-value');
+        }
+    } finally {
+        $server->stop();
+    }
+});
+
+
+it('sends no upload bytes after a 303 redirect converts the request to GET', function (): void {
+    $server = HttpResponseParityServer::start();
+
+    try {
+        $base = sprintf('http://127.0.0.1:%d', $server->port);
+        $transport = new CurlTransport();
+
+        foreach (['/upload-303', '/upload-cross-303'] as $path) {
+            $stream = fopen('php://temp', 'w+b');
+            expect($stream)->toBeResource();
+            fwrite($stream, 'audit-sentinel');
+            rewind($stream);
+
+            $result = $transport->send(
+                HttpRequest::post($base . $path)
+                    ->uploadFromStream($stream, 14)
+                    ->followRedirects(),
+            );
+
+            expect($result->successful)->toBeTrue()
+                ->and($result->response?->body)->toBe('GET:')
+                ->and(is_resource($stream))->toBeTrue();
+
+            fclose($stream);
         }
     } finally {
         $server->stop();

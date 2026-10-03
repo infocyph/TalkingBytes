@@ -183,10 +183,25 @@ final readonly class CurlTransport implements HttpTransport
             'curl',
             $body,
             $errno,
-            $bodyCollector->error() ?? $error,
+            $headerCollector->error() ?? $bodyCollector->error() ?? $error,
             $info,
             $headerCollector->headers(),
             publishBufferedDownload: false,
+        );
+    }
+
+    private function cancellationFailure(HttpRequest $request): ?CommunicationResult
+    {
+        if ($request->cancellationSignal()?->isRequested() !== true) {
+            return null;
+        }
+
+        return CommunicationResult::failure(
+            'HTTP operation cancelled.',
+            metadata: [
+                'cancelled' => true,
+                'transport' => 'curl',
+            ],
         );
     }
 
@@ -203,7 +218,10 @@ final readonly class CurlTransport implements HttpTransport
         HttpRequest $request,
         ?string $pinnedResolution,
     ): array|CommunicationResult {
-        $headerCollector = new ResponseHeaderCollector();
+        $headerCollector = new ResponseHeaderCollector(
+            $request->options->maxResponseHeaderBytes,
+            $request->options->maxResponseHeaderCount,
+        );
         $bodyCollector = null;
 
         try {
@@ -255,6 +273,21 @@ final readonly class CurlTransport implements HttpTransport
         return $jar instanceof CookieJar ? $jar : null;
     }
 
+    private function deadlineFailure(HttpRequest $request): ?CommunicationResult
+    {
+        if ($request->operationDeadline()?->expired() !== true) {
+            return null;
+        }
+
+        return CommunicationResult::failure(
+            'HTTP operation deadline exceeded.',
+            metadata: [
+                'deadline_exceeded' => true,
+                'transport' => 'curl',
+            ],
+        );
+    }
+
     private function dispatchResultEvents(HttpRequest $request, CommunicationResult $result, float $startedAt): void
     {
         $payload = [
@@ -290,14 +323,23 @@ final readonly class CurlTransport implements HttpTransport
 
     private function executeSingle(HttpRequest $resolvedRequest, string $url): CommunicationResult
     {
+        $preflightFailure = $this->executionPreflightFailure($resolvedRequest);
+        if ($preflightFailure !== null) {
+            return $preflightFailure;
+        }
 
         try {
             $pinnedResolution = RequestSecurityGuard::pinnedResolution($resolvedRequest, $url);
         } catch (InvalidArgumentException $exception) {
             return CommunicationResult::failure($exception->getMessage(), metadata: ['transport' => 'curl']);
         }
-        $handle = curl_init();
 
+        $preflightFailure = $this->executionPreflightFailure($resolvedRequest);
+        if ($preflightFailure !== null) {
+            return $preflightFailure;
+        }
+
+        $handle = curl_init();
         if ($handle === false) {
             return CommunicationResult::failure('Unable to initialize cURL handle.', metadata: ['transport' => 'curl']);
         }
@@ -339,6 +381,13 @@ final readonly class CurlTransport implements HttpTransport
             );
         }
 
+        $preflightFailure = $this->executionPreflightFailure($resolvedRequest);
+        if ($preflightFailure !== null) {
+            $bodyCollector->abort();
+
+            return $preflightFailure;
+        }
+
         $result = $this->buildExecutionResult(
             $resolvedRequest,
             $rawBody,
@@ -367,6 +416,11 @@ final readonly class CurlTransport implements HttpTransport
         }
 
         return $result;
+    }
+
+    private function executionPreflightFailure(HttpRequest $request): ?CommunicationResult
+    {
+        return $this->cancellationFailure($request) ?? $this->deadlineFailure($request);
     }
 
     private function prepareCookieContext(HttpRequest $request): HttpRequest

@@ -125,6 +125,10 @@ final class CookieJar
                 continue;
             }
 
+            if (CookieStoragePolicy::isInsecureOverlay($cookie, $context, $this->cookies)) {
+                continue;
+            }
+
             if ($cookie->isExpired()) {
                 unset($this->cookies[$cookie->key()]);
 
@@ -459,7 +463,7 @@ final class CookieJar
         }
 
         try {
-            return new Cookie(
+            $cookie = new Cookie(
                 $name,
                 $value,
                 $attributes['domain'],
@@ -472,6 +476,8 @@ final class CookieJar
         } catch (InvalidArgumentException) {
             return null;
         }
+
+        return CookieStoragePolicy::accepts($cookie, $context, $segments) ? $cookie : null;
     }
 
     private function purgeExpired(): void

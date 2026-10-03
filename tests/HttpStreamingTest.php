@@ -262,3 +262,86 @@ it('can abort a finalized stream without publishing or replacing the target', fu
 
     unlink($target);
 });
+
+
+it('drops upload state when redirects convert requests to GET', function (): void {
+    $stream = fopen('php://temp', 'w+b');
+    expect($stream)->toBeResource();
+    fwrite($stream, 'payload');
+    rewind($stream);
+
+    foreach ([301, 302, 303] as $status) {
+        $redirected = HttpRequest::post('https://example.com/upload')
+            ->uploadFromStream($stream, 7)
+            ->headers([
+                'Content-Type' => 'application/octet-stream',
+                'Content-Length' => '7',
+                'Transfer-Encoding' => 'identity',
+                'Expect' => '100-continue',
+            ])
+            ->redirectedTo('https://example.com/final', $status, true);
+
+        expect($redirected->method->value)->toBe('GET')
+            ->and($redirected->metadata)->not->toHaveKeys([
+                'upload_stream',
+                'upload_file_path',
+                'upload_size',
+                'upload_offset',
+            ])
+            ->and($redirected->headers->get('Content-Type'))->toBeNull()
+            ->and($redirected->headers->get('Content-Length'))->toBeNull()
+            ->and($redirected->headers->get('Transfer-Encoding'))->toBeNull()
+            ->and($redirected->headers->get('Expect'))->toBeNull();
+    }
+
+    fclose($stream);
+});
+
+it('preserves repeatable upload state for 307 and 308 redirects', function (): void {
+    $stream = fopen('php://temp', 'w+b');
+    expect($stream)->toBeResource();
+    fwrite($stream, 'payload');
+    rewind($stream);
+
+    foreach ([307, 308] as $status) {
+        $redirected = HttpRequest::put('https://example.com/upload')
+            ->uploadFromStream($stream, 7)
+            ->redirectedTo('https://example.com/final', $status, true);
+
+        expect($redirected->method->value)->toBe('PUT')
+            ->and($redirected->metadata['upload_stream'] ?? null)->toBe($stream)
+            ->and($redirected->metadata['upload_size'] ?? null)->toBe(7);
+    }
+
+    fclose($stream);
+});
+
+
+it('enforces aggregate HTTP response header byte budgets', function (): void {
+    $collector = new ResponseHeaderCollector(maxBytes: 32);
+
+    expect($collector->collect("HTTP/1.1 200 OK\r\n"))->toBe(17);
+    expect($collector->collect("X-Long: 1234567890\r\n"))->toBe(0);
+    expect($collector->error())->toContain('max allowed bytes (32)');
+});
+
+it('enforces aggregate HTTP response header field-count budgets', function (): void {
+    $collector = new ResponseHeaderCollector(maxFields: 1);
+
+    expect($collector->collect("HTTP/1.1 200 OK\r\n"))->toBe(17);
+    expect($collector->collect("X-One: 1\r\n"))->toBe(10);
+    expect($collector->collect("X-Two: 2\r\n"))->toBe(0);
+    expect($collector->error())->toContain('max allowed fields (1)');
+});
+
+it('counts response header budgets across interim and final header blocks', function (): void {
+    $collector = new ResponseHeaderCollector(maxFields: 1);
+
+    $collector->collect("HTTP/1.1 100 Continue\r\n");
+    $collector->collect("X-Interim: 1\r\n");
+    $collector->collect("\r\n");
+    $collector->collect("HTTP/1.1 200 OK\r\n");
+
+    expect($collector->collect("X-Final: 1\r\n"))->toBe(0)
+        ->and($collector->error())->toContain('max allowed fields (1)');
+});

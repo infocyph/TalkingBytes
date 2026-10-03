@@ -8,6 +8,7 @@ use Infocyph\TalkingBytes\Http\Contract\HttpMiddleware;
 use Infocyph\TalkingBytes\Http\Contract\HttpTransport;
 use Infocyph\TalkingBytes\Http\HttpClient;
 use Infocyph\TalkingBytes\Http\HttpRequest;
+use Infocyph\TalkingBytes\Http\Internal\UploadHandleManager;
 use Infocyph\TalkingBytes\Http\Signing\HmacSha256Signer;
 
 it('applies deterministic signed request headers', function (): void {
@@ -139,4 +140,158 @@ it('signs after middleware has completed request mutation', function (): void {
     ]);
 
     expect($sent->headers->get('X-TB-Signature'))->toBe($signer->sign($canonical));
+});
+
+
+it('signs the exact bounded bytes of stream uploads and restores caller position', function (): void {
+    $stream = fopen('php://temp', 'w+b');
+    expect($stream)->toBeResource();
+    fwrite($stream, 'prefix-first-suffix');
+    fseek($stream, 7);
+
+    $signer = new HmacSha256Signer('secret-key');
+    $prepared = HttpRequest::put('https://api.example.com/upload')
+        ->uploadFromStream($stream, 5)
+        ->withAuthenticator(new SignedRequestAuth(
+            $signer,
+            static fn(): int => 1_700_000_000,
+            static fn(): string => 'nonce-upload',
+        ))
+        ->prepareForTransport();
+
+    $canonical = implode("\n", [
+        'PUT',
+        '/upload',
+        '1700000000',
+        'nonce-upload',
+        hash('sha256', 'first'),
+    ]);
+
+    expect($prepared->headers->get('X-TB-Signature'))->toBe($signer->sign($canonical))
+        ->and(ftell($stream))->toBe(7);
+
+    $snapshot = $prepared->metadata['_upload_handle'] ?? null;
+    expect($snapshot)->toBeResource();
+    fwrite($stream, 'other');
+    fseek($snapshot, 0);
+    expect(stream_get_contents($snapshot))->toBe('first');
+
+    UploadHandleManager::cleanup($prepared);
+    fclose($stream);
+});
+
+it('produces different signatures for different upload bytes', function (): void {
+    $signer = new HmacSha256Signer('secret-key');
+    $auth = new SignedRequestAuth(
+        $signer,
+        static fn(): int => 1_700_000_000,
+        static fn(): string => 'nonce-upload',
+    );
+
+    $signatures = [];
+    foreach (['first', 'other'] as $payload) {
+        $stream = fopen('php://temp', 'w+b');
+        expect($stream)->toBeResource();
+        fwrite($stream, $payload);
+        rewind($stream);
+
+        $prepared = HttpRequest::put('https://api.example.com/upload')
+            ->uploadFromStream($stream, 5)
+            ->withAuthenticator($auth)
+            ->prepareForTransport();
+
+        $signatures[] = $prepared->headers->get('X-TB-Signature');
+        UploadHandleManager::cleanup($prepared);
+        fclose($stream);
+    }
+
+    expect($signatures[0])->not->toBe($signatures[1]);
+});
+
+it('keeps signed file upload bytes stable after the source path is replaced', function (): void {
+    $path = tempnam(sys_get_temp_dir(), 'tb-signed-upload-');
+    expect($path)->toBeString();
+    file_put_contents($path, 'first');
+
+    $signer = new HmacSha256Signer('secret-key');
+    $prepared = HttpRequest::put('https://api.example.com/upload')
+        ->uploadFromFile($path)
+        ->withAuthenticator(new SignedRequestAuth(
+            $signer,
+            static fn(): int => 1_700_000_000,
+            static fn(): string => 'nonce-file',
+        ))
+        ->prepareForTransport();
+
+    file_put_contents($path, 'other');
+
+    $snapshot = $prepared->metadata['_upload_handle'] ?? null;
+    expect($snapshot)->toBeResource();
+    fseek($snapshot, 0);
+    expect(stream_get_contents($snapshot))->toBe('first');
+
+    $canonical = implode("\n", [
+        'PUT',
+        '/upload',
+        '1700000000',
+        'nonce-file',
+        hash('sha256', 'first'),
+    ]);
+    expect($prepared->headers->get('X-TB-Signature'))->toBe($signer->sign($canonical));
+
+    UploadHandleManager::cleanup($prepared);
+    unlink($path);
+});
+
+it('fails closed when a signed upload ends before its declared size', function (): void {
+    $stream = fopen('php://temp', 'w+b');
+    expect($stream)->toBeResource();
+    fwrite($stream, 'abc');
+    rewind($stream);
+
+    expect(fn(): HttpRequest => HttpRequest::put('https://api.example.com/upload')
+        ->uploadFromStream($stream, 5)
+        ->withSigner(new HmacSha256Signer('secret-key'))
+        ->prepareForTransport())
+        ->toThrow(InvalidArgumentException::class, 'ended before the declared upload size');
+
+    fclose($stream);
+});
+
+it('preserves the signed stream source offset across 307 redirects', function (): void {
+    $stream = fopen('php://temp', 'w+b');
+    expect($stream)->toBeResource();
+    fwrite($stream, 'SECRETPAYLOAD');
+    fseek($stream, 6);
+
+    $auth = new SignedRequestAuth(
+        new HmacSha256Signer('secret-key'),
+        static fn(): int => 1_700_000_000,
+        static fn(): string => 'nonce-redirect',
+    );
+    $prepared = HttpRequest::put('https://api.example.com/upload')
+        ->uploadFromStream($stream, 7)
+        ->withAuthenticator($auth)
+        ->prepareForTransport();
+
+    $snapshot = $prepared->metadata['_upload_handle'] ?? null;
+    expect($snapshot)->toBeResource();
+    fseek($snapshot, 0);
+    expect(stream_get_contents($snapshot))->toBe('PAYLOAD');
+    UploadHandleManager::cleanup($prepared);
+
+    $redirected = $prepared
+        ->redirectedTo('https://api.example.com/upload-next', 307, true)
+        ->prepareForTransport();
+
+    $redirectSnapshot = $redirected->metadata['_upload_handle'] ?? null;
+    expect($redirectSnapshot)->toBeResource();
+    fseek($redirectSnapshot, 0);
+
+    expect(stream_get_contents($redirectSnapshot))->toBe('PAYLOAD')
+        ->and($redirected->metadata['_upload_source_offset'] ?? null)->toBe(6)
+        ->and(ftell($stream))->toBe(6);
+
+    UploadHandleManager::cleanup($redirected);
+    fclose($stream);
 });

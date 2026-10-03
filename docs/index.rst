@@ -34,6 +34,7 @@ It provides:
    events
    middleware-and-resilience
    resolved-composition
+   runwire-integration
    testing
    security
    performance
@@ -41,3 +42,4 @@ It provides:
    naming
    release-checklist
    release-notes-2.2
+   release-notes-2.3

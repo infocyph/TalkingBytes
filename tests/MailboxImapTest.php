@@ -2,9 +2,15 @@
 
 declare(strict_types=1);
 
+use Infocyph\Runwire\Coroutine\CoroutineRuntime;
+use Infocyph\Runwire\Coroutine\CoroutineScope;
+use Infocyph\Runwire\Runtime\Enum\RuntimeDriver;
+use Infocyph\Runwire\RuntimeCapabilities;
+use Infocyph\Runwire\RuntimeContext;
 use Infocyph\TalkingBytes\Core\Event\CallableEventDispatcher;
 use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
 use Infocyph\TalkingBytes\Email\Config\ImapConfig;
+use Infocyph\TalkingBytes\Email\EmailMailboxFactory;
 use Infocyph\TalkingBytes\Email\Enum\ImapSecurity;
 use Infocyph\TalkingBytes\Email\Exception\MailboxConnectionException;
 use Infocyph\TalkingBytes\Email\Exception\MailboxProtocolException;
@@ -268,6 +274,11 @@ foreach ($expect as $entry) {
 
     $tag = explode(' ', $command, 2)[0] ?? 'A0000';
 
+    $delayMs = (int) ($entry['delay_ms'] ?? 0);
+    if ($delayMs > 0) {
+        usleep($delayMs * 1000);
+    }
+
     foreach (($entry['untagged'] ?? []) as $untagged) {
         fwrite($client, $untagged . "\r\n");
     }
@@ -290,6 +301,68 @@ $writeJson($reportPath, $transcript);
 PHP;
     }
 }
+
+function imapRunwireContext(): RuntimeContext
+{
+    return RuntimeContext::fromCapabilities(
+        new RuntimeCapabilities(
+            driver: RuntimeDriver::NATIVE,
+            persistentProcess: true,
+            persistentApplication: true,
+            ownsEventLoop: true,
+            runwireLoopAvailable: true,
+            supportsAsyncIo: true,
+            supportsRunwireCoroutines: true,
+        ),
+        mode: 'native',
+        concurrent: true,
+    );
+}
+
+it('lets Runwire peers progress while IMAP waits for a response', function (): void {
+    $server = FakeImapServerProcess::start([
+        'expect' => [
+            ['regex' => '/^A\d+ CAPABILITY$/', 'untagged' => ['* CAPABILITY IMAP4rev1']],
+            ['regex' => '/^A\d+ LOGIN "user" "pass"$/'],
+            ['regex' => '/^A\d+ LIST "" \*$/', 'untagged' => ['* LIST (\\HasNoChildren) "/" "INBOX"'], 'delay_ms' => 120],
+            ['regex' => '/^A\d+ LOGOUT$/', 'untagged' => ['* BYE Logging out']],
+        ],
+    ]);
+    $runtime = imapRunwireContext();
+    $events = [];
+
+    try {
+        $folders = (new CoroutineRuntime())->run(
+            static function (CoroutineScope $scope) use ($runtime, $server, &$events): array {
+                $scope->spawn(static function () use ($scope, &$events): void {
+                    $scope->sleep(0.02);
+                    $events[] = 'peer';
+                });
+
+                $mailbox = (new EmailMailboxFactory())
+                    ->withRunwire($runtime, scope: $scope)
+                    ->usingImap(new ImapConfig(
+                        host: '127.0.0.1',
+                        port: $server->port,
+                        security: ImapSecurity::None,
+                        username: 'user',
+                        password: 'pass',
+                    ));
+
+                $folders = $mailbox->folders();
+                $events[] = 'imap';
+                $mailbox->transport()->logout();
+
+                return $folders;
+            },
+        );
+
+        expect($folders)->toContain('INBOX')
+            ->and($events)->toBe(['peer', 'imap']);
+    } finally {
+        $server->stop();
+    }
+});
 
 it('fetches folders, status, search and parsed message over imap socket transport', function (): void {
     $raw = implode("\r\n", [

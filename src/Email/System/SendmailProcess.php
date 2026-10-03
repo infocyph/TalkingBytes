@@ -6,6 +6,7 @@ namespace Infocyph\TalkingBytes\Email\System;
 
 use Infocyph\TalkingBytes\Core\Support\CancellationSignal;
 use Infocyph\TalkingBytes\Core\Support\Clock;
+use Infocyph\TalkingBytes\Core\Support\OperationDeadline;
 use Infocyph\TalkingBytes\Core\Support\Sleeper;
 use RuntimeException;
 use Throwable;
@@ -36,9 +37,8 @@ final class SendmailProcess
     private function __construct(
         mixed $process,
         private array $pipes,
-        private readonly float $deadline,
+        private readonly OperationDeadline $deadline,
         private readonly int $timeoutSeconds,
-        private readonly Clock $clock,
         private readonly Sleeper $sleeper,
         private readonly ?CancellationSignal $cancellation,
         private readonly ?int $processGroupId,
@@ -60,12 +60,21 @@ final class SendmailProcess
         ?CancellationSignal $cancellation = null,
         ?Clock $clock = null,
         ?Sleeper $sleeper = null,
+        ?OperationDeadline $operationDeadline = null,
     ): self {
         $runtimeClock = $clock ?? Clock::system();
         $runtimeSleeper = $sleeper ?? Sleeper::system();
+        $deadline = OperationDeadline::after((float) $timeoutSeconds, $runtimeClock);
+        if ($operationDeadline !== null) {
+            $deadline = $deadline->earliest($operationDeadline);
+        }
 
         if ($cancellation?->isRequested() === true) {
             throw new RuntimeException('Sendmail process cancelled.');
+        }
+
+        if ($deadline->expired()) {
+            throw new RuntimeException('Sendmail process timed out before start.');
         }
 
         $process = proc_open($command, self::descriptorSpec(), $pipes);
@@ -88,9 +97,8 @@ final class SendmailProcess
         return new self(
             $process,
             $pipes,
-            $runtimeClock->monotonic() + $timeoutSeconds,
+            $deadline,
             $timeoutSeconds,
-            $runtimeClock,
             $runtimeSleeper,
             $cancellation,
             self::tryCreateProcessGroup($process),
@@ -250,11 +258,11 @@ final class SendmailProcess
             throw new RuntimeException('Sendmail process cancelled.');
         }
 
-        if ($this->clock->monotonic() >= $this->deadline) {
+        if ($this->deadline->expired()) {
             $this->terminate();
 
             throw new RuntimeException(sprintf(
-                'Sendmail process timed out after %d seconds.',
+                'Sendmail process timed out or operation deadline exceeded (configured timeout: %d seconds).',
                 $this->timeoutSeconds,
             ));
         }

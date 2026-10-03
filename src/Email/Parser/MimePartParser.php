@@ -34,6 +34,26 @@ final readonly class MimePartParser
         return $this->parsePart($headers, $body, $partNumber, 1, $partCount, $decodedBytes);
     }
 
+    /**
+     * @param list<string> $parts
+     * @param list<string> $buffer
+     */
+    private function appendMultipartPart(array &$parts, array &$buffer, int $maxParts): void
+    {
+        if ($buffer === []) {
+            return;
+        }
+        if (count($parts) >= $maxParts) {
+            throw new EmailParseException(sprintf(
+                'MIME part count exceeds limit (%d).',
+                $this->limits->maxMimeParts,
+            ));
+        }
+
+        $parts[] = implode("\r\n", $buffer);
+        $buffer = [];
+    }
+
     private function contentId(HeaderBag $headers): ?string
     {
         $contentId = $headers->first('Content-ID');
@@ -129,7 +149,8 @@ final readonly class MimePartParser
         }
 
         $children = [];
-        foreach ($this->splitMultipartBody($body, $boundary) as $index => $partBody) {
+        $remainingParts = max(0, $this->limits->maxMimeParts - $partCount);
+        foreach ($this->splitMultipartBody($body, $boundary, $remainingParts) as $index => $partBody) {
             $childNumber = $partNumber === null
                 ? (string) ($index + 1)
                 : sprintf('%s.%d', $partNumber, $index + 1);
@@ -229,6 +250,7 @@ final readonly class MimePartParser
         int &$decodedBytes,
     ): ParsedEmailPart {
         [$rawHeaders, $rawBody] = $this->splitRawMessage($rawPart);
+        HeaderLimitValidator::assertWithin($rawHeaders, $this->limits);
         $headers = $this->headerParser->parse($rawHeaders);
 
         return $this->parsePart($headers, $rawBody, $partNumber, $depth, $partCount, $decodedBytes);
@@ -269,7 +291,7 @@ final readonly class MimePartParser
     /**
      * @return list<string>
      */
-    private function splitMultipartBody(string $body, string $boundary): array
+    private function splitMultipartBody(string $body, string $boundary, int $maxParts): array
     {
         $normalized = str_replace("\n", "\r\n", str_replace(["\r\n", "\r"], "\n", $body));
         $startDelimiter = '--' . $boundary;
@@ -281,11 +303,9 @@ final readonly class MimePartParser
 
         foreach ($lines as $line) {
             if ($line === $startDelimiter || $line === $endDelimiter) {
-                if ($inPart && $buffer !== []) {
-                    $parts[] = implode("\r\n", $buffer);
-                    $buffer = [];
+                if ($inPart) {
+                    $this->appendMultipartPart($parts, $buffer, $maxParts);
                 }
-
                 if ($line === $endDelimiter) {
                     break;
                 }
@@ -295,16 +315,12 @@ final readonly class MimePartParser
                 continue;
             }
 
-            if (!$inPart) {
-                continue;
+            if ($inPart) {
+                $buffer[] = $line;
             }
-
-            $buffer[] = $line;
         }
 
-        if ($buffer !== []) {
-            $parts[] = implode("\r\n", $buffer);
-        }
+        $this->appendMultipartPart($parts, $buffer, $maxParts);
 
         return $parts;
     }

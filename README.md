@@ -26,7 +26,7 @@ composer require infocyph/talkingbytes
 
 Requirements:
 
-- PHP `>=8.4`
+- PHP `^8.4`
 - `ext-curl`
 - `ext-fileinfo`
 - `ext-openssl`
