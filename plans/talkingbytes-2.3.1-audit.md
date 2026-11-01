@@ -80,12 +80,49 @@ Any earlier 2.3 green run validates only its own commit. The changed working tre
 
 Live verification of the baseline's [scheduled run 41272555610](https://github.com/infocyph/TalkingBytes/actions/runs/41272555610) found failures in release acceptance, PHP 8.4/8.5 analysis and all four normal/lowest QA lanes. Release-acceptance logs reproduce the same 33 complexity findings and Rector edit; inspected PHP 8.4 lowest logs fail on that Rector edit. Sustained HTTP performance, both benchmark jobs, Mailpit, native gRPC, documentation, optional-capability coldness, clean production install and Runwire present/absent jobs passed. The current committed revision therefore has a QA block; the older recorded c50 failure is not the current performance status. These results still do not certify the local Runwire 3.0 changes.
 
+### R5 — Borrowed Runwire scope lifecycle must fail predictably (P1; reproduction required)
+
+**Source review:** `src/Integration/Runwire/RunwireBinding.php` checks runtime capability, request completion and request/runtime identity, but does not establish that a supplied `CoroutineScope` is still open. Current Runwire 3.0 `CoroutineScope` marks itself closed and its `sleep()`, `waitReadable()`, `waitWritable()` and `yieldNow()` operations reject closed scopes with `LogicException`. TalkingBytes' cooperative sleeper and readiness bridge handle `CancelledException`, not this separate lifecycle failure. Runwire does not currently expose a public `isClosed()` method. This is a **source-established contract gap, not a reproduced production incident**.
+
+Add real Runwire 3.0 tests for (a) closing the host scope before construction/binding where possible, (b) closing it after graph construction and before an HTTP/email/mailbox/gRPC/webhook operation, and (c) closing it during cooperative retry/read/write waits. Establish the expected failure result and confirm no subsequent protocol side effects. Do not use reflection, rely on private Runwire state, invent an implicit runtime or silently switch to blocking I/O. If the required admission check is impossible through Runwire's public API, document the upstream dependency and make active-operation failures deterministic and safe at the existing boundary. Preserve host-owned scope/request lifecycle.
+
+### R6 — Reject malformed HTTP security policy metadata (P1; adversarial test first)
+
+**Source review:** `src/Http/Internal/RequestSecurityGuard.php::normalizeHosts()` maps a non-array `security_allow_hosts` or `security_block_hosts` value to `[]`, and silently discards invalid list entries. Because an empty allow-list means unrestricted hosts, malformed caller-provided metadata can silently disable intended restrictions, even though the public `allowHosts()/blockHosts()` fluent methods themselves accept arrays. The private-network toggle similarly activates only for literal `true`. This is a **fail-open configuration risk**, not evidence of remote exploitation.
+
+Add tests for wrong types, mixed lists, empty lists, normalized host forms and conflicting policies supplied through `HttpRequest::metadata()`. Validate explicitly supplied security metadata at the request/security boundary and reject malformed values instead of converting them into an absent policy. Preserve documented intentional `[]` semantics, host normalization, DNS pinning, HTTP proxy rejection and redirect-by-redirect revalidation. Verify both single and multi transports.
+
+### R7 — Make spool claim and destination publication collision-safe (P0; data-integrity risk)
+
+**Source review:** `src/Email/Receiver/SpoolEmailReceiver.php::uniqueTarget()` checks `file_exists()` before returning a destination and `moveFileToDirectory()` subsequently calls `rename()`. A separate writer or worker can create that target between check and rename; on platforms where rename replaces existing destinations, a concurrent operation can overwrite another message. This path is used for processing, successful moves and failure quarantine. No concurrent-overwrite reproduction was run in this review.
+
+Create deterministic multi-process and collision-injection regressions for two workers targeting the same basename, destination pre-existence, same-filesystem and cross-filesystem behavior, interrupted moves, and failure-quarantine sidecars. Implement exclusive, no-clobber destination reservation/publication with correct cleanup and recovery semantics. Preserve atomic consumption where available; do not replace an existing message or silently lose a claimed item. Also evaluate the `firstSpoolFile()` check-to-open race and verify a file chosen as a regular non-symlink remains safe when opened and bounded for reading (condition protection on the documented spool-directory trust model). Retain ownership and file-permission controls.
+
+### R8 — Preserve audit provenance and make branch QA discoverable (P1 process/maintenance)
+
+The branch deletes `plans/talkingbytes-2.3-audit-and-runwire.md` but this 2.3.1 tracker still links to it as the historical audit. Restore the historical document or replace the reference with a durable equivalent; simply deleting it leaves misleading audit provenance. `.gitattributes` already excludes `plans` from Composer export, so preservation does not reopen R2.
+
+The sole local workflow runs on pushes to `main`/`master`, tags and qualifying pull requests, **not** arbitrary `patch/*` pushes. There is currently no hosted run for the reviewed branch HEAD `a0500613495e769444853d8639b951342e5816e6`. Use a PR-based candidate check (or an explicitly authorized equivalent), inspect every matrix lane on the exact final revision, and do not confuse the previously green 2.3 baseline with 2.3.1 certification. Release acceptance should confirm the matched package archive and final commit, not merely a successful local checkout.
+
+## Remediation order and required proofs
+
+1. **Data integrity and policy first:** reproduce and resolve R7, R6 and the R5 lifecycle edge cases; add targeted regression tests without broadening public APIs.
+2. **Existing engineering gate:** resolve R1's 33 findings by cohesive changes, triage R3's 18 clone groups; do not game class/function complexity, duplicate detectors or change detector thresholds.
+3. **Parity and packaging:** rerun HTTP/SMTP/IMAP/POP3/gRPC/webhook tests, Runwire absent/present, normal/lowest dependency resolution, no-dev archive consumers, and R8 provenance checks.
+4. **Performance and longevity:** retain the 2% matched sustained RPM acceptance; compare c5/c20/c50 with ordered/reversed repeat trials, then repeat graph lifecycles and worker soaks.
+5. **Final acceptance:** commit the final candidate, execute every required hosted workflow on that exact SHA, save evidence and leave merge/tag/publication to the maintainer.
+
+The new source findings above are **review observations requiring tests**, not claims that failing regressions have already been reproduced or remediated. No source changes beyond the pre-existing branch commit are implied.
+
 ## Execution and acceptance checklist
 
 - [x] Record clean baseline, active toolchain, full host test inventory and current QA failures.
 - [x] Verify published Runwire 3.0, install `^3.0`, update supported integration documentation/suggestion, and rerun the full host suite.
 - [x] Run required `composer ic:process`; review its complete diff, including the existing Rector finding. Host execution passes; only `WebhookSender::cancelledResult()` changes from a null-check ternary to null coalescing. Restricted Rector initially could not bind its worker TCP server.
 - [x] Verify archive exclusions, complete runtime source parity, isolated `--no-dev` consumers, and optional Runwire 3.0 composition.
+- [ ] Resolve R7 spool destination collision safety and file-admission races; retain real multi-process evidence.
+- [ ] Reproduce and resolve R6 fail-open policy metadata and R5 closed-scope behavior with real Runwire 3.0.
+- [ ] Preserve the historical 2.3 audit reference, then confirm R8 branch-head PR/check coverage.
 - [ ] Resolve R1 and semantically applicable R3 findings in the batches above.
 - [ ] After remediation, obtain passing `composer ic:tests:details`, `composer ic:release:guard` and `composer ic:ci` results; every required detector must pass at its original level/scope/limits. Current final-check outcomes are recorded below.
 - [x] Build docs using the pinned requirements and warnings as errors. `UV_CACHE_DIR=/tmp/tb-uv-cache uv run --with-requirements docs/requirements.txt sphinx-build -W --keep-going -b html docs /tmp/tb-docs` passes.
@@ -119,4 +156,4 @@ Local logs are temporary: `/tmp/tb-baseline-details.log`, `/tmp/tb-baseline-host
 | Git whitespace validation | `git diff --check` passes. |
 | Final-candidate hosted matrix / sustained throughput / long soak | Open. No final candidate was committed, pushed, tagged or published by this audit. Host PHP 8.4 is unavailable; native-gRPC/Mailpit/minimal-extension evidence described above belongs to the baseline hosted run. |
 
-The audit deliverable and requested dependency bump are complete. R1 and applicable R3 source remediation remain planned work; **2.3.1 is recommended, not release-ready**. Production changes in this audit are limited to the Rector metadata expression; dependency metadata, integration documentation and archive exclusions are separate changes.
+The audit deliverable and requested dependency bump are complete. R1, applicable R3, and new R5–R8 verification/remediation remain planned work; **2.3.1 is recommended, not release-ready**. Production changes in this audit are limited to the Rector metadata expression; dependency metadata, integration documentation and archive exclusions are separate changes.
