@@ -41,29 +41,34 @@ final class TransferDecoder
                 continue;
             }
 
-            $chunk = base64_decode($quartet, true);
-            if ($chunk === false) {
-                throw new EmailParseException('MIME body contains invalid base64 data.');
-            }
-            $decoded .= $chunk;
+            $decoded .= $this->decodeQuartet($quartet);
             $quartet = '';
-            if ($maxDecodedBytes !== null && strlen($decoded) > $maxDecodedBytes) {
-                throw new EmailParseException(sprintf('Decoded MIME body exceeds limit (%d bytes).', $maxDecodedBytes));
-            }
+            $this->assertDecodedLimit($decoded, $maxDecodedBytes);
         }
 
         if ($quartet !== '') {
-            $chunk = base64_decode($quartet, true);
-            if ($chunk === false) {
-                throw new EmailParseException('MIME body contains invalid base64 data.');
-            }
-            $decoded .= $chunk;
+            $decoded .= $this->decodeQuartet($quartet);
         }
 
-        if ($maxDecodedBytes !== null && strlen($decoded) > $maxDecodedBytes) {
-            throw new EmailParseException(sprintf('Decoded MIME body exceeds limit (%d bytes).', $maxDecodedBytes));
-        }
+        $this->assertDecodedLimit($decoded, $maxDecodedBytes);
 
         return $decoded;
     }
+    private function assertDecodedLimit(string $decoded, ?int $maxDecodedBytes): void
+    {
+        if ($maxDecodedBytes !== null && strlen($decoded) > $maxDecodedBytes) {
+            throw new EmailParseException(sprintf('Decoded MIME body exceeds limit (%d bytes).', $maxDecodedBytes));
+        }
+    }
+
+    private function decodeQuartet(string $quartet): string
+    {
+        $chunk = base64_decode($quartet, true);
+        if ($chunk === false) {
+            throw new EmailParseException('MIME body contains invalid base64 data.');
+        }
+
+        return $chunk;
+    }
+
 }
