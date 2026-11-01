@@ -302,22 +302,22 @@ final readonly class MimePartParser
         $inPart = false;
 
         foreach ($lines as $line) {
-            if ($line === $startDelimiter || $line === $endDelimiter) {
+            if ($line !== $startDelimiter && $line !== $endDelimiter) {
                 if ($inPart) {
-                    $this->appendMultipartPart($parts, $buffer, $maxParts);
+                    $buffer[] = $line;
                 }
-                if ($line === $endDelimiter) {
-                    break;
-                }
-
-                $inPart = true;
 
                 continue;
             }
 
             if ($inPart) {
-                $buffer[] = $line;
+                $this->appendMultipartPart($parts, $buffer, $maxParts);
             }
+            if ($line === $endDelimiter) {
+                break;
+            }
+
+            $inPart = true;
         }
 
         $this->appendMultipartPart($parts, $buffer, $maxParts);
