@@ -121,11 +121,7 @@ final class CookieJar
 
         foreach ($lines as $line) {
             $cookie = $this->parseSetCookie($line, $context);
-            if ($cookie === null) {
-                continue;
-            }
-
-            if (CookieStoragePolicy::isInsecureOverlay($cookie, $context, $this->cookies)) {
+            if ($cookie === null || CookieStoragePolicy::isInsecureOverlay($cookie, $context, $this->cookies)) {
                 continue;
             }
 
@@ -452,14 +448,11 @@ final class CookieJar
             $attributes = $this->applyAttribute($attributes, $segment);
         }
 
-        if (!$attributes['hostOnly']) {
-            if (!$this->domainMatchesOrigin($context['host'], $attributes['domain'])) {
-                return null;
-            }
-
-            if (!$this->domainCookieScopeAllowed($attributes['domain'])) {
-                return null;
-            }
+        if (!$attributes['hostOnly'] && (
+            !$this->domainMatchesOrigin($context['host'], $attributes['domain'])
+            || !$this->domainCookieScopeAllowed($attributes['domain'])
+        )) {
+            return null;
         }
 
         try {
