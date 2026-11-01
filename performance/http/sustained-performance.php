@@ -383,21 +383,17 @@ final readonly class SustainedHttpPerformance
             unset($pipes[0]);
         }
 
-        $deadline = microtime(true) + 3.0;
-        while (!is_file($readyPath) && microtime(true) < $deadline) {
-            usleep(10_000);
-        }
-
-        $ready = is_file($readyPath)
-            ? json_decode((string) file_get_contents($readyPath), true)
-            : null;
-        $port = is_array($ready) && is_int($ready['port'] ?? null)
-            ? $ready['port']
-            : 0;
+        $port = $this->waitForReadyPort($process, $readyPath);
         if ($port < 1) {
+            $error = '';
+            if (isset($pipes[2])) {
+                stream_set_blocking($pipes[2], false);
+                $error = trim((string) stream_get_contents($pipes[2]));
+            }
             $this->stopServer($process, $pipes, $readyPath);
 
-            throw new RuntimeException('Sustained HTTP performance server did not become ready.');
+            throw new RuntimeException('Sustained HTTP performance server did not become ready.'
+                . ($error === '' ? '' : ' ' . $error));
         }
 
         /** @var array<int, resource> $pipes */
@@ -421,9 +417,31 @@ final readonly class SustainedHttpPerformance
 
         proc_close($process);
 
-        if (is_file($readyPath)) {
-            unlink($readyPath);
+        foreach ([$readyPath, $readyPath . '.tmp'] as $path) {
+            if (is_file($path)) {
+                unlink($path);
+            }
         }
+    }
+
+    /** @param resource $process */
+    private function waitForReadyPort(mixed $process, string $readyPath): int
+    {
+        $deadline = hrtime(true) + 3_000_000_000;
+        while (hrtime(true) < $deadline) {
+            $status = proc_get_status($process);
+            $ready = is_file($readyPath) ? json_decode((string) file_get_contents($readyPath), true) : null;
+            $port = is_array($ready) ? ($ready['port'] ?? null) : null;
+            if (is_int($port) && $port > 0 && $port <= 65535) {
+                return $port;
+            }
+            if (!$status['running']) {
+                break;
+            }
+            usleep(10_000);
+        }
+
+        return 0;
     }
 }
 
