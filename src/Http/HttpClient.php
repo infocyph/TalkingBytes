@@ -429,6 +429,11 @@ final readonly class HttpClient
             $request = $request->connectTimeout($this->defaultOptions->connectTimeoutSeconds);
         }
 
+        return $this->applyTlsDefaults($this->applyRedirectDefaults($request));
+    }
+
+    private function applyRedirectDefaults(HttpRequest $request): HttpRequest
+    {
         if (
             !$request->options->isExplicit('followRedirects')
             || !$request->options->isExplicit('maxRedirects')
@@ -443,6 +448,11 @@ final readonly class HttpClient
             );
         }
 
+        return $request;
+    }
+
+    private function applyTlsDefaults(HttpRequest $request): HttpRequest
+    {
         if (
             !$request->options->isExplicit('verifyPeer')
             || !$request->options->isExplicit('verifyHost')
