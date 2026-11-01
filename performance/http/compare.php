@@ -85,39 +85,11 @@ final class SustainedPerformanceComparison
                 $runwireDeltaPercent,
             );
 
-            foreach ([
+            self::appendLevelSummaries($concurrency, [
                 '2.2 baseline' => $baselineLevel,
                 '2.3 unbound' => $candidateLevel,
                 '2.3 Runwire' => $runwireLevel,
-            ] as $label => $level) {
-                $errors = $level['errors'] + $level['warmup_errors'];
-                $timeouts = $level['timeouts'] + $level['warmup_timeouts'];
-                if ($errors > 0 || $timeouts > 0) {
-                    $failures[] = sprintf(
-                        '%s c=%d had %d errors and %d timeouts including warm-up',
-                        $label,
-                        $concurrency,
-                        $errors,
-                        $timeouts,
-                    );
-                }
-
-                $summaryRows[] = sprintf(
-                    '| %d | %s | %.2f | %.2f | %.2f | %.2f | %d | %d | %.2f | %d | %d | %d |',
-                    $concurrency,
-                    $label,
-                    $level['median_rpm'],
-                    $level['p50_batch_latency_ms'],
-                    $level['p95_batch_latency_ms'],
-                    $level['p99_batch_latency_ms'],
-                    $errors,
-                    $timeouts,
-                    $level['max_cpu_percent'],
-                    $level['max_memory_bytes'],
-                    $level['max_resource_count'],
-                    $level['max_resource_delta'],
-                );
-            }
+            ], $failures, $summaryRows);
 
             if ($regressionPercent > $maxRegression) {
                 $failures[] = sprintf(
@@ -145,6 +117,48 @@ final class SustainedPerformanceComparison
         if ($failures !== []) {
             throw new RuntimeException(
                 "Sustained HTTP performance acceptance failed:\n- " . implode("\n- ", $failures),
+            );
+        }
+    }
+
+    /**
+     * @phpstan-param array<string, LevelResult> $levels
+     * @param list<string> $failures
+     * @param list<string> $summaryRows
+     */
+    private static function appendLevelSummaries(
+        int $concurrency,
+        array $levels,
+        array &$failures,
+        array &$summaryRows,
+    ): void {
+        foreach ($levels as $label => $level) {
+            $errors = $level['errors'] + $level['warmup_errors'];
+            $timeouts = $level['timeouts'] + $level['warmup_timeouts'];
+            if ($errors > 0 || $timeouts > 0) {
+                $failures[] = sprintf(
+                    '%s c=%d had %d errors and %d timeouts including warm-up',
+                    $label,
+                    $concurrency,
+                    $errors,
+                    $timeouts,
+                );
+            }
+
+            $summaryRows[] = sprintf(
+                '| %d | %s | %.2f | %.2f | %.2f | %.2f | %d | %d | %.2f | %d | %d | %d |',
+                $concurrency,
+                $label,
+                $level['median_rpm'],
+                $level['p50_batch_latency_ms'],
+                $level['p95_batch_latency_ms'],
+                $level['p99_batch_latency_ms'],
+                $errors,
+                $timeouts,
+                $level['max_cpu_percent'],
+                $level['max_memory_bytes'],
+                $level['max_resource_count'],
+                $level['max_resource_delta'],
             );
         }
     }

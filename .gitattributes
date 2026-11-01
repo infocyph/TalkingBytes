@@ -1,7 +1,13 @@
 .github export-ignore
 .agents export-ignore
 .codex export-ignore
+.aws export-ignore
 .idea export-ignore
+graphify-out export-ignore
+phpforge export-ignore
+build export-ignore
+var export-ignore
+plans export-ignore
 benchmarks export-ignore
 docs export-ignore
 examples export-ignore

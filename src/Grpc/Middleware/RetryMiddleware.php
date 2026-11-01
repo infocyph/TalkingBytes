@@ -33,12 +33,10 @@ final readonly class RetryMiddleware implements GrpcMiddleware
 
     public function handle(GrpcRequest $request, Closure $next): CommunicationResult
     {
-        if ($this->cancellation?->isRequested() === true) {
-            return $this->cancelled(0);
-        }
-
         if (!$request->retrySafe()) {
-            return $next($request);
+            return $this->cancellation?->isRequested() === true
+                ? $this->cancelled(0)
+                : $next($request);
         }
 
         $startedAt = $this->clock->monotonic();
@@ -58,15 +56,11 @@ final readonly class RetryMiddleware implements GrpcMiddleware
             if (!$decision->retry) {
                 return $result;
             }
-            if (!$this->delayFitsDeadline($request, $startedAt, $decision->delayMs)) {
-                return $this->deadlineExceeded($attempt);
+            $failure = $this->retryWaitFailure($request, $startedAt, $decision->delayMs, $attempt);
+            if ($failure !== null) {
+                return $failure;
             }
 
-            if ($this->cancellation === null) {
-                $this->sleeper->milliseconds($decision->delayMs);
-            } elseif (!$this->sleeper->millisecondsInterruptibly($decision->delayMs, $this->cancellation)) {
-                return $this->cancelled($attempt);
-            }
             $attempt++;
         }
     }
@@ -103,6 +97,33 @@ final readonly class RetryMiddleware implements GrpcMiddleware
         }
 
         return ($this->clock->monotonic() - $startedAt) + ($delayMs / 1000) < $request->deadlineSeconds;
+    }
+
+    private function retryWaitFailure(
+        GrpcRequest $request,
+        float $startedAt,
+        int $delayMs,
+        int $attempt,
+    ): ?CommunicationResult {
+        if (!$this->delayFitsDeadline($request, $startedAt, $delayMs)) {
+            return $this->deadlineExceeded($attempt);
+        }
+        if (!$this->waitBeforeRetry($delayMs)) {
+            return $this->cancelled($attempt);
+        }
+
+        return null;
+    }
+
+    private function waitBeforeRetry(int $delayMs): bool
+    {
+        if ($this->cancellation === null) {
+            $this->sleeper->milliseconds($delayMs);
+
+            return true;
+        }
+
+        return $this->sleeper->millisecondsInterruptibly($delayMs, $this->cancellation);
     }
 
     private function withRemainingDeadline(GrpcRequest $request, float $startedAt): ?GrpcRequest

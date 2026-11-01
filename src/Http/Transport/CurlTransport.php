@@ -63,51 +63,19 @@ final readonly class CurlTransport implements HttpTransport
                 $this->storeResponseCookies($current, $response, $url);
             }
 
-            if (!$current->options->followRedirects || !$response instanceof HttpResponse) {
+            $location = $this->redirectLocation($current, $response);
+            if ($location === null || !$response instanceof HttpResponse) {
                 break;
             }
 
-            $status = $response->statusCode;
-            if (!is_int($status) || !in_array($status, [301, 302, 303, 307, 308], true)) {
-                break;
-            }
-
-            $location = $response->header('Location');
-            if (is_array($location)) {
-                $location = $location[0] ?? null;
-            }
-            if (!is_string($location) || $location === '') {
-                break;
-            }
-
-            if ($redirects >= $current->options->maxRedirects) {
-                $result = CommunicationResult::failure(
-                    sprintf('HTTP redirect limit exceeded (%d).', $current->options->maxRedirects),
-                    $status,
-                    $response,
-                    ['transport' => 'curl'],
-                );
+            $next = $this->advanceRedirect($current, $url, $location, $redirects, $response);
+            if ($next instanceof CommunicationResult) {
+                $result = $next;
 
                 break;
             }
 
-            try {
-                $nextUrl = RedirectResolver::resolve($url, $location);
-                $this->assertRedirectScheme($current, $url, $nextUrl);
-                $sameOrigin = $this->sameOrigin($url, $nextUrl);
-                $current = $current->redirectedTo($nextUrl, $status, $sameOrigin);
-                $current = $this->applyCookiesForHop($current, $nextUrl)->prepareForTransport();
-                RequestSecurityGuard::assertAllowed($current, $nextUrl);
-            } catch (InvalidArgumentException $exception) {
-                $result = CommunicationResult::failure(
-                    $exception->getMessage(),
-                    $status,
-                    $response,
-                    ['transport' => 'curl'],
-                );
-
-                break;
-            }
+            $current = $next;
 
             $redirects++;
         }
@@ -126,6 +94,45 @@ final readonly class CurlTransport implements HttpTransport
             $result->response,
             [...$result->metadata, '_cookie_provenance_managed' => true],
         );
+    }
+
+    private function advanceRedirect(
+        HttpRequest $request,
+        string $url,
+        string $location,
+        int $redirects,
+        HttpResponse $response,
+    ): HttpRequest|CommunicationResult {
+        $status = $response->statusCode;
+        if (!is_int($status)) {
+            return CommunicationResult::failure('HTTP redirect status is unavailable.', response: $response);
+        }
+        if ($redirects >= $request->options->maxRedirects) {
+            return CommunicationResult::failure(
+                sprintf('HTTP redirect limit exceeded (%d).', $request->options->maxRedirects),
+                $status,
+                $response,
+                ['transport' => 'curl'],
+            );
+        }
+
+        try {
+            $nextUrl = RedirectResolver::resolve($url, $location);
+            $this->assertRedirectScheme($request, $url, $nextUrl);
+            $sameOrigin = $this->sameOrigin($url, $nextUrl);
+            $next = $request->redirectedTo($nextUrl, $status, $sameOrigin);
+            $next = $this->applyCookiesForHop($next, $nextUrl)->prepareForTransport();
+            RequestSecurityGuard::assertAllowed($next, $nextUrl);
+
+            return $next;
+        } catch (InvalidArgumentException $exception) {
+            return CommunicationResult::failure(
+                $exception->getMessage(),
+                $status,
+                $response,
+                ['transport' => 'curl'],
+            );
+        }
     }
 
     private function applyCookiesForHop(HttpRequest $request, string $url): HttpRequest
@@ -434,6 +441,24 @@ final readonly class CurlTransport implements HttpTransport
             '_cookie_origin_url' => $request->buildUrl(),
             '_cookie_origin_header' => $request->headers->get('Cookie'),
         ]);
+    }
+
+    private function redirectLocation(HttpRequest $request, mixed $response): ?string
+    {
+        if (!$request->options->followRedirects || !$response instanceof HttpResponse) {
+            return null;
+        }
+
+        if (!in_array($response->statusCode, [301, 302, 303, 307, 308], true)) {
+            return null;
+        }
+
+        $location = $response->header('Location');
+        if (is_array($location)) {
+            $location = $location[0] ?? null;
+        }
+
+        return is_string($location) && $location !== '' ? $location : null;
     }
 
     private function sameOrigin(string $first, string $second): bool

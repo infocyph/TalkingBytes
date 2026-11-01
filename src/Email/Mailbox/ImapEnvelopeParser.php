@@ -15,45 +15,28 @@ final class ImapEnvelopeParser
     public function parse(ImapResponse $response): ?array
     {
         foreach ($response->lines as $line) {
-            $start = stripos($line, 'ENVELOPE ');
-            if ($start === false) {
-                continue;
+            $envelope = $this->parseLine($line);
+            if ($envelope !== null) {
+                return $envelope;
             }
-
-            $start += strlen('ENVELOPE ');
-            while (isset($line[$start]) && $line[$start] === ' ') {
-                $start++;
-            }
-
-            if (!isset($line[$start]) || $line[$start] !== '(') {
-                continue;
-            }
-
-            $envelopeChunk = $this->extractParenthesized($line, $start);
-            if ($envelopeChunk === null) {
-                continue;
-            }
-
-            $fields = $this->splitTopLevel(substr($envelopeChunk, 1, -1));
-            if (count($fields) < 10) {
-                continue;
-            }
-
-            $date = null;
-            $dateValue = $this->parseNullableString($fields[0]);
-            if ($dateValue !== null) {
-                $date = new HeaderParser()->parseDate($dateValue);
-            }
-
-            return [
-                'subject' => $this->parseNullableString($fields[1]),
-                'from' => $this->parseEnvelopeFromField($fields[2]),
-                'date' => $date,
-                'messageId' => $this->parseNullableString($fields[9]),
-            ];
         }
 
         return null;
+    }
+
+    private function appendStructuralChar(string $char, bool &$inQuote, int &$depth, string &$buffer): bool
+    {
+        if ($char === '"') {
+            $inQuote = true;
+        } elseif ($char === '(' || $char === ')') {
+            $depth += $char === '(' ? 1 : -1;
+        } else {
+            return false;
+        }
+
+        $buffer .= $char;
+
+        return true;
     }
 
     private function consumeParenthesis(
@@ -197,6 +180,46 @@ final class ImapEnvelopeParser
         return sprintf('%s <%s>', $name, $email);
     }
 
+    /**
+     * @return array{subject:?string,from:?string,date:?DateTimeImmutable,messageId:?string}|null
+     */
+    private function parseLine(string $line): ?array
+    {
+        $start = stripos($line, 'ENVELOPE ');
+        if ($start === false) {
+            return null;
+        }
+
+        $start += strlen('ENVELOPE ');
+        while (isset($line[$start]) && $line[$start] === ' ') {
+            $start++;
+        }
+
+        if (!isset($line[$start]) || $line[$start] !== '(') {
+            return null;
+        }
+
+        $envelopeChunk = $this->extractParenthesized($line, $start);
+        if ($envelopeChunk === null) {
+            return null;
+        }
+
+        $fields = $this->splitTopLevel(substr($envelopeChunk, 1, -1));
+        if (count($fields) < 10) {
+            return null;
+        }
+
+        $dateValue = $this->parseNullableString($fields[0]);
+        $date = $dateValue === null ? null : new HeaderParser()->parseDate($dateValue);
+
+        return [
+            'subject' => $this->parseNullableString($fields[1]),
+            'from' => $this->parseEnvelopeFromField($fields[2]),
+            'date' => $date,
+            'messageId' => $this->parseNullableString($fields[9]),
+        ];
+    }
+
     private function parseNullableString(string $field): ?string
     {
         $trimmed = trim($field);
@@ -230,17 +253,7 @@ final class ImapEnvelopeParser
                 continue;
             }
 
-            if ($char === '"') {
-                $inQuote = true;
-                $buffer .= '"';
-
-                continue;
-            }
-
-            if ($char === '(' || $char === ')') {
-                $depth += $char === '(' ? 1 : -1;
-                $buffer .= $char;
-
+            if ($this->appendStructuralChar($char, $inQuote, $depth, $buffer)) {
                 continue;
             }
 

@@ -26,28 +26,10 @@ final readonly class DnsDkimPublicKeyResolver implements DkimPublicKeyResolver
         $dkimRecords = [];
 
         foreach ($records as $record) {
-            if (!is_array($record)) {
-                continue;
+            $candidate = $this->candidateRecord($record);
+            if ($candidate !== null) {
+                $dkimRecords[] = $candidate;
             }
-
-            $txt = $this->extractTxtRecord($record);
-            if ($txt === null || trim($txt) === '') {
-                continue;
-            }
-
-            $tags = DkimTagValueParser::parse($txt);
-            if (!array_key_exists('p', $tags)) {
-                continue;
-            }
-
-            if (isset($tags['v']) && strtoupper($tags['v']) !== 'DKIM1') {
-                continue;
-            }
-
-            $dkimRecords[] = [
-                'record' => $txt,
-                'public_key' => $tags['p'],
-            ];
         }
 
         if (count($dkimRecords) !== 1) {
@@ -60,6 +42,32 @@ final readonly class DnsDkimPublicKeyResolver implements DkimPublicKeyResolver
         }
 
         return $dkimRecord['record'];
+    }
+
+    /**
+     * @return array{record: string, public_key: string}|null
+     */
+    private function candidateRecord(mixed $record): ?array
+    {
+        if (!is_array($record)) {
+            return null;
+        }
+
+        $txt = $this->extractTxtRecord($record);
+        if ($txt === null || trim($txt) === '') {
+            return null;
+        }
+
+        $tags = DkimTagValueParser::parse($txt);
+        if (!array_key_exists('p', $tags)) {
+            return null;
+        }
+
+        if (isset($tags['v']) && strtoupper($tags['v']) !== 'DKIM1') {
+            return null;
+        }
+
+        return ['record' => $txt, 'public_key' => $tags['p']];
     }
 
     /**

@@ -117,20 +117,7 @@ final readonly class WebhookSender
                 break;
             }
 
-            $timestamp = (int) floor($this->clock->timestamp());
-            $request = HttpRequest::post($url)
-                ->raw($payload, 'application/json')
-                ->headers($webhook->headers)
-                ->header(WebhookHeaders::EVENT, $webhook->event)
-                ->header(WebhookHeaders::DELIVERY, $webhook->deliveryId)
-                ->header(WebhookHeaders::TIMESTAMP, (string) $timestamp)
-                ->header(WebhookHeaders::ATTEMPT, (string) $attempt)
-                ->header(WebhookHeaders::CONTENT_TYPE, 'application/json');
-
-            if ($this->signingSecret !== null) {
-                $signature = $this->signature(WebhookSignature::deliveryPayload($payload, $webhook->event, $webhook->deliveryId), $timestamp);
-                $request = $request->header(WebhookHeaders::SIGNATURE, sprintf('t=%d,v2=%s', $timestamp, $signature));
-            }
+            $request = $this->deliveryRequest($webhook, $url, $payload, $attempt);
 
             $result = $this->httpClient->send($request);
             $completedAttempts = $attempt;
@@ -149,16 +136,11 @@ final readonly class WebhookSender
                 'failure_category' => ObservabilitySanitizer::resultContext($result)['failure_category'] ?? 'transport_error',
             ]);
 
-            $delayMs = $decision->delayMs;
-            if ($delayMs > 0) {
-                if ($this->cancellation === null) {
-                    $this->sleeper->milliseconds($delayMs);
-                } elseif (!$this->sleeper->millisecondsInterruptibly($delayMs, $this->cancellation)) {
-                    $cancelled = true;
-                    $result = $this->cancelledResult($result, $completedAttempts);
+            if ($decision->delayMs > 0 && !$this->waitBeforeRetry($decision->delayMs)) {
+                $cancelled = true;
+                $result = $this->cancelledResult($result, $completedAttempts);
 
-                    break;
-                }
+                break;
             }
 
             $attempt++;
@@ -243,7 +225,7 @@ final readonly class WebhookSender
 
     private function cancelledResult(?CommunicationResult $previous, int $attempts): CommunicationResult
     {
-        $metadata = $previous === null ? [] : $previous->metadata;
+        $metadata = $previous->metadata ?? [];
 
         return CommunicationResult::failure(
             'Webhook delivery cancelled.',
@@ -257,6 +239,26 @@ final readonly class WebhookSender
         );
     }
 
+    private function deliveryRequest(WebhookMessage $webhook, string $url, string $payload, int $attempt): HttpRequest
+    {
+        $timestamp = (int) floor($this->clock->timestamp());
+        $request = HttpRequest::post($url)
+            ->raw($payload, 'application/json')
+            ->headers($webhook->headers)
+            ->header(WebhookHeaders::EVENT, $webhook->event)
+            ->header(WebhookHeaders::DELIVERY, $webhook->deliveryId)
+            ->header(WebhookHeaders::TIMESTAMP, (string) $timestamp)
+            ->header(WebhookHeaders::ATTEMPT, (string) $attempt)
+            ->header(WebhookHeaders::CONTENT_TYPE, 'application/json');
+
+        if ($this->signingSecret !== null) {
+            $signature = $this->signature(WebhookSignature::deliveryPayload($payload, $webhook->event, $webhook->deliveryId), $timestamp);
+            $request = $request->header(WebhookHeaders::SIGNATURE, sprintf('t=%d,v2=%s', $timestamp, $signature));
+        }
+
+        return $request;
+    }
+
     private function signature(string $payload, int $timestamp): string
     {
         if ($this->signingSecret === null) {
@@ -264,5 +266,16 @@ final readonly class WebhookSender
         }
 
         return $this->resolvedSigner->sign($payload, $timestamp, $this->signingSecret);
+    }
+
+    private function waitBeforeRetry(int $delayMs): bool
+    {
+        if ($this->cancellation === null) {
+            $this->sleeper->milliseconds($delayMs);
+
+            return true;
+        }
+
+        return $this->sleeper->millisecondsInterruptibly($delayMs, $this->cancellation);
     }
 }

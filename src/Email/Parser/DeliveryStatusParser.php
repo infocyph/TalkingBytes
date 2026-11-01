@@ -107,6 +107,16 @@ final class DeliveryStatusParser
         return $reports;
     }
 
+    /**
+     * @param array<string, string> $fields
+     */
+    private static function appendContinuation(array &$fields, ?string $currentKey, string $line): void
+    {
+        if ($currentKey !== null && array_key_exists($currentKey, $fields)) {
+            $fields[$currentKey] .= ' ' . trim($line);
+        }
+    }
+
     private function normalizeMta(?string $value): ?string
     {
         return $this->normalizeSemicolonValue($value);
@@ -160,9 +170,7 @@ final class DeliveryStatusParser
             }
 
             if (($line[0] ?? '') === ' ' || ($line[0] ?? '') === "\t") {
-                if ($currentKey !== null && array_key_exists($currentKey, $fields)) {
-                    $fields[$currentKey] .= ' ' . trim($line);
-                }
+                self::appendContinuation($fields, $currentKey, $line);
 
                 continue;
             }

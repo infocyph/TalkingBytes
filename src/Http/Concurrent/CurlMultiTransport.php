@@ -82,9 +82,10 @@ final readonly class CurlMultiTransport
         $stoppedScheduling = false;
         $cancelled = false;
         $deadlineExceeded = false;
+        $continue = true;
 
         try {
-            while (true) {
+            while ($continue) {
                 if ($operationDeadline?->expired() === true) {
                     $deadlineExceeded = true;
                     $stoppedScheduling = true;
@@ -92,28 +93,21 @@ final readonly class CurlMultiTransport
 
                     break;
                 }
-                $scheduled = [
-                    'next_index' => $nextIndex,
-                    'stopped' => false,
-                    'cancelled' => false,
-                ];
-
-                if (!$stoppedScheduling) {
-                    $scheduled = $this->scheduleAvailable(
-                        $multiHandle,
-                        $configurator,
-                        $requests,
-                        $keys,
-                        $nextIndex,
-                        $limit->value,
-                        $results,
-                        $contexts,
-                        $stopOnFailure,
-                        $cancellation,
-                    );
-                    $nextIndex = $scheduled['next_index'];
-                    $stoppedScheduling = $scheduled['stopped'];
-                }
+                $scheduled = $this->scheduleAvailable(
+                    $multiHandle,
+                    $configurator,
+                    $requests,
+                    $keys,
+                    $nextIndex,
+                    $limit->value,
+                    $results,
+                    $contexts,
+                    $stopOnFailure,
+                    $cancellation,
+                    $stoppedScheduling,
+                );
+                $nextIndex = $scheduled['next_index'];
+                $stoppedScheduling = $stoppedScheduling || $scheduled['stopped'];
 
                 if ($scheduled['cancelled']) {
                     $cancelled = true;
@@ -127,40 +121,20 @@ final readonly class CurlMultiTransport
                     break;
                 }
 
-                $execution = $this->executeMulti($multiHandle);
-                if ($execution['error'] !== null) {
-                    $stoppedScheduling = true;
-                    $this->failOutstanding(
-                        $multiHandle,
-                        $keys,
-                        $nextIndex,
-                        $contexts,
-                        $results,
-                        $execution['error'],
-                    );
-
-                    break;
-                }
-
-                $completed = $this->collectCompleted(
+                $progress = $this->completeActiveCycle(
                     $multiHandle,
+                    $keys,
+                    $nextIndex,
                     $contexts,
                     $results,
                     $stopOnFailure,
+                    $cancellation,
+                    $operationDeadline,
                 );
-                $stoppedScheduling = $stoppedScheduling || $completed['failure_observed'];
+                $stoppedScheduling = $stoppedScheduling || $progress['stopped'];
+                $cancelled = $progress['cancelled'];
+                $continue = $progress['continue'];
 
-                if ($cancellation?->isRequested() === true) {
-                    $cancelled = true;
-                    $stoppedScheduling = true;
-                    $this->cancelOutstanding($multiHandle, $keys, $nextIndex, $contexts, $results);
-
-                    break;
-                }
-
-                if (self::shouldWaitForActivity($contexts, $completed['count'], $execution['running'])) {
-                    $this->waitForActivity($multiHandle, $cancellation, $operationDeadline);
-                }
             }
         } finally {
             foreach ($contexts as $context) {
@@ -297,6 +271,53 @@ final readonly class CurlMultiTransport
         return ['count' => $count, 'failure_observed' => $failureObserved];
     }
 
+    /**
+     * @return array{error:?string, running:int}
+     */
+    /**
+     * @param list<int|string> $keys
+     * @param array<int, array{key:int|string, handle:\CurlHandle, request:HttpRequest, headerCollector:ResponseHeaderCollector, bodyCollector:ResponseBodyCollector}> $contexts
+     * @param array<int|string, CommunicationResult> $results
+     * @return array{continue:bool,stopped:bool,cancelled:bool}
+     */
+    private function completeActiveCycle(
+        \CurlMultiHandle $multiHandle,
+        array $keys,
+        int $nextIndex,
+        array &$contexts,
+        array &$results,
+        bool $stopOnFailure,
+        ?CancellationSignal $cancellation,
+        ?OperationDeadline $operationDeadline,
+    ): array {
+        $execution = $this->executeMulti($multiHandle);
+        if ($execution['error'] !== null) {
+            $this->failOutstanding(
+                $multiHandle,
+                $keys,
+                $nextIndex,
+                $contexts,
+                $results,
+                $execution['error'],
+            );
+
+            return ['continue' => false, 'stopped' => true, 'cancelled' => false];
+        }
+
+        $completed = $this->collectCompleted($multiHandle, $contexts, $results, $stopOnFailure);
+        if ($cancellation?->isRequested() === true) {
+            $this->cancelOutstanding($multiHandle, $keys, $nextIndex, $contexts, $results);
+
+            return ['continue' => false, 'stopped' => true, 'cancelled' => true];
+        }
+
+        if (self::shouldWaitForActivity($contexts, $completed['count'], $execution['running'])) {
+            CurlMultiActivityWaiter::wait($multiHandle, $this->sleeper, $this->cooperativeWait, $cancellation, $operationDeadline);
+        }
+
+        return ['continue' => true, 'stopped' => $completed['failure_observed'], 'cancelled' => false];
+    }
+
     private function dispatchRequestResultEvent(HttpRequest $request, CommunicationResult $result): void
     {
         $this->events->dispatch($result->successful ? 'http.request.finish' : 'http.request.failed', [
@@ -309,7 +330,7 @@ final readonly class CurlMultiTransport
     }
 
     /**
-     * @return array{error:?string, running:int}
+     * @return array{error:?string,running:int}
      */
     private function executeMulti(\CurlMultiHandle $multiHandle): array
     {
@@ -517,13 +538,14 @@ final readonly class CurlMultiTransport
         $prepared = $request->prepareForTransport();
 
         try {
-            RequestSecurityGuard::assertAllowed($prepared);
+            // pinnedResolution() validates the destination, including host policy,
+            // before returning any strict DNS pin. Do not repeat that admission.
+            $pinnedResolution = RequestSecurityGuard::pinnedResolution($prepared, $prepared->buildUrl());
             if ($prepared->options->followRedirects) {
                 throw new InvalidArgumentException(
                     'Concurrent HTTP requests do not follow redirects; use CurlTransport for manually validated redirect chains.',
                 );
             }
-            $pinnedResolution = RequestSecurityGuard::pinnedResolution($prepared, $prepared->buildUrl());
         } catch (InvalidArgumentException $exception) {
             UploadHandleManager::cleanup($prepared);
             $results[$index] = CommunicationResult::failure(
@@ -621,7 +643,12 @@ final readonly class CurlMultiTransport
         array &$contexts,
         bool $stopOnFailure,
         ?CancellationSignal $cancellation,
+        bool $stoppedScheduling,
     ): array {
+        if ($stoppedScheduling) {
+            return ['next_index' => $nextIndex, 'stopped' => false, 'cancelled' => false];
+        }
+
         $total = count($keys);
 
         while ($nextIndex < $total && count($contexts) < $maxConcurrency) {
@@ -654,52 +681,5 @@ final readonly class CurlMultiTransport
         }
 
         return ['next_index' => $nextIndex, 'stopped' => false, 'cancelled' => false];
-    }
-
-    private function waitForActivity(
-        \CurlMultiHandle $multiHandle,
-        ?CancellationSignal $cancellation,
-        ?OperationDeadline $operationDeadline,
-    ): void {
-        if ($this->cooperativeWait) {
-            if (curl_multi_select($multiHandle, 0.0) > 0) {
-                return;
-            }
-
-            $delayMs = 5;
-            if ($operationDeadline !== null) {
-                $remainingMs = (int) ceil($operationDeadline->remainingSeconds() * 1000);
-                $delayMs = min($delayMs, max(0, $remainingMs));
-            }
-            if ($delayMs === 0) {
-                return;
-            }
-
-            if ($cancellation === null) {
-                $this->sleeper->milliseconds($delayMs);
-
-                return;
-            }
-
-            $this->sleeper->millisecondsInterruptibly($delayMs, $cancellation, $delayMs);
-
-            return;
-        }
-
-        $timeoutSeconds = $cancellation === null ? 1.0 : 0.05;
-        if ($operationDeadline !== null) {
-            $timeoutSeconds = min($timeoutSeconds, max(0.0, $operationDeadline->remainingSeconds()));
-        }
-        if ($timeoutSeconds <= 0.0 || curl_multi_select($multiHandle, $timeoutSeconds) !== -1) {
-            return;
-        }
-
-        if ($cancellation === null) {
-            $this->sleeper->milliseconds(10);
-
-            return;
-        }
-
-        $this->sleeper->millisecondsInterruptibly(10, $cancellation, 10);
     }
 }

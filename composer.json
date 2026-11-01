@@ -32,7 +32,7 @@
     },
     "require-dev": {
         "infocyph/phpforge": "dev-main@dev",
-        "infocyph/runwire": "^2.1"
+        "infocyph/runwire": "^3.0"
     },
     "suggest": {
         "ext-grpc": "Required for native gRPC transport.",
@@ -42,7 +42,7 @@
         "ext-posix": "Optional best-effort Unix sendmail process-group termination for descendant cleanup.",
         "ext-sodium": "Required for Ed25519-SHA256 DKIM signing and verification.",
         "grpc/grpc": "Required for generated PHP gRPC clients.",
-        "infocyph/runwire": "Optional Runwire 2.1+ runtime binding for host cancellation, deadlines, and cooperative waits."
+        "infocyph/runwire": "Optional Runwire 3.0 runtime binding for host cancellation, deadlines, and cooperative waits."
     },
     "minimum-stability": "stable",
     "prefer-stable": true,

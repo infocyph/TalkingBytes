@@ -18,12 +18,14 @@ final class RequestSecurityGuard
         }
         $host = self::normalizeHost($host);
 
-        $allowHosts = self::normalizeHosts($request->metadata['security_allow_hosts'] ?? []);
+        $thisPolicy = self::validatedSecurityPolicy($request->metadata);
+
+        $allowHosts = self::normalizeHosts($thisPolicy['security_allow_hosts'] ?? []);
         if ($allowHosts !== [] && !in_array(strtolower($host), $allowHosts, true)) {
             throw new InvalidArgumentException(sprintf('HTTP request host is not allowed: %s', $host));
         }
 
-        $blockHosts = self::normalizeHosts($request->metadata['security_block_hosts'] ?? []);
+        $blockHosts = self::normalizeHosts($thisPolicy['security_block_hosts'] ?? []);
         if (in_array(strtolower($host), $blockHosts, true)) {
             throw new InvalidArgumentException(sprintf('HTTP request host is blocked: %s', $host));
         }
@@ -213,19 +215,20 @@ final class RequestSecurityGuard
     private static function normalizeHosts(mixed $value): array
     {
         if (!is_array($value)) {
-            return [];
+            throw new InvalidArgumentException('HTTP security host policy must contain host names.');
         }
 
         $hosts = [];
         foreach ($value as $item) {
             if (!is_string($item)) {
-                continue;
+                throw new InvalidArgumentException('HTTP security host policy entries must be non-empty strings.');
             }
 
             $host = strtolower(self::normalizeHost(trim($item)));
-            if ($host !== '') {
-                $hosts[] = $host;
+            if ($host === '' || preg_match('/[\\x00-\\x20\\x7F\\/\\?#@]/', $host) === 1) {
+                throw new InvalidArgumentException('HTTP security host policy contains an invalid host name.');
             }
+            $hosts[] = $host;
         }
 
         return $hosts;
@@ -268,5 +271,24 @@ final class RequestSecurityGuard
             $fallback,
             static fn(string $value): bool => filter_var($value, FILTER_VALIDATE_IP) !== false,
         ));
+    }
+
+    /**
+     * @param array<string, mixed> $policy
+     * @return array<string, mixed>
+     */
+    private static function validatedSecurityPolicy(array $policy): array
+    {
+        foreach (['security_allow_hosts', 'security_block_hosts'] as $key) {
+            if (array_key_exists($key, $policy) && !is_array($policy[$key])) {
+                throw new InvalidArgumentException(sprintf('HTTP %s must be an array of host names.', $key));
+            }
+        }
+        if (array_key_exists('security_block_private_networks', $policy)
+            && !is_bool($policy['security_block_private_networks'])) {
+            throw new InvalidArgumentException('HTTP security_block_private_networks must be a boolean.');
+        }
+
+        return $policy;
     }
 }

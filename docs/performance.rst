@@ -63,12 +63,41 @@ The native suite includes:
 - gRPC request construction, unary callback dispatch, and inbound dispatch
 - email preparation, raw build/stream build, parser, null send, fake send, and
   the existing 1/10/25 MB streaming payload cases
+- inbound multipart parsing with an 800 KiB Base64 attachment through
+  ``LargeEmailBench::benchParseBase64Attachment``; measure this separately from
+  outbound streaming builds and the HTTP fan-out workload
 - resilience primitive overhead
 
 The rolling cURL-multi scheduler is also covered by deterministic local-server
 tests that prove a freed concurrency slot is refilled before a slow peer
 completes. Treat end-to-end network/process benchmarks separately from CPU
 microbenchmarks.
+
+Inbound Base64 parsing
+----------------------
+
+The Base64 decoder validates complete quartets and decoded-byte limits directly
+in its hot loop. Keep incomplete-tail helpers outside that loop: per-quartet
+helper calls caused an approximately 11% local HTTP parsing regression.
+``LargeEmailBench::benchParseBase64Attachment`` covers the 800 KiB inbound
+attachment workload separately from outbound message construction.
+
+Matched local correction checks used PHP 8.5.4, CLI OPcache enabled, JIT disabled,
+one HTTP worker, and 20-second measured windows after warm-up. Every response
+validated the decoded attachment size and SHA-256. Only the decoder changed
+between the original 2.3 baseline and the corrected candidate.
+
+- One client, baseline/candidate/candidate/baseline order: median successful RPM
+  was 1,362.79 versus 1,368.11 (candidate +0.39%).
+- Four clients, both orders combined: median successful RPM was 1,325.39 versus
+  1,322.75 (candidate -0.20%). The initial four-client batch measured -3.00%;
+  repeating the unchanged code in reversed order measured +1.44%. Preserve both
+  batches as variability evidence rather than claiming a throughput gain.
+- All measured responses were valid, with zero errors or timeouts. Four-client
+  windows used approximately 99% of one CPU and at most 55 MiB RSS.
+
+These measurements show recovery for this local parsing workload. They do not
+replace the sustained fan-out gate or establish production deployment capacity.
 
 Runwire 2.3 evidence
 --------------------

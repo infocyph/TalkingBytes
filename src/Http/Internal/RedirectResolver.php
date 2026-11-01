@@ -114,23 +114,9 @@ final class RedirectResolver
         $output = '';
 
         while ($input !== '') {
-            if (str_starts_with($input, '../')) {
-                $input = substr($input, 3);
-
-                continue;
-            }
-            if (str_starts_with($input, './')) {
-                $input = substr($input, 2);
-
-                continue;
-            }
-            if (str_starts_with($input, '/./')) {
-                $input = substr($input, 2);
-
-                continue;
-            }
-            if ($input === '/.') {
-                $input = '/';
+            $stripped = self::stripDotPrefix($input);
+            if ($stripped !== null) {
+                $input = $stripped;
 
                 continue;
             }
@@ -259,6 +245,21 @@ final class RedirectResolver
         }
 
         return [substr($input, 0, $slash), substr($input, $slash)];
+    }
+
+    private static function stripDotPrefix(string $input): ?string
+    {
+        if (str_starts_with($input, '../')) {
+            return substr($input, 3);
+        }
+        if (str_starts_with($input, './') || str_starts_with($input, '/./')) {
+            return substr($input, 2);
+        }
+        if ($input === '/.') {
+            return '/';
+        }
+
+        return null;
     }
 
     /**

@@ -243,25 +243,9 @@ final class FakeMailboxTransport implements BodyStructureMailboxTransport, Envel
         $uids = [];
 
         foreach ($this->messages[$folder] as $uid => $raw) {
-            $isSeen = $this->seen[$folder][$uid] ?? false;
-
-            if ($requiresUnseen && $isSeen) {
-                continue;
+            if ($this->matchesSearch($folder, $uid, $raw, $criteria, $requiresSeen, $requiresUnseen)) {
+                $uids[] = $uid;
             }
-
-            if ($requiresSeen && !$isSeen) {
-                continue;
-            }
-
-            if (!$this->matchesHeaderContains($criteria, 'SUBJECT', $raw)) {
-                continue;
-            }
-
-            if (!$this->matchesHeaderContains($criteria, 'FROM', $raw)) {
-                continue;
-            }
-
-            $uids[] = $uid;
         }
 
         sort($uids);
@@ -368,6 +352,23 @@ final class FakeMailboxTransport implements BodyStructureMailboxTransport, Envel
         }
 
         return str_contains(strtolower($headerMatch[1]), $needle);
+    }
+
+    private function matchesSearch(
+        string $folder,
+        int $uid,
+        string $raw,
+        string $criteria,
+        bool $requiresSeen,
+        bool $requiresUnseen,
+    ): bool {
+        $isSeen = $this->seen[$folder][$uid] ?? false;
+        if (($requiresUnseen && $isSeen) || ($requiresSeen && !$isSeen)) {
+            return false;
+        }
+
+        return $this->matchesHeaderContains($criteria, 'SUBJECT', $raw)
+            && $this->matchesHeaderContains($criteria, 'FROM', $raw);
     }
 
     private function normalizeFlag(string $flag): string

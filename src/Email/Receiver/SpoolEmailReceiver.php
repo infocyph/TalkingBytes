@@ -156,6 +156,29 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
         }
     }
 
+    private function eligibleSpoolFile(SplFileInfo $entry, string $extension, int $now): ?string
+    {
+        if ($entry->isLink() || !$entry->isFile() || strcasecmp($entry->getExtension(), $extension) !== 0) {
+            return null;
+        }
+
+        $file = $entry->getPathname();
+        $mtime = filemtime($file);
+        if ($mtime === false) {
+            return null;
+        }
+
+        $age = $now - $mtime;
+        if ($this->config->olderThanSeconds !== null && $age < $this->config->olderThanSeconds) {
+            return null;
+        }
+        if ($this->config->newerThanSeconds !== null && $age > $this->config->newerThanSeconds) {
+            return null;
+        }
+
+        return $file;
+    }
+
     private function ensureDirectory(string $directory): void
     {
         if (!is_dir($directory) && !mkdir($directory, 0700, true) && !is_dir($directory)) {
@@ -182,14 +205,14 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
             return;
         }
 
-        if ($file !== $sourceFile && !$this->tryRename($file, $sourceFile)) {
-            throw new RuntimeException(sprintf('Unable to restore claimed spool file "%s".', $sourceFile));
+        if ($file !== $sourceFile) {
+            SpoolFilePublisher::move($file, dirname($sourceFile), targetBasename: basename($sourceFile));
         }
     }
 
     private function firstSpoolFile(): ?string
     {
-        $directory = rtrim($this->config->directory, '/\\');
+        $directory = rtrim($this->config->directory, '/\\\\');
         if (!is_dir($directory)) {
             return null;
         }
@@ -201,26 +224,9 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
             if (!$entry instanceof SplFileInfo) {
                 continue;
             }
-            if ($entry->isLink() || !$entry->isFile() || strtolower($entry->getExtension()) !== strtolower($extension)) {
-                continue;
-            }
-            $file = $entry->getPathname();
-            $mtime = filemtime($file);
-            if ($mtime === false) {
-                continue;
-            }
 
-            $age = $now - $mtime;
-
-            if ($this->config->olderThanSeconds !== null && $age < $this->config->olderThanSeconds) {
-                continue;
-            }
-
-            if ($this->config->newerThanSeconds !== null && $age > $this->config->newerThanSeconds) {
-                continue;
-            }
-
-            if ($candidate === null || strcmp($file, $candidate) < 0) {
+            $file = $this->eligibleSpoolFile($entry, $extension, $now);
+            if ($file !== null && ($candidate === null || strcmp($file, $candidate) < 0)) {
                 $candidate = $file;
             }
         }
@@ -266,8 +272,12 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
             return;
         }
 
-        if ($file !== $sourceFile && file_exists($file) && !file_exists($sourceFile)) {
-            $this->tryRename($file, $sourceFile);
+        if ($file !== $sourceFile && file_exists($file)) {
+            try {
+                SpoolFilePublisher::move($file, dirname($sourceFile), targetBasename: basename($sourceFile));
+            } catch (RuntimeException) {
+                // Preserve the claimed file if a replacement was already published.
+            }
         }
     }
 
@@ -277,19 +287,7 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
         bool $ensureUnique = false,
         ?string $targetBasename = null,
     ): string {
-        $this->ensureDirectory($directory);
-
-        $basename = $targetBasename ?? basename($file);
-        $target = rtrim($directory, '/\\') . '/' . $basename;
-        if ($ensureUnique) {
-            $target = $this->uniqueTarget($directory, $basename);
-        }
-
-        if (!$this->tryRename($file, $target)) {
-            throw new RuntimeException(sprintf('Unable to move file "%s" to "%s".', $file, $target));
-        }
-
-        return $target;
+        return SpoolFilePublisher::move($file, $directory, $ensureUnique, $targetBasename);
     }
 
     /**
@@ -303,21 +301,33 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
     private function readFile(string $file, bool $exclusiveLock): string|false
     {
         $maxBytes = $this->config->maxMessageBytes ?? 10_485_760;
-        $size = filesize($file);
-        if (!is_int($size) || $size > $maxBytes) {
-            throw new RuntimeException(sprintf('Spool email exceeds configured size limit (%d bytes).', $maxBytes));
-        }
-
         set_error_handler(static fn(): bool => true, E_WARNING);
 
         try {
             $handle = fopen($file, 'rb');
+            $pathState = lstat($file);
         } finally {
             restore_error_handler();
         }
 
         if (!is_resource($handle)) {
             return false;
+        }
+
+        $opened = fstat($handle);
+        if (!is_array($pathState) || !is_array($opened)
+            || ($pathState['mode'] & 0170000) !== 0100000
+            || $pathState['ino'] !== $opened['ino']
+            || $pathState['dev'] !== $opened['dev']) {
+            fclose($handle);
+
+            return false;
+        }
+
+        if ($opened['size'] > $maxBytes) {
+            fclose($handle);
+
+            throw new RuntimeException(sprintf('Spool email exceeds configured size limit (%d bytes).', $maxBytes));
         }
 
         $lockMode = $exclusiveLock ? LOCK_EX : LOCK_SH;
@@ -425,19 +435,5 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
         } finally {
             restore_error_handler();
         }
-    }
-
-    private function uniqueTarget(string $directory, string $basename): string
-    {
-        $target = rtrim($directory, '/\\') . '/' . $basename;
-        if (!file_exists($target)) {
-            return $target;
-        }
-
-        $pathInfo = pathinfo($basename);
-        $name = $pathInfo['filename'];
-        $extension = isset($pathInfo['extension']) ? ('.' . $pathInfo['extension']) : '';
-
-        return sprintf('%s/%s-%s%s', rtrim($directory, '/\\'), $name, bin2hex(random_bytes(4)), $extension);
     }
 }

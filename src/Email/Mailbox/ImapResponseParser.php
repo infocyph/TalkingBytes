@@ -204,24 +204,44 @@ final readonly class ImapResponseParser
                 continue;
             }
 
-            $chunks = preg_split('/\s+/', trim($matches[1])) ?: [];
-            for ($i = 0; $i < count($chunks) - 1; $i += 2) {
-                $name = strtoupper($chunks[$i]);
-                if (!array_key_exists($name, $values)) {
-                    continue;
-                }
-
-                $values[$name] = ctype_digit($chunks[$i + 1]) ? (int) $chunks[$i + 1] : 0;
-            }
+            $this->applyStatusPairs($values, $matches[1]);
         }
 
         return new MailboxStatus(
-            messages: $values['MESSAGES'],
-            recent: $values['RECENT'],
-            unseen: $values['UNSEEN'],
+            messages: (int) $values['MESSAGES'],
+            recent: (int) $values['RECENT'],
+            unseen: (int) $values['UNSEEN'],
             uidValidity: is_int($values['UIDVALIDITY']) ? $values['UIDVALIDITY'] : null,
             uidNext: is_int($values['UIDNEXT']) ? $values['UIDNEXT'] : null,
         );
+    }
+
+    /**
+     * @param array<string, int|null> $values
+     */
+    private function applyStatusPairs(array &$values, string $raw): void
+    {
+        $chunks = preg_split('/\\s+/', trim($raw)) ?: [];
+        for ($i = 0; $i < count($chunks) - 1; $i += 2) {
+            $name = strtoupper($chunks[$i]);
+            if (array_key_exists($name, $values)) {
+                $values[$name] = ctype_digit($chunks[$i + 1]) ? (int) $chunks[$i + 1] : 0;
+            }
+        }
+    }
+
+    /**
+     * @return list<string>|null
+     */
+    private function parseFetchFlags(string $metadata): ?array
+    {
+        if (preg_match('/\\bFLAGS\\s+\\(([^)]*)\\)/i', $metadata, $matches) !== 1) {
+            return null;
+        }
+
+        $tokens = preg_split('/\\s+/', trim($matches[1])) ?: [];
+
+        return array_values(array_filter($tokens, static fn(string $flag): bool => $flag !== ''));
     }
 
     /**
@@ -235,12 +255,7 @@ final readonly class ImapResponseParser
             }
 
             $sequence = ctype_digit($matches[1]) ? (int) $matches[1] : null;
-            $flags = null;
-            if (preg_match('/\bFLAGS\s+\(([^)]*)\)/i', $matches[2], $flagMatch) === 1) {
-                $flagTokens = preg_split('/\s+/', trim($flagMatch[1])) ?: [];
-                $flagTokens = array_values(array_filter($flagTokens, static fn(string $flag): bool => $flag !== ''));
-                $flags = $flagTokens === [] ? [] : $flagTokens;
-            }
+            $flags = $this->parseFetchFlags($matches[2]);
 
             return ['sequence' => $sequence, 'flags' => $flags];
         }

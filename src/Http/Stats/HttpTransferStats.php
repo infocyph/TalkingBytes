@@ -27,40 +27,47 @@ final readonly class HttpTransferStats
      */
     public static function fromCurlInfo(array $info): self
     {
-        $httpVersion = null;
-        if (is_int($info['http_version'] ?? null)) {
-            $httpVersion = match ($info['http_version']) {
-                CURL_HTTP_VERSION_1_0 => '1.0',
-                CURL_HTTP_VERSION_1_1 => '1.1',
-                CURL_HTTP_VERSION_2_0 => '2',
-                CURL_HTTP_VERSION_3 => '3',
-                default => null,
-            };
-        }
 
         return new self(
             totalTimeMs: self::secondsToMs($info['total_time'] ?? null),
             dnsTimeMs: self::secondsToMs($info['namelookup_time'] ?? null),
             connectTimeMs: self::secondsToMs($info['connect_time'] ?? null),
             ttfbMs: self::secondsToMs($info['starttransfer_time'] ?? null),
-            effectiveUrl: is_string($info['url'] ?? null) ? $info['url'] : null,
-            primaryIp: is_string($info['primary_ip'] ?? null) ? $info['primary_ip'] : null,
-            redirectCount: is_int($info['redirect_count'] ?? null) ? $info['redirect_count'] : null,
-            uploadedBytes: is_float($info['size_upload'] ?? null) || is_int($info['size_upload'] ?? null)
-                ? (int) $info['size_upload']
-                : null,
-            downloadedBytes: is_float($info['size_download'] ?? null) || is_int($info['size_download'] ?? null)
-                ? (int) $info['size_download']
-                : null,
-            uploadSpeed: is_float($info['speed_upload'] ?? null) || is_int($info['speed_upload'] ?? null)
-                ? (float) $info['speed_upload']
-                : null,
-            downloadSpeed: is_float($info['speed_download'] ?? null) || is_int($info['speed_download'] ?? null)
-                ? (float) $info['speed_download']
-                : null,
-            contentType: is_string($info['content_type'] ?? null) ? $info['content_type'] : null,
-            httpVersion: $httpVersion,
+            effectiveUrl: self::stringOrNull($info['url'] ?? null),
+            primaryIp: self::stringOrNull($info['primary_ip'] ?? null),
+            redirectCount: self::intOrNull($info['redirect_count'] ?? null),
+            uploadedBytes: self::intOrNull($info['size_upload'] ?? null),
+            downloadedBytes: self::intOrNull($info['size_download'] ?? null),
+            uploadSpeed: self::floatOrNull($info['speed_upload'] ?? null),
+            downloadSpeed: self::floatOrNull($info['speed_download'] ?? null),
+            contentType: self::stringOrNull($info['content_type'] ?? null),
+            httpVersion: self::httpVersion($info['http_version'] ?? null),
         );
+    }
+
+    private static function floatOrNull(mixed $value): ?float
+    {
+        return is_int($value) || is_float($value) ? (float) $value : null;
+    }
+
+    private static function httpVersion(mixed $value): ?string
+    {
+        if (!is_int($value)) {
+            return null;
+        }
+
+        return match ($value) {
+            CURL_HTTP_VERSION_1_0 => '1.0',
+            CURL_HTTP_VERSION_1_1 => '1.1',
+            CURL_HTTP_VERSION_2_0 => '2',
+            CURL_HTTP_VERSION_3 => '3',
+            default => null,
+        };
+    }
+
+    private static function intOrNull(mixed $value): ?int
+    {
+        return is_int($value) || is_float($value) ? (int) $value : null;
     }
 
     private static function secondsToMs(mixed $seconds): ?int
@@ -70,5 +77,10 @@ final readonly class HttpTransferStats
         }
 
         return (int) round($seconds * 1000);
+    }
+
+    private static function stringOrNull(mixed $value): ?string
+    {
+        return is_string($value) ? $value : null;
     }
 }

@@ -70,14 +70,20 @@ Versioning
 - compare native component benchmarks with the accepted baseline
 - compare unbound, Runwire-bound, and bound-resolved construction benchmarks
 - run the same-runner sustained HTTP fan-out gate against tag ``2.2`` and require
-  the directly comparable 2.3 unbound RPM regression to remain within 2%; record
+  the directly comparable current-candidate unbound RPM regression to remain within 2%; record
   p50/p95/p99 batch latency, errors/timeouts, CPU, memory, resource count/delta,
   exact baseline/candidate revisions, and retain the JSON artifact
-- characterize Runwire-bound sustained throughput separately from the 2.2 → 2.3
+- characterize Runwire-bound sustained throughput separately from the baseline → candidate
   unbound regression gate; do not imply a 2% Runwire comparison where no 2.2
   Runwire baseline exists
 - record PHP version, extension set, OPcache state, operating system, hardware,
   peak memory where meaningful, and benchmark class/methods used
+- verify no-clobber spool publication/restoration and symlink/file-identity admission
+  against hostile replacement and multi-process consumer races
+- verify closed borrowed Runwire coroutine scopes fail at cooperative boundaries
+  without retrying work or taking host lifecycle ownership
+- verify malformed HTTP host security metadata is rejected instead of silently
+  weakening an explicit allow/block policy
 - freeze the exact release head before the final supported matrix
 - tag only the exact commit whose CI, integration, release-guard, benchmark,
   soak, and documentation gates passed

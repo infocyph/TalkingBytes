@@ -122,37 +122,7 @@ final readonly class MultipartBody implements HttpBody
         try {
             foreach ($this->parts as $part) {
                 $key = self::nextPartKey($payload, $part['name']);
-                if ($part['type'] === 'field') {
-                    $value = $part['value'] ?? '';
-                    $contentBytes += strlen($value);
-                    $payload[$key] = $value;
-
-                    continue;
-                }
-
-                if ($part['type'] === 'file') {
-                    $path = $part['path'] ?? '';
-                    $size = filesize($path);
-                    if (!is_int($size)) {
-                        throw new InvalidArgumentException(sprintf('Unable to determine multipart file size: %s', $path));
-                    }
-                    $contentBytes += $size;
-                    $payload[$key] = new CURLFile($path, $part['mimeType'] ?? '', $part['filename'] ?? 'upload');
-
-                    continue;
-                }
-
-                if ($part['type'] === 'data') {
-                    $value = $part['value'] ?? '';
-                    $contentBytes += strlen($value);
-                    $payload[$key] = new CURLStringFile($value, $part['filename'] ?? 'upload', $part['mimeType'] ?? 'application/octet-stream');
-
-                    continue;
-                }
-
-                $path = $this->spoolStreamPart($part, $maxUploadBytes, $contentBytes);
-                $temporaryPaths[] = $path;
-                $payload[$key] = new CURLFile($path, $part['mimeType'] ?? '', $part['filename'] ?? 'upload');
+                $payload[$key] = $this->preparedPart($part, $maxUploadBytes, $contentBytes, $temporaryPaths);
             }
 
             if ($maxUploadBytes !== null && $contentBytes > $maxUploadBytes) {
@@ -223,6 +193,68 @@ final readonly class MultipartBody implements HttpBody
     }
 
     /**
+     * @param resource $source
+     * @param resource $destination
+     */
+    private function copyStreamPart(mixed $source, mixed $destination, int $offset, int $remaining, ?int $knownSize): int
+    {
+        try {
+            $readLimit = $remaining < PHP_INT_MAX ? $remaining + 1 : PHP_INT_MAX;
+            $copied = stream_copy_to_stream($source, $destination, $readLimit);
+            if (!is_int($copied) || $copied > $remaining) {
+                throw new InvalidArgumentException('Multipart stream exceeded its configured byte limit.');
+            }
+            if ($knownSize !== null && $copied !== $knownSize) {
+                throw new InvalidArgumentException('Multipart stream byte count did not match its known size.');
+            }
+            if (!fflush($destination)) {
+                throw new InvalidArgumentException('Unable to flush temporary multipart stream file.');
+            }
+
+            return $copied;
+        } finally {
+            fclose($destination);
+            fseek($source, $offset);
+        }
+    }
+
+    /**
+     * @param array{name: string, type: 'field'|'file'|'data'|'stream', value?: string, path?: string, stream?: resource, offset?: int, knownSize?: ?int, filename?: string, mimeType?: string} $part
+     * @param list<string> $temporaryPaths
+     */
+    private function preparedPart(
+        array $part,
+        ?int $maxUploadBytes,
+        int &$contentBytes,
+        array &$temporaryPaths,
+    ): string|CURLFile|CURLStringFile {
+        if ($part['type'] === 'field' || $part['type'] === 'data') {
+            $value = $part['value'] ?? '';
+            $contentBytes += strlen($value);
+
+            return $part['type'] === 'field'
+                ? $value
+                : new CURLStringFile($value, $part['filename'] ?? 'upload', $part['mimeType'] ?? 'application/octet-stream');
+        }
+
+        if ($part['type'] === 'file') {
+            $path = $part['path'] ?? '';
+            $size = filesize($path);
+            if (!is_int($size)) {
+                throw new InvalidArgumentException(sprintf('Unable to determine multipart file size: %s', $path));
+            }
+            $contentBytes += $size;
+
+            return new CURLFile($path, $part['mimeType'] ?? '', $part['filename'] ?? 'upload');
+        }
+
+        $path = $this->spoolStreamPart($part, $maxUploadBytes, $contentBytes);
+        $temporaryPaths[] = $path;
+
+        return new CURLFile($path, $part['mimeType'] ?? '', $part['filename'] ?? 'upload');
+    }
+
+    /**
      * @param array{name: string, type: 'field'|'file'|'data'|'stream', value?: string, path?: string, stream?: resource, offset?: int, knownSize?: ?int, filename?: string, mimeType?: string} $part
      */
     private function spoolStreamPart(array $part, ?int $maxUploadBytes, int &$contentBytes): string
@@ -255,23 +287,8 @@ final readonly class MultipartBody implements HttpBody
         }
 
         try {
-            try {
-                $readLimit = $remaining < PHP_INT_MAX ? $remaining + 1 : PHP_INT_MAX;
-                $copied = stream_copy_to_stream($stream, $destination, $readLimit);
-                if (!is_int($copied) || $copied > $remaining) {
-                    throw new InvalidArgumentException('Multipart stream exceeded its configured byte limit.');
-                }
-                if (is_int($knownSize) && $copied !== $knownSize) {
-                    throw new InvalidArgumentException('Multipart stream byte count did not match its known size.');
-                }
-                $contentBytes += $copied;
-                if (!fflush($destination)) {
-                    throw new InvalidArgumentException('Unable to flush temporary multipart stream file.');
-                }
-            } finally {
-                fclose($destination);
-                fseek($stream, $offset);
-            }
+            $contentBytes += $this->copyStreamPart($stream, $destination, $offset, $remaining, $knownSize);
+
         } catch (Throwable $throwable) {
             unlink($path);
 

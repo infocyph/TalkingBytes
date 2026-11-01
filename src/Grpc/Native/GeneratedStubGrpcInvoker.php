@@ -106,7 +106,7 @@ final readonly class GeneratedStubGrpcInvoker implements NativeGrpcInvoker, Nati
             $this->resolveMethodName($method),
             [
                 $message,
-                $this->toNativeMetadata($headers),
+                $headers->headers,
                 $this->toNativeOptions($deadlineSeconds),
             ],
         );
@@ -136,7 +136,7 @@ final readonly class GeneratedStubGrpcInvoker implements NativeGrpcInvoker, Nati
             $this->resolveMethodName($method),
             [
                 $message,
-                $this->toNativeMetadata($headers),
+                $headers->headers,
                 $this->toNativeOptions($deadlineSeconds),
             ],
         );
@@ -232,7 +232,7 @@ final readonly class GeneratedStubGrpcInvoker implements NativeGrpcInvoker, Nati
         }
 
         if (method_exists($call, 'getMetadata')) {
-            return $this->fromNativeMetadata($call->getMetadata());
+            return NativeGrpcMetadataCodec::fromNative($call->getMetadata());
         }
 
         return new GrpcMetadata();
@@ -276,7 +276,7 @@ final readonly class GeneratedStubGrpcInvoker implements NativeGrpcInvoker, Nati
         }
 
         if (method_exists($call, 'getTrailingMetadata')) {
-            return $this->fromNativeMetadata($call->getTrailingMetadata());
+            return NativeGrpcMetadataCodec::fromNative($call->getTrailingMetadata());
         }
 
         return new GrpcMetadata();
@@ -305,7 +305,7 @@ final readonly class GeneratedStubGrpcInvoker implements NativeGrpcInvoker, Nati
     private function extractWaitStatusMetadata(mixed $status): array
     {
         if (is_array($status)) {
-            return $this->normalizeStatusArrayMetadata($status);
+            return NativeGrpcMetadataCodec::normalizeStatusArray($status);
         }
 
         if (!is_object($status)) {
@@ -388,31 +388,6 @@ final readonly class GeneratedStubGrpcInvoker implements NativeGrpcInvoker, Nati
         }
     }
 
-    private function fromNativeMetadata(mixed $metadata): GrpcMetadata
-    {
-        if ($metadata instanceof GrpcMetadata) {
-            return $metadata;
-        }
-
-        if (!is_array($metadata)) {
-            return new GrpcMetadata();
-        }
-
-        /** @var array<string, list<string>> $normalized */
-        $normalized = [];
-
-        foreach ($metadata as $name => $values) {
-            if (!is_string($name)) {
-                continue;
-            }
-
-            $normalizedValues = $this->normalizeNativeMetadataValues($values);
-            $normalized[$name] = $normalizedValues;
-        }
-
-        return new GrpcMetadata($normalized);
-    }
-
     private function invokeStreamOpen(string $method, GrpcMetadata $headers, ?float $deadlineSeconds): mixed
     {
         $methodName = $this->resolveMethodName($method);
@@ -424,7 +399,7 @@ final readonly class GeneratedStubGrpcInvoker implements NativeGrpcInvoker, Nati
             ));
         }
 
-        $metadata = $this->toNativeMetadata($headers);
+        $metadata = $headers->headers;
         $options = $this->toNativeOptions($deadlineSeconds);
         $arguments = $arity === 3
             ? [null, $metadata, $options]
@@ -492,49 +467,6 @@ final readonly class GeneratedStubGrpcInvoker implements NativeGrpcInvoker, Nati
         return $normalized;
     }
 
-    /**
-     * @return list<string>
-     */
-    private function normalizeNativeMetadataValues(mixed $values): array
-    {
-        if (is_array($values)) {
-            $normalized = [];
-
-            foreach ($values as $value) {
-                $normalizedValue = $this->stringifyNativeMetadataValue($value);
-                if ($normalizedValue !== null) {
-                    $normalized[] = $normalizedValue;
-                }
-            }
-
-            return $normalized;
-        }
-
-        $normalizedValue = $this->stringifyNativeMetadataValue($values);
-        if ($normalizedValue === null) {
-            return [];
-        }
-
-        return [$normalizedValue];
-    }
-
-    /**
-     * @param array<mixed> $status
-     * @return array<string, mixed>
-     */
-    private function normalizeStatusArrayMetadata(array $status): array
-    {
-        $normalized = [];
-
-        foreach ($status as $key => $value) {
-            if (is_string($key)) {
-                $normalized[$key] = $value;
-            }
-        }
-
-        return $normalized;
-    }
-
     private function resolveMethodName(string $method): string
     {
         $normalized = GrpcMethodGuard::normalize($method);
@@ -546,27 +478,6 @@ final readonly class GeneratedStubGrpcInvoker implements NativeGrpcInvoker, Nati
         $parts = explode('/', ltrim($normalized, '/'));
 
         return $parts[array_key_last($parts)];
-    }
-
-    private function stringifyNativeMetadataValue(mixed $value): ?string
-    {
-        if (is_string($value) || is_int($value) || is_float($value) || is_bool($value)) {
-            return (string) $value;
-        }
-
-        if ($value instanceof \Stringable) {
-            return (string) $value;
-        }
-
-        return null;
-    }
-
-    /**
-     * @return array<string, list<string>>
-     */
-    private function toNativeMetadata(GrpcMetadata $headers): array
-    {
-        return $headers->headers;
     }
 
     /**
