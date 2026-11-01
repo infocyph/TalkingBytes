@@ -189,7 +189,7 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
 
     private function firstSpoolFile(): ?string
     {
-        $directory = rtrim($this->config->directory, '/\\');
+        $directory = rtrim($this->config->directory, '/\\\\');
         if (!is_dir($directory)) {
             return null;
         }
@@ -198,34 +198,36 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
         $now = (int) floor($this->clock->timestamp());
         $candidate = null;
         foreach (new FilesystemIterator($directory, FilesystemIterator::SKIP_DOTS) as $entry) {
-            if (!$entry instanceof SplFileInfo) {
-                continue;
-            }
-            if ($entry->isLink() || !$entry->isFile() || strtolower($entry->getExtension()) !== strtolower($extension)) {
-                continue;
-            }
-            $file = $entry->getPathname();
-            $mtime = filemtime($file);
-            if ($mtime === false) {
-                continue;
-            }
-
-            $age = $now - $mtime;
-
-            if ($this->config->olderThanSeconds !== null && $age < $this->config->olderThanSeconds) {
-                continue;
-            }
-
-            if ($this->config->newerThanSeconds !== null && $age > $this->config->newerThanSeconds) {
-                continue;
-            }
-
-            if ($candidate === null || strcmp($file, $candidate) < 0) {
+            $file = $this->eligibleSpoolFile($entry, $extension, $now);
+            if ($file !== null && ($candidate === null || strcmp($file, $candidate) < 0)) {
                 $candidate = $file;
             }
         }
 
         return $candidate;
+    }
+
+    private function eligibleSpoolFile(SplFileInfo $entry, string $extension, int $now): ?string
+    {
+        if ($entry->isLink() || !$entry->isFile() || strcasecmp($entry->getExtension(), $extension) !== 0) {
+            return null;
+        }
+
+        $file = $entry->getPathname();
+        $mtime = filemtime($file);
+        if ($mtime === false) {
+            return null;
+        }
+
+        $age = $now - $mtime;
+        if ($this->config->olderThanSeconds !== null && $age < $this->config->olderThanSeconds) {
+            return null;
+        }
+        if ($this->config->newerThanSeconds !== null && $age > $this->config->newerThanSeconds) {
+            return null;
+        }
+
+        return $file;
     }
 
     private function isSameFilesystem(string $file, string $directory): bool
