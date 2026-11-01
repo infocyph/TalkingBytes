@@ -122,14 +122,15 @@ final readonly class MultipartBody implements HttpBody
         try {
             foreach ($this->parts as $part) {
                 $key = self::nextPartKey($payload, $part['name']);
-                if ($part['type'] === 'field') {
+                if ($part['type'] === 'field' || $part['type'] === 'data') {
                     $value = $part['value'] ?? '';
                     $contentBytes += strlen($value);
-                    $payload[$key] = $value;
+                    $payload[$key] = $part['type'] === 'field'
+                        ? $value
+                        : new CURLStringFile($value, $part['filename'] ?? 'upload', $part['mimeType'] ?? 'application/octet-stream');
 
                     continue;
                 }
-
                 if ($part['type'] === 'file') {
                     $path = $part['path'] ?? '';
                     $size = filesize($path);
@@ -138,14 +139,6 @@ final readonly class MultipartBody implements HttpBody
                     }
                     $contentBytes += $size;
                     $payload[$key] = new CURLFile($path, $part['mimeType'] ?? '', $part['filename'] ?? 'upload');
-
-                    continue;
-                }
-
-                if ($part['type'] === 'data') {
-                    $value = $part['value'] ?? '';
-                    $contentBytes += strlen($value);
-                    $payload[$key] = new CURLStringFile($value, $part['filename'] ?? 'upload', $part['mimeType'] ?? 'application/octet-stream');
 
                     continue;
                 }
@@ -255,23 +248,8 @@ final readonly class MultipartBody implements HttpBody
         }
 
         try {
-            try {
-                $readLimit = $remaining < PHP_INT_MAX ? $remaining + 1 : PHP_INT_MAX;
-                $copied = stream_copy_to_stream($stream, $destination, $readLimit);
-                if (!is_int($copied) || $copied > $remaining) {
-                    throw new InvalidArgumentException('Multipart stream exceeded its configured byte limit.');
-                }
-                if (is_int($knownSize) && $copied !== $knownSize) {
-                    throw new InvalidArgumentException('Multipart stream byte count did not match its known size.');
-                }
-                $contentBytes += $copied;
-                if (!fflush($destination)) {
-                    throw new InvalidArgumentException('Unable to flush temporary multipart stream file.');
-                }
-            } finally {
-                fclose($destination);
-                fseek($stream, $offset);
-            }
+            $contentBytes += $this->copyStreamPart($stream, $destination, $offset, $remaining, $knownSize);
+
         } catch (Throwable $throwable) {
             unlink($path);
 
@@ -279,6 +257,32 @@ final readonly class MultipartBody implements HttpBody
         }
 
         return $path;
+    }
+
+    /**
+     * @param resource $source
+     * @param resource $destination
+     */
+    private function copyStreamPart(mixed $source, mixed $destination, int $offset, int $remaining, ?int $knownSize): int
+    {
+        try {
+            $readLimit = $remaining < PHP_INT_MAX ? $remaining + 1 : PHP_INT_MAX;
+            $copied = stream_copy_to_stream($source, $destination, $readLimit);
+            if (!is_int($copied) || $copied > $remaining) {
+                throw new InvalidArgumentException('Multipart stream exceeded its configured byte limit.');
+            }
+            if ($knownSize !== null && $copied !== $knownSize) {
+                throw new InvalidArgumentException('Multipart stream byte count did not match its known size.');
+            }
+            if (!fflush($destination)) {
+                throw new InvalidArgumentException('Unable to flush temporary multipart stream file.');
+            }
+
+            return $copied;
+        } finally {
+            fclose($destination);
+            fseek($source, $offset);
+        }
     }
 
     /**
