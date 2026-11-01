@@ -76,6 +76,22 @@ function talkingBytesRunwireMessage(): EmailMessage
         ->text('payload');
 }
 
+it('surfaces closed borrowed Runwire coroutine scopes instead of silently blocking', function (): void {
+    $runtime = talkingBytesRunwireContext(cooperative: true);
+    $closedScope = null;
+
+    (new CoroutineRuntime())->run(static function (CoroutineScope $scope) use (&$closedScope): void {
+        $closedScope = $scope;
+    });
+
+    $binding = new RunwireBinding($runtime, scope: $closedScope);
+    $sleeper = $binding->sleeper();
+
+    expect($sleeper)->not->toBeNull();
+    expect(fn() => $sleeper?->milliseconds(1))
+        ->toThrow(LogicException::class, 'Coroutine scope is already closed.');
+});
+
 it('bounds borrowed Runwire stream readiness without owning the scope', function (): void {
     $runtime = talkingBytesRunwireContext(cooperative: true);
     $pair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
