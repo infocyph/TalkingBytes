@@ -18,30 +18,20 @@ final class CurlMultiActivityWaiter
         ?OperationDeadline $operationDeadline,
     ): void {
         if ($cooperativeWait) {
-            if (curl_multi_select($multiHandle, 0.0) > 0) {
-                return;
-            }
-
-            $delayMs = 5;
-            if ($operationDeadline !== null) {
-                $remainingMs = (int) ceil($operationDeadline->remainingSeconds() * 1000);
-                $delayMs = min($delayMs, max(0, $remainingMs));
-            }
-            if ($delayMs === 0) {
-                return;
-            }
-
-            if ($cancellation === null) {
-                $sleeper->milliseconds($delayMs);
-
-                return;
-            }
-
-            $sleeper->millisecondsInterruptibly($delayMs, $cancellation, $delayMs);
+            self::waitCooperatively($multiHandle, $sleeper, $cancellation, $operationDeadline);
 
             return;
         }
 
+        self::waitBlocking($multiHandle, $sleeper, $cancellation, $operationDeadline);
+    }
+
+    private static function waitBlocking(
+        \CurlMultiHandle $multiHandle,
+        Sleeper $sleeper,
+        ?CancellationSignal $cancellation,
+        ?OperationDeadline $operationDeadline,
+    ): void {
         $timeoutSeconds = $cancellation === null ? 1.0 : 0.05;
         if ($operationDeadline !== null) {
             $timeoutSeconds = min($timeoutSeconds, max(0.0, $operationDeadline->remainingSeconds()));
@@ -58,4 +48,33 @@ final class CurlMultiActivityWaiter
 
         $sleeper->millisecondsInterruptibly(10, $cancellation, 10);
     }
+
+    private static function waitCooperatively(
+        \CurlMultiHandle $multiHandle,
+        Sleeper $sleeper,
+        ?CancellationSignal $cancellation,
+        ?OperationDeadline $operationDeadline,
+    ): void {
+        if (curl_multi_select($multiHandle, 0.0) > 0) {
+            return;
+        }
+
+        $delayMs = 5;
+        if ($operationDeadline !== null) {
+            $remainingMs = (int) ceil($operationDeadline->remainingSeconds() * 1000);
+            $delayMs = min($delayMs, max(0, $remainingMs));
+        }
+        if ($delayMs === 0) {
+            return;
+        }
+
+        if ($cancellation === null) {
+            $sleeper->milliseconds($delayMs);
+
+            return;
+        }
+
+        $sleeper->millisecondsInterruptibly($delayMs, $cancellation, $delayMs);
+    }
+
 }
