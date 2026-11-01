@@ -554,24 +554,12 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
      */
     private function readIdleLineIfAvailable(mixed $socket): ?string
     {
-        $read = [$socket];
-        $write = [];
-        $except = [];
-        $microseconds = $this->streamWaiter === null ? 250000 : 0;
-        $ready = stream_select($read, $write, $except, 0, $microseconds);
-        if ($ready === false) {
-            throw new MailboxConnectionException('IMAP IDLE stream_select failed.');
-        }
-
-        if ($ready < 1) {
-            if ($this->streamWaiter !== null) {
-                $this->sleeper->milliseconds(10);
-            }
-
-            return null;
-        }
-
-        return rtrim($this->readLine(), "\r\n");
+        return ImapResponseStreamReader::idleLine(
+            $socket,
+            $this->streamWaiter,
+            $this->sleeper,
+            fn(): string => $this->readLine(),
+        );
     }
 
     private function readLine(): string
@@ -637,42 +625,16 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
 
     private function readTaggedResponse(string $tag): ImapResponse
     {
-        $lines = [];
-        $literals = [];
-        $status = 'NO';
-        $totalBytes = 0;
         $deadline = $this->commandDeadline();
-
         try {
-            while (true) {
-                $line = $this->readLineUntil($deadline);
-                $trimmed = rtrim($line, "\r\n");
-                $lines[] = $trimmed;
-                $totalBytes += strlen($line);
-
-                if (count($lines) > $this->config->maxResponseLines || $totalBytes > $this->config->maxResponseBytes) {
-                    throw new MailboxProtocolException('IMAP response exceeds configured bounds.');
-                }
-
-                $literalSize = $this->parseLiteralSize($trimmed);
-                if ($literalSize !== null) {
-                    $literal = $this->readExact($literalSize, $deadline);
-                    $totalBytes += strlen($literal);
-                    if ($totalBytes > $this->config->maxResponseBytes) {
-                        throw new MailboxProtocolException('IMAP response exceeds configured byte limit.');
-                    }
-
-                    $literals[] = $literal;
-                }
-
-                if (preg_match('/^' . preg_quote($tag, '/') . '\\s+(OK|NO|BAD)\\b/i', $trimmed, $matches) === 1) {
-                    $status = strtoupper($matches[1]);
-
-                    break;
-                }
-            }
-
-            return new ImapResponse($tag, $status, $lines, $literals);
+            return ImapResponseStreamReader::read(
+                $tag,
+                fn(): string => $this->readLineUntil($deadline),
+                fn(int $bytes): string => $this->readExact($bytes, $deadline),
+                fn(string $line): ?int => $this->parseLiteralSize($line),
+                $this->config->maxResponseLines,
+                $this->config->maxResponseBytes,
+            );
         } finally {
             $this->restoreReadTimeout();
         }
