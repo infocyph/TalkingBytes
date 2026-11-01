@@ -205,8 +205,8 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
             return;
         }
 
-        if ($file !== $sourceFile && !$this->tryRename($file, $sourceFile)) {
-            throw new RuntimeException(sprintf('Unable to restore claimed spool file "%s".', $sourceFile));
+        if ($file !== $sourceFile) {
+            SpoolFilePublisher::move($file, dirname($sourceFile), targetBasename: basename($sourceFile));
         }
     }
 
@@ -272,8 +272,12 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
             return;
         }
 
-        if ($file !== $sourceFile && file_exists($file) && !file_exists($sourceFile)) {
-            $this->tryRename($file, $sourceFile);
+        if ($file !== $sourceFile && file_exists($file)) {
+            try {
+                SpoolFilePublisher::move($file, dirname($sourceFile), targetBasename: basename($sourceFile));
+            } catch (RuntimeException) {
+                // Preserve the claimed file if a replacement was already published.
+            }
         }
     }
 
@@ -297,21 +301,33 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
     private function readFile(string $file, bool $exclusiveLock): string|false
     {
         $maxBytes = $this->config->maxMessageBytes ?? 10_485_760;
-        $size = filesize($file);
-        if (!is_int($size) || $size > $maxBytes) {
-            throw new RuntimeException(sprintf('Spool email exceeds configured size limit (%d bytes).', $maxBytes));
-        }
-
         set_error_handler(static fn(): bool => true, E_WARNING);
 
         try {
             $handle = fopen($file, 'rb');
+            $pathState = lstat($file);
         } finally {
             restore_error_handler();
         }
 
         if (!is_resource($handle)) {
             return false;
+        }
+
+        $opened = fstat($handle);
+        if (!is_array($pathState) || !is_array($opened)
+            || ($pathState['mode'] & 0170000) !== 0100000
+            || $pathState['ino'] !== $opened['ino']
+            || $pathState['dev'] !== $opened['dev']) {
+            fclose($handle);
+
+            return false;
+        }
+
+        if ($opened['size'] > $maxBytes) {
+            fclose($handle);
+
+            throw new RuntimeException(sprintf('Spool email exceeds configured size limit (%d bytes).', $maxBytes));
         }
 
         $lockMode = $exclusiveLock ? LOCK_EX : LOCK_SH;

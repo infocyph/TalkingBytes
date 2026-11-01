@@ -14,6 +14,7 @@ $directory = $argv[1] ?? '';
 $mode = $argv[2] ?? 'consume';
 $marker = $argv[3] ?? '';
 $output = $argv[4] ?? '';
+$processing = $argv[5] ?? null;
 
 $parser = new class($mode, $marker) implements EmailParser
 {
@@ -41,7 +42,7 @@ $parser = new class($mode, $marker) implements EmailParser
 };
 
 $email = (new SpoolEmailReceiver(
-    new SpoolConfig($directory, lockBeforeRead: true),
+    new SpoolConfig($directory, processingDirectory: $processing, lockBeforeRead: true),
     parser: $parser,
     deleteAfterRead: true,
 ))->receiveParsed();

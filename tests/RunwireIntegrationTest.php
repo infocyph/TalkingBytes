@@ -92,6 +92,43 @@ it('surfaces closed borrowed Runwire coroutine scopes instead of silently blocki
         ->toThrow(LogicException::class, 'Coroutine scope is already closed.');
 });
 
+it('does not silently resume cooperative waiting on a scope closed after binding', function (): void {
+    $runtime = talkingBytesRunwireContext(cooperative: true);
+    $sleeper = null;
+    $waiter = null;
+
+    (new CoroutineRuntime())->run(static function (CoroutineScope $scope) use ($runtime, &$sleeper, &$waiter): void {
+        $binding = new RunwireBinding($runtime, scope: $scope);
+        $sleeper = $binding->sleeper();
+        $waiter = $binding->streamWaiter();
+    });
+
+    $attempts = 0;
+    expect(fn() => \Infocyph\TalkingBytes\Core\Support\RetryExecutor::run(
+        new \Infocyph\TalkingBytes\Retry\FixedDelayRetryPolicy(2, 5),
+        static function () use (&$attempts): CommunicationResult {
+            $attempts++;
+
+            return CommunicationResult::failure('retryable', 503);
+        },
+        $sleeper,
+    ))->toThrow(LogicException::class, 'Coroutine scope is already closed.');
+    expect($attempts)->toBe(1);
+
+    $pair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
+    if ($pair === false) {
+        throw new RuntimeException('Unable to create stream pair for closed-scope regression.');
+    }
+
+    try {
+        expect(fn() => $waiter?->waitReadable($pair[0]))
+            ->toThrow(LogicException::class, 'Coroutine scope is already closed.');
+    } finally {
+        fclose($pair[0]);
+        fclose($pair[1]);
+    }
+});
+
 it('bounds borrowed Runwire stream readiness without owning the scope', function (): void {
     $runtime = talkingBytesRunwireContext(cooperative: true);
     $pair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
