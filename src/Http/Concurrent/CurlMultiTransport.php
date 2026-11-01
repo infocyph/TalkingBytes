@@ -82,9 +82,10 @@ final readonly class CurlMultiTransport
         $stoppedScheduling = false;
         $cancelled = false;
         $deadlineExceeded = false;
+        $continue = true;
 
         try {
-            while (true) {
+            while ($continue) {
                 if ($operationDeadline?->expired() === true) {
                     $deadlineExceeded = true;
                     $stoppedScheduling = true;
@@ -132,9 +133,7 @@ final readonly class CurlMultiTransport
                 );
                 $stoppedScheduling = $stoppedScheduling || $progress['stopped'];
                 $cancelled = $progress['cancelled'];
-                if (!$progress['continue']) {
-                    break;
-                }
+                $continue = $progress['continue'];
 
             }
         } finally {
