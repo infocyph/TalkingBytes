@@ -217,9 +217,6 @@ final readonly class ImapResponseParser
     }
 
     /**
-     * @return array{sequence:?int,flags:?list<string>}
-     */
-    /**
      * @param array<string, int|null> $values
      */
     private function applyStatusPairs(array &$values, string $raw): void
@@ -233,6 +230,9 @@ final readonly class ImapResponseParser
         }
     }
 
+    /**
+     * @return array{sequence:?int,flags:?list<string>}
+     */
     private function parseFetchMeta(ImapResponse $response): array
     {
         foreach ($response->lines as $line) {
@@ -250,9 +250,6 @@ final readonly class ImapResponseParser
     }
 
     /**
-     * @return list<int>
-     */
-    /**
      * @return list<string>|null
      */
     private function parseFetchFlags(string $metadata): ?array
@@ -266,6 +263,9 @@ final readonly class ImapResponseParser
         return array_values(array_filter($tokens, static fn(string $flag): bool => $flag !== ''));
     }
 
+    /**
+     * @return list<int>
+     */
     private function parseUidChunks(string $raw): array
     {
         if ($raw === '') {
