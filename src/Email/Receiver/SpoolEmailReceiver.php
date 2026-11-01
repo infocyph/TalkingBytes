@@ -281,15 +281,23 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
 
         $basename = $targetBasename ?? basename($file);
         $target = rtrim($directory, '/\\') . '/' . $basename;
-        if ($ensureUnique) {
-            $target = $this->uniqueTarget($directory, $basename);
+        for ($attempt = 0; $attempt < 8; $attempt++) {
+            $candidate = $ensureUnique ? $this->uniqueTarget($directory, $basename) : $target;
+            $published = $this->tryLink($file, $candidate);
+            if (!$published && !$this->isSameFilesystem($file, $directory) && !file_exists($candidate)) {
+                $published = $this->publishAcrossFilesystems($file, $directory, $candidate);
+            }
+            if ($published) {
+                $this->removePublishedSource($file, $candidate);
+
+                return $candidate;
+            }
+            if (!$ensureUnique || !file_exists($candidate)) {
+                break;
+            }
         }
 
-        if (!$this->tryRename($file, $target)) {
-            throw new RuntimeException(sprintf('Unable to move file "%s" to "%s".', $file, $target));
-        }
-
-        return $target;
+        throw new RuntimeException(sprintf('Unable to move file "%s" without overwriting a destination.', $file));
     }
 
     /**
@@ -414,6 +422,54 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
         ]);
 
         return $parsed;
+    }
+
+    private function publishAcrossFilesystems(string $source, string $directory, string $target): bool
+    {
+        $staging = tempnam($directory, '.tb-spool-');
+        if ($staging === false) {
+            throw new RuntimeException('Unable to allocate spool destination staging file.');
+        }
+
+        try {
+            if (!$this->tryCopy($source, $staging) || !chmod($staging, 0600)) {
+                throw new RuntimeException('Unable to safely stage spool message on destination filesystem.');
+            }
+
+            return $this->tryLink($staging, $target);
+        } finally {
+            $this->deleteFile($staging, strict: false);
+        }
+    }
+
+    private function removePublishedSource(string $source, string $destination): void
+    {
+        if (unlink($source)) {
+            return;
+        }
+
+        $this->deleteFile($destination, strict: false);
+        throw new RuntimeException(sprintf('Unable to remove spool source after publication: %s', $source));
+    }
+
+    private function tryCopy(string $source, string $target): bool
+    {
+        set_error_handler(static fn(): bool => true, E_WARNING);
+        try {
+            return copy($source, $target);
+        } finally {
+            restore_error_handler();
+        }
+    }
+
+    private function tryLink(string $source, string $target): bool
+    {
+        set_error_handler(static fn(): bool => true, E_WARNING);
+        try {
+            return link($source, $target);
+        } finally {
+            restore_error_handler();
+        }
     }
 
     private function tryRename(string $source, string $target): bool
