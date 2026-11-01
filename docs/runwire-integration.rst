@@ -113,6 +113,14 @@ still blocking; it must not be described as cooperative or fully asynchronous.
 Ownership and cleanup
 ---------------------
 
+An already-closed coroutine scope cannot currently be detected during binding
+through Runwire 3.0's public API. A cooperative wait or sleep on such a
+scope raises a ``LogicException`` instead of silently falling back to blocking
+I/O. The host must keep the scope open for the entire bound operation and
+must not reuse a graph after closing its scope. An operation that is still
+performing synchronous DNS or connection setup may only discover this at
+its next cooperative boundary.
+
 TalkingBytes borrows Runwire resources. It never stops the Runwire loop,
 completes a ``RequestContext``, closes the caller's ``CoroutineScope``, or
 changes host worker/signal policy.
