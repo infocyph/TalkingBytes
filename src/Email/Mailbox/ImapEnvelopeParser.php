@@ -220,9 +220,6 @@ final class ImapEnvelopeParser
         return $trimmed;
     }
 
-    /**
-     * @return list<string>
-     */
     private function appendStructuralChar(string $char, bool &$inQuote, int &$depth, string &$buffer): bool
     {
         if ($char === '"') {
@@ -238,6 +235,9 @@ final class ImapEnvelopeParser
         return true;
     }
 
+    /**
+     * @return list<string>
+     */
     private function splitTopLevel(string $value): array
     {
         $parts = [];
