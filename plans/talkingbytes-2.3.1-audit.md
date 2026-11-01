@@ -1,6 +1,6 @@
 # TalkingBytes 2.3.1 audit and release plan
 
-Audit date: 2026-11-01 (Asia/Dhaka). Baseline: `1096b05c143db1167a69fb1ea78ab1ece99f4004` (the `2.3` tag). Status: R1/R2/R6/R8 remediation has passed hosted certification on `7eb3f84c`; subsequent R5/R7 safety regression coverage and documentation updates require the final HEAD matrix to be green. The original audit measurements below are historical and are **not** current blockers.
+Audit date: 2026-11-01 (Asia/Dhaka). Baseline: `1096b05c143db1167a69fb1ea78ab1ece99f4004` (the `2.3` tag). Status: R1–R8 remediation and the complete release matrix passed at source revision `25b902847b42648589af4bc60ea1d4a7ccd031a5`. The subsequent audit-evidence-only commit must also pass the final HEAD matrix before manual-review handoff. Original audit failures below are historical, not current blockers.
 
 ## Release-candidate verification and remaining sign-off
 
@@ -8,14 +8,16 @@ The [PR #18](https://github.com/infocyph/TalkingBytes/pull/18) is maintained on 
 
 The same-runner benchmark at that SHA compared tag `2.2` (`ed7873c033498132a169b792e63f601aef98d1ca`) against unbound 2.3.1: c5 **-0.46%**, c20 **-1.41%**, c50 **-0.46%** relative RPM. All are within the unchanged **2%** budget; zero errors/timeouts. Bound Runwire throughput is characterized separately, not treated as a historical Runwire baseline. [Performance artifact from that run](https://github.com/infocyph/TalkingBytes/actions/runs/41289626142/artifacts/13076901215).
 
-Changes made **after** that successful revision: file-identity verification on spool reads; no-clobber restoration of claimed messages; deterministic same-filesystem collision, cross-filesystem publication (when a distinct mounted filesystem is available), symlink-substitution, two-worker and crash-retention tests; and a second closed-scope Runwire regression. A new complete hosted matrix must certify the **exact final committed SHA** before this PR is marked ready for manual review. Earlier successful jobs alone cannot certify subsequent commits.
+Final implementation certification: [Security & Standards run 41314006754](https://github.com/infocyph/TalkingBytes/actions/runs/41314006754) passed at `25b902847b42648589af4bc60ea1d4a7ccd031a5` with **476 tests / 2,531 assertions**, all PHP 8.4/8.5 analysis and QA lanes, release guard, Mailpit, native gRPC, optional Runwire gates, docs and clean install. The sustained performance result was c5 **+0.64%**, c20 **-1.91%**, c50 **-1.97%**, no errors or timeouts, at the original **2%** limit. [Raw performance evidence](https://github.com/infocyph/TalkingBytes/actions/runs/41314006754/artifacts/13085773895). Two prior noisy runner attempts exceeded the c50 threshold (2.04–3.07%), and the measured excess motivated eliminating redundant request admission in `CurlMultiTransport::prepareContext()`. The successful source revision passed without changing the comparator or limits. That c50 result has little headroom, so retain the benchmark artifact and the final-head performance check rather than claiming a universal throughput improvement.
+
+Changes made **after** that successful revision: file-identity verification on spool reads; no-clobber restoration of claimed messages; deterministic same-filesystem collision, cross-filesystem publication (when a distinct mounted filesystem is available), symlink-substitution, two-worker and crash-retention tests; and a second closed-scope Runwire regression. The complete hosted matrix **passed at the implementation revision** `25b90284`. Revalidate after this evidence-only documentation commit to certify the exact final HEAD before the PR is marked ready. Earlier successful jobs alone cannot certify subsequent commits.
 
 | Finding | Disposition |
 | --- | --- |
 | R1 — baseline 33 complexity failures | **Resolved** by cohesive refactoring; no rule/baseline changes; green PHPStan on `7eb3f84c` |
 | R2 — Composer archive leakage | **Resolved** by tracked export exclusions and isolated archive consumers; clean-install job green |
 | R3 — duplicate ownership | **Maintained at passing policy**; consolidated signed-upload ownership, native gRPC metadata, HTTP multi waits, IMAP response reading and spool publication; retain protocol-specific rules where merging would be misleading. Remaining structural similarity is non-blocking unless a functional defect is reproduced |
-| R4 — exact SHA CI | **Green on `7eb3f84c`; final revision pending** |
+| R4 — exact SHA CI | **Green on `25b90284`; evidence-only final revision pending** |
 | R5 — closed Runwire scope | **Documented host lifecycle contract** and explicit before-/after-binding failure regressions; no unsupported `isClosed()` API or silent blocking fallback |
 | R6 — malformed HTTP policy metadata | **Resolved** by type/host validation and adversarial tests |
 | R7 — spool collision/data integrity | **Remediated**, with exclusive publication, no-clobber restore, opened-file identity validation, and multi-process regression coverage; final matrix pending |
@@ -152,7 +154,9 @@ The new source findings above are **review observations requiring tests**, not c
 - [x] Run component benchmark smoke: `composer ic:bench:quick` passes **38 subjects, zero failures/errors**. This is not proof of sustained application RPM.
 - [x] Pass same-runner c5/c20/c50 against tag `2.2` on `7eb3f84c` with the unchanged 2% budget and retained CI artifact; repeat for the exact final commit.
 - [x] Verify repeated graph/request cleanup and worker-oriented regressions in the hosted suite; longer deployment soaks remain the integrator's responsibility, not a claim of CI certification.
-- [ ] Finalize release notes, run the complete hosted matrix on the **last** SHA, attach checks/artifacts to PR #18, mark ready for manual review; do not merge/tag/publish.
+- [x] Finish implementation audit, 2.3.1 release notes and complete hosted matrix on `25b90284`; preserve raw artifacts and unchanged performance budget.
+- [ ] Confirm the **final documentation-only HEAD** passes the full hosted matrix, then mark PR #18 ready for manual review.
+- [ ] Maintainer only: manually review, merge, tag and publish.
 
 ## Optional improvements, separate from required fixes
 

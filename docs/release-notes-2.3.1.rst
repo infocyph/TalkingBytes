@@ -19,7 +19,7 @@ Correctness and security
   Existing redirects continue to revalidate destinations and DNS policy.
 - Spool destination publication cannot replace a previously published file.
   File movement uses exclusive, no-clobber publication on one filesystem and
-  bounded staging on another. Restoring a claimed message also refuses to
+  restricted-permission staging on another. Restoring a claimed message also refuses to
   overwrite a newly arrived message with the same original basename.
 - Inbound spool reading checks the identity and regular-file type of the
   opened file against the path selected for admission. A symlink substituted
@@ -63,8 +63,17 @@ Mailpit, docs, isolated production install and sustained HTTP comparison.
 
 That historical candidate measured unbound RPM regressions of -0.46% at c5,
 -1.41% at c20 and -0.46% at c50 versus tag 2.2, within the unchanged 2%
-acceptance limit. The subsequent spool/race and lifecycle changes require
-their own final-head green matrix. See the maintained
+acceptance limit. The implementation candidate at
+``25b902847b42648589af4bc60ea1d4a7ccd031a5`` subsequently passed
+476 tests / 2,531 assertions and the full hosted release matrix
+(`run 41314006754 <https://github.com/infocyph/TalkingBytes/actions/runs/41314006754>`_).
+Its same-runner unbound RPM differences were +0.64% at c5, -1.91% at c20,
+and -1.97% at c50, with no errors or timeouts. Earlier c50 comparisons on
+the pre-optimization revision exceeded the 2% limit; redundant HTTP
+destination admission was removed while retaining the guard in DNS pinning.
+The successful c50 result is near the limit and should not be represented
+as a universal throughput gain. A final HEAD check is required after
+the release-evidence documentation update. See the maintained
 `2.3.1 audit and release plan <https://github.com/infocyph/TalkingBytes/blob/patch/runwire-3/plans/talkingbytes-2.3.1-audit.md>`_
 for tracked evidence and limitations. Do not tag or merge before the final
 candidate has been certified and manually reviewed.
