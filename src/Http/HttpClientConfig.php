@@ -127,28 +127,35 @@ final readonly class HttpClientConfig
                 continue;
             }
 
-            if (is_string($headerValue)) {
-                $defaultHeaders[$name] = $headerValue;
-
-                continue;
-            }
-
-            if (!is_array($headerValue)) {
-                continue;
-            }
-
-            $items = [];
-            foreach ($headerValue as $item) {
-                if (is_string($item)) {
-                    $items[] = $item;
-                }
-            }
-
-            if ($items !== []) {
-                $defaultHeaders[$name] = $items;
+            $normalized = self::defaultHeaderValue($headerValue);
+            if ($normalized !== null) {
+                $defaultHeaders[$name] = $normalized;
             }
         }
 
         return $defaultHeaders;
     }
+
+    /**
+     * @return string|list<string>|null
+     */
+    private static function defaultHeaderValue(mixed $value): string|array|null
+    {
+        if (is_string($value)) {
+            return $value;
+        }
+        if (!is_array($value)) {
+            return null;
+        }
+
+        $items = [];
+        foreach ($value as $item) {
+            if (is_string($item)) {
+                $items[] = $item;
+            }
+        }
+
+        return $items === [] ? null : $items;
+    }
+
 }
