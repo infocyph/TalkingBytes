@@ -41,24 +41,33 @@ final readonly class GrpcMetadata
 
             $normalizedName = self::normalizeHeaderName($name);
 
-            foreach ($values as $value) {
-                if (!is_string($value)) {
-                    throw new InvalidArgumentException('gRPC metadata values must be strings.');
-                }
-                self::assertHeaderValue($value, $normalizedName);
-                $totalBytes += strlen($normalizedName) + strlen($value);
-                if ($totalBytes > self::MAX_TOTAL_BYTES) {
-                    throw new InvalidArgumentException(sprintf(
-                        'gRPC metadata cannot exceed %d total bytes.',
-                        self::MAX_TOTAL_BYTES,
-                    ));
-                }
-            }
+            self::assertTotalBytes($values, $normalizedName, $totalBytes);
 
             $normalized[$normalizedName] = $values;
         }
 
         $this->headers = $normalized;
+    }
+
+    /**
+     * @param list<mixed> $values
+     */
+    private static function assertTotalBytes(array $values, string $normalizedName, int &$totalBytes): void
+    {
+        foreach ($values as $value) {
+            if (!is_string($value)) {
+                throw new InvalidArgumentException('gRPC metadata values must be strings.');
+            }
+
+            self::assertHeaderValue($value, $normalizedName);
+            $totalBytes += strlen($normalizedName) + strlen($value);
+            if ($totalBytes > self::MAX_TOTAL_BYTES) {
+                throw new InvalidArgumentException(sprintf(
+                    'gRPC metadata cannot exceed %d total bytes.',
+                    self::MAX_TOTAL_BYTES,
+                ));
+            }
+        }
     }
 
     /**
