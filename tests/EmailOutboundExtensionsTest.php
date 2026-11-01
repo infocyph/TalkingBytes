@@ -115,6 +115,39 @@ it('receives queued .eml files from spool receiver', function (): void {
     }
 });
 
+it('does not overwrite an existing spool destination with the same message name', function (): void {
+    $root = sys_get_temp_dir().'/talkingbytes-spool-collision-'.bin2hex(random_bytes(6));
+    $source = $root.'/inbox';
+    $destination = $root.'/processed';
+    mkdir($source, 0700, true);
+    mkdir($destination, 0700, true);
+
+    try {
+        file_put_contents($source.'/message.eml', "From: sender@example.test\r\nTo: recipient@example.test\r\nSubject: New delivery\r\n\r\nBody");
+        file_put_contents($destination.'/message.eml', 'existing delivery must not be replaced');
+
+        $received = (new SpoolEmailReceiver(new SpoolConfig($source), moveAfterRead: $destination))->receive();
+        $published = glob($destination.'/*.eml') ?: [];
+
+        expect($received?->subject)->toBe('New delivery')
+            ->and(file_get_contents($destination.'/message.eml'))->toBe('existing delivery must not be replaced')
+            ->and($published)->toHaveCount(2)
+            ->and(file_exists($source.'/message.eml'))->toBeFalse();
+
+        $newFiles = array_values(array_filter($published, static fn(string $path): bool => basename($path) !== 'message.eml'));
+        expect($newFiles)->toHaveCount(1)
+            ->and(file_get_contents($newFiles[0]))->toContain('Subject: New delivery');
+    } finally {
+        foreach ([$source, $destination] as $directory) {
+            foreach (glob($directory.'/*') ?: [] as $path) {
+                unlink($path);
+            }
+            rmdir($directory);
+        }
+        rmdir($root);
+    }
+});
+
 it('honors queued fake transport results', function (): void {
     $transport = (new FakeEmailTransport)
         ->pushResult(CommunicationResult::failure('failed'));
