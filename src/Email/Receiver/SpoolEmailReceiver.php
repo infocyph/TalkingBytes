@@ -198,6 +198,10 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
         $now = (int) floor($this->clock->timestamp());
         $candidate = null;
         foreach (new FilesystemIterator($directory, FilesystemIterator::SKIP_DOTS) as $entry) {
+            if (!$entry instanceof SplFileInfo) {
+                continue;
+            }
+
             $file = $this->eligibleSpoolFile($entry, $extension, $now);
             if ($file !== null && ($candidate === null || strcmp($file, $candidate) < 0)) {
                 $candidate = $file;

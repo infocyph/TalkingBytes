@@ -41,9 +41,7 @@ final readonly class GrpcMetadata
 
             $normalizedName = self::normalizeHeaderName($name);
 
-            self::assertTotalBytes($values, $normalizedName, $totalBytes);
-
-            $normalized[$normalizedName] = $values;
+            $normalized[$normalizedName] = self::validatedValues($values, $normalizedName, $totalBytes);
         }
 
         $this->headers = $normalized;
@@ -51,8 +49,9 @@ final readonly class GrpcMetadata
 
     /**
      * @param list<mixed> $values
+     * @return list<string>
      */
-    private static function assertTotalBytes(array $values, string $normalizedName, int &$totalBytes): void
+    private static function validatedValues(array $values, string $normalizedName, int &$totalBytes): array
     {
         foreach ($values as $value) {
             if (!is_string($value)) {
@@ -68,6 +67,8 @@ final readonly class GrpcMetadata
                 ));
             }
         }
+
+        return $values;
     }
 
     /**

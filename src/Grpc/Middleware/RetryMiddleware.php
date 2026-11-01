@@ -33,12 +33,10 @@ final readonly class RetryMiddleware implements GrpcMiddleware
 
     public function handle(GrpcRequest $request, Closure $next): CommunicationResult
     {
-        if ($this->cancellation?->isRequested() === true) {
-            return $this->cancelled(0);
-        }
-
         if (!$request->retrySafe()) {
-            return $next($request);
+            return $this->cancellation?->isRequested() === true
+                ? $this->cancelled(0)
+                : $next($request);
         }
 
         $startedAt = $this->clock->monotonic();

@@ -337,6 +337,9 @@ final readonly class CurlMultiTransport
         return ['continue' => true, 'stopped' => $completed['failure_observed'], 'cancelled' => false];
     }
 
+    /**
+     * @return array{error:?string,running:int}
+     */
     private function executeMulti(\CurlMultiHandle $multiHandle): array
     {
         $status = curl_multi_exec($multiHandle, $running);

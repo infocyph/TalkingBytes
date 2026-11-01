@@ -208,9 +208,9 @@ final readonly class ImapResponseParser
         }
 
         return new MailboxStatus(
-            messages: $values['MESSAGES'],
-            recent: $values['RECENT'],
-            unseen: $values['UNSEEN'],
+            messages: (int) $values['MESSAGES'],
+            recent: (int) $values['RECENT'],
+            unseen: (int) $values['UNSEEN'],
             uidValidity: is_int($values['UIDVALIDITY']) ? $values['UIDVALIDITY'] : null,
             uidNext: is_int($values['UIDNEXT']) ? $values['UIDNEXT'] : null,
         );

@@ -122,9 +122,6 @@ final class SustainedPerformanceComparison
     }
 
     /**
-     * @param array<string, mixed> $source
-     */
-    /**
      * @phpstan-param array<string, LevelResult> $levels
      * @param list<string> $failures
      * @param list<string> $summaryRows
@@ -166,6 +163,9 @@ final class SustainedPerformanceComparison
         }
     }
 
+    /**
+     * @param array<string, mixed> $source
+     */
     private static function floatValue(array $source, string $key): float
     {
         $value = $source[$key] ?? null;

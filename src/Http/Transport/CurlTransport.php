@@ -64,7 +64,7 @@ final readonly class CurlTransport implements HttpTransport
             }
 
             $location = $this->redirectLocation($current, $response);
-            if ($location === null) {
+            if ($location === null || !$response instanceof HttpResponse) {
                 break;
             }
 
