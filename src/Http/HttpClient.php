@@ -432,44 +432,6 @@ final readonly class HttpClient
         return $this->applyTlsDefaults($this->applyRedirectDefaults($request));
     }
 
-    private function applyRedirectDefaults(HttpRequest $request): HttpRequest
-    {
-        if (
-            !$request->options->isExplicit('followRedirects')
-            || !$request->options->isExplicit('maxRedirects')
-        ) {
-            $request = $request->followRedirects(
-                $request->options->isExplicit('followRedirects')
-                    ? $request->options->followRedirects
-                    : $this->defaultOptions->followRedirects,
-                $request->options->isExplicit('maxRedirects')
-                    ? $request->options->maxRedirects
-                    : $this->defaultOptions->maxRedirects,
-            );
-        }
-
-        return $request;
-    }
-
-    private function applyTlsDefaults(HttpRequest $request): HttpRequest
-    {
-        if (
-            !$request->options->isExplicit('verifyPeer')
-            || !$request->options->isExplicit('verifyHost')
-        ) {
-            $request = $request->verifyTls(
-                $request->options->isExplicit('verifyPeer')
-                    ? $request->options->verifyPeer
-                    : $this->defaultOptions->verifyPeer,
-                $request->options->isExplicit('verifyHost')
-                    ? $request->options->verifyHost
-                    : $this->defaultOptions->verifyHost,
-            );
-        }
-
-        return $request;
-    }
-
     private function applyDefaults(HttpRequest $request): HttpRequest
     {
         $request = $this->applyCoreOptionDefaults($request);
@@ -531,6 +493,25 @@ final readonly class HttpClient
         return $this->applyResponseLimitDefaults($request);
     }
 
+    private function applyRedirectDefaults(HttpRequest $request): HttpRequest
+    {
+        if (
+            !$request->options->isExplicit('followRedirects')
+            || !$request->options->isExplicit('maxRedirects')
+        ) {
+            $request = $request->followRedirects(
+                $request->options->isExplicit('followRedirects')
+                    ? $request->options->followRedirects
+                    : $this->defaultOptions->followRedirects,
+                $request->options->isExplicit('maxRedirects')
+                    ? $request->options->maxRedirects
+                    : $this->defaultOptions->maxRedirects,
+            );
+        }
+
+        return $request;
+    }
+
     private function applyResponseLimitDefaults(HttpRequest $request): HttpRequest
     {
         if (
@@ -552,6 +533,25 @@ final readonly class HttpClient
             && !$request->options->isExplicit('maxResponseHeaderCount')
         ) {
             $request = $request->maxResponseHeaderCount($this->defaultOptions->maxResponseHeaderCount);
+        }
+
+        return $request;
+    }
+
+    private function applyTlsDefaults(HttpRequest $request): HttpRequest
+    {
+        if (
+            !$request->options->isExplicit('verifyPeer')
+            || !$request->options->isExplicit('verifyHost')
+        ) {
+            $request = $request->verifyTls(
+                $request->options->isExplicit('verifyPeer')
+                    ? $request->options->verifyPeer
+                    : $this->defaultOptions->verifyPeer,
+                $request->options->isExplicit('verifyHost')
+                    ? $request->options->verifyHost
+                    : $this->defaultOptions->verifyHost,
+            );
         }
 
         return $request;

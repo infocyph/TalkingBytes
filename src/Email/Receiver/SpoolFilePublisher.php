@@ -20,12 +20,21 @@ final class SpoolFilePublisher
         }
 
         $handle = self::openLockedSource($source);
+
         try {
             return self::publish($source, $directory, $targetBasename ?? basename($source), $ensureUnique);
         } finally {
             flock($handle, LOCK_UN);
             fclose($handle);
         }
+    }
+
+    private static function isSameFilesystem(string $file, string $directory): bool
+    {
+        $source = stat($file);
+        $target = stat($directory);
+
+        return is_array($source) && is_array($target) && $source['dev'] === $target['dev'];
     }
 
     /**
@@ -40,6 +49,7 @@ final class SpoolFilePublisher
 
         if (!flock($handle, LOCK_EX | LOCK_NB)) {
             fclose($handle);
+
             throw new RuntimeException(sprintf('Spool source is already being processed: %s', $source));
         }
 
@@ -50,6 +60,7 @@ final class SpoolFilePublisher
             || is_link($source)) {
             flock($handle, LOCK_UN);
             fclose($handle);
+
             throw new RuntimeException('Spool source changed while acquiring the processing claim.');
         }
 
@@ -78,14 +89,6 @@ final class SpoolFilePublisher
         throw new RuntimeException(sprintf('Unable to move file "%s" without overwriting a destination.', $source));
     }
 
-    private static function isSameFilesystem(string $file, string $directory): bool
-    {
-        $source = stat($file);
-        $target = stat($directory);
-
-        return is_array($source) && is_array($target) && $source['dev'] === $target['dev'];
-    }
-
     private static function publishAcrossFilesystems(string $source, string $directory, string $target): bool
     {
         $staging = tempnam($directory, '.tb-spool-');
@@ -111,12 +114,14 @@ final class SpoolFilePublisher
         }
 
         unlink($destination);
+
         throw new RuntimeException(sprintf('Unable to remove spool source after publication: %s', $source));
     }
 
     private static function tryCopy(string $source, string $target): bool
     {
         set_error_handler(static fn(): bool => true, E_WARNING);
+
         try {
             return copy($source, $target);
         } finally {
@@ -127,6 +132,7 @@ final class SpoolFilePublisher
     private static function tryLink(string $source, string $target): bool
     {
         set_error_handler(static fn(): bool => true, E_WARNING);
+
         try {
             return link($source, $target);
         } finally {

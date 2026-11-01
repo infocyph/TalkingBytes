@@ -96,6 +96,11 @@ final readonly class RawEmailBuilder
         ];
     }
 
+    private function normalizeLineEndings(string $value): string
+    {
+        return str_replace("\n", "\r\n", str_replace(["\r\n", "\r"], "\n", $value));
+    }
+
     /**
      * @param resource $bodyStream
      */
@@ -126,11 +131,6 @@ final readonly class RawEmailBuilder
         }
 
         return $this->normalizeLineEndings($this->headerBuilder->build($message, $mimeMessage, $includeSubject));
-    }
-
-    private function normalizeLineEndings(string $value): string
-    {
-        return str_replace("\n", "\r\n", str_replace(["\r\n", "\r"], "\n", $value));
     }
 
     /**

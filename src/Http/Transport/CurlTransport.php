@@ -135,24 +135,6 @@ final readonly class CurlTransport implements HttpTransport
         }
     }
 
-    private function redirectLocation(HttpRequest $request, mixed $response): ?string
-    {
-        if (!$request->options->followRedirects || !$response instanceof HttpResponse) {
-            return null;
-        }
-
-        if (!in_array($response->statusCode, [301, 302, 303, 307, 308], true)) {
-            return null;
-        }
-
-        $location = $response->header('Location');
-        if (is_array($location)) {
-            $location = $location[0] ?? null;
-        }
-
-        return is_string($location) && $location !== '' ? $location : null;
-    }
-
     private function applyCookiesForHop(HttpRequest $request, string $url): HttpRequest
     {
         $jar = $this->cookieJar($request);
@@ -459,6 +441,24 @@ final readonly class CurlTransport implements HttpTransport
             '_cookie_origin_url' => $request->buildUrl(),
             '_cookie_origin_header' => $request->headers->get('Cookie'),
         ]);
+    }
+
+    private function redirectLocation(HttpRequest $request, mixed $response): ?string
+    {
+        if (!$request->options->followRedirects || !$response instanceof HttpResponse) {
+            return null;
+        }
+
+        if (!in_array($response->statusCode, [301, 302, 303, 307, 308], true)) {
+            return null;
+        }
+
+        $location = $response->header('Location');
+        if (is_array($location)) {
+            $location = $location[0] ?? null;
+        }
+
+        return is_string($location) && $location !== '' ? $location : null;
     }
 
     private function sameOrigin(string $first, string $second): bool

@@ -70,22 +70,6 @@ final class RetryExecutor
         }
     }
 
-    private static function handleRetryException(
-        RetryPolicy $policy,
-        Throwable $throwable,
-        Sleeper $sleeper,
-        ?CancellationSignal $cancellation,
-        ?OperationDeadline $deadline,
-        int $attempt,
-    ): ?CommunicationResult {
-        $decision = $policy->decide(new RetryContext($attempt, error: $throwable));
-        if (!$decision->retry) {
-            throw $throwable;
-        }
-
-        return self::retryWaitFailure($sleeper, $decision->delayMs, $cancellation, $deadline, $attempt);
-    }
-
     /**
      * @return array{delay_ms:int,deadline_limited:bool}|null
      */
@@ -123,6 +107,22 @@ final class RetryExecutor
                 'attempts' => max(0, $attempts),
             ],
         );
+    }
+
+    private static function handleRetryException(
+        RetryPolicy $policy,
+        Throwable $throwable,
+        Sleeper $sleeper,
+        ?CancellationSignal $cancellation,
+        ?OperationDeadline $deadline,
+        int $attempt,
+    ): ?CommunicationResult {
+        $decision = $policy->decide(new RetryContext($attempt, error: $throwable));
+        if (!$decision->retry) {
+            throw $throwable;
+        }
+
+        return self::retryWaitFailure($sleeper, $decision->delayMs, $cancellation, $deadline, $attempt);
     }
 
     private static function preflightFailure(

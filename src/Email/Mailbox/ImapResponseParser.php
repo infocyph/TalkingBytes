@@ -231,6 +231,20 @@ final readonly class ImapResponseParser
     }
 
     /**
+     * @return list<string>|null
+     */
+    private function parseFetchFlags(string $metadata): ?array
+    {
+        if (preg_match('/\\bFLAGS\\s+\\(([^)]*)\\)/i', $metadata, $matches) !== 1) {
+            return null;
+        }
+
+        $tokens = preg_split('/\\s+/', trim($matches[1])) ?: [];
+
+        return array_values(array_filter($tokens, static fn(string $flag): bool => $flag !== ''));
+    }
+
+    /**
      * @return array{sequence:?int,flags:?list<string>}
      */
     private function parseFetchMeta(ImapResponse $response): array
@@ -247,20 +261,6 @@ final readonly class ImapResponseParser
         }
 
         return ['sequence' => null, 'flags' => null];
-    }
-
-    /**
-     * @return list<string>|null
-     */
-    private function parseFetchFlags(string $metadata): ?array
-    {
-        if (preg_match('/\\bFLAGS\\s+\\(([^)]*)\\)/i', $metadata, $matches) !== 1) {
-            return null;
-        }
-
-        $tokens = preg_split('/\\s+/', trim($matches[1])) ?: [];
-
-        return array_values(array_filter($tokens, static fn(string $flag): bool => $flag !== ''));
     }
 
     /**

@@ -48,30 +48,6 @@ final readonly class GrpcMetadata
     }
 
     /**
-     * @param list<mixed> $values
-     * @return list<string>
-     */
-    private static function validatedValues(array $values, string $normalizedName, int &$totalBytes): array
-    {
-        foreach ($values as $value) {
-            if (!is_string($value)) {
-                throw new InvalidArgumentException('gRPC metadata values must be strings.');
-            }
-
-            self::assertHeaderValue($value, $normalizedName);
-            $totalBytes += strlen($normalizedName) + strlen($value);
-            if ($totalBytes > self::MAX_TOTAL_BYTES) {
-                throw new InvalidArgumentException(sprintf(
-                    'gRPC metadata cannot exceed %d total bytes.',
-                    self::MAX_TOTAL_BYTES,
-                ));
-            }
-        }
-
-        return $values;
-    }
-
-    /**
      * @return list<string>
      */
     public function binaryValues(string $name): array
@@ -241,6 +217,30 @@ final readonly class GrpcMetadata
         }
 
         return $normalized;
+    }
+
+    /**
+     * @param list<mixed> $values
+     * @return list<string>
+     */
+    private static function validatedValues(array $values, string $normalizedName, int &$totalBytes): array
+    {
+        foreach ($values as $value) {
+            if (!is_string($value)) {
+                throw new InvalidArgumentException('gRPC metadata values must be strings.');
+            }
+
+            self::assertHeaderValue($value, $normalizedName);
+            $totalBytes += strlen($normalizedName) + strlen($value);
+            if ($totalBytes > self::MAX_TOTAL_BYTES) {
+                throw new InvalidArgumentException(sprintf(
+                    'gRPC metadata cannot exceed %d total bytes.',
+                    self::MAX_TOTAL_BYTES,
+                ));
+            }
+        }
+
+        return $values;
     }
 
     private function appendValue(string $normalizedName, string $value): self

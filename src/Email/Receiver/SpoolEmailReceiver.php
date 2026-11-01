@@ -156,6 +156,29 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
         }
     }
 
+    private function eligibleSpoolFile(SplFileInfo $entry, string $extension, int $now): ?string
+    {
+        if ($entry->isLink() || !$entry->isFile() || strcasecmp($entry->getExtension(), $extension) !== 0) {
+            return null;
+        }
+
+        $file = $entry->getPathname();
+        $mtime = filemtime($file);
+        if ($mtime === false) {
+            return null;
+        }
+
+        $age = $now - $mtime;
+        if ($this->config->olderThanSeconds !== null && $age < $this->config->olderThanSeconds) {
+            return null;
+        }
+        if ($this->config->newerThanSeconds !== null && $age > $this->config->newerThanSeconds) {
+            return null;
+        }
+
+        return $file;
+    }
+
     private function ensureDirectory(string $directory): void
     {
         if (!is_dir($directory) && !mkdir($directory, 0700, true) && !is_dir($directory)) {
@@ -209,29 +232,6 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
         }
 
         return $candidate;
-    }
-
-    private function eligibleSpoolFile(SplFileInfo $entry, string $extension, int $now): ?string
-    {
-        if ($entry->isLink() || !$entry->isFile() || strcasecmp($entry->getExtension(), $extension) !== 0) {
-            return null;
-        }
-
-        $file = $entry->getPathname();
-        $mtime = filemtime($file);
-        if ($mtime === false) {
-            return null;
-        }
-
-        $age = $now - $mtime;
-        if ($this->config->olderThanSeconds !== null && $age < $this->config->olderThanSeconds) {
-            return null;
-        }
-        if ($this->config->newerThanSeconds !== null && $age > $this->config->newerThanSeconds) {
-            return null;
-        }
-
-        return $file;
     }
 
     private function isSameFilesystem(string $file, string $directory): bool
@@ -420,6 +420,4 @@ final readonly class SpoolEmailReceiver implements EmailReceiver
             restore_error_handler();
         }
     }
-
-
 }

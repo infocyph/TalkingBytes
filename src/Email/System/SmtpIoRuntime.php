@@ -83,27 +83,6 @@ final readonly class SmtpIoRuntime
     /**
      * @param resource $connection
      */
-    private function prepareWrite(mixed $connection, OperationDeadline $deadline): OperationDeadline
-    {
-        $effectiveDeadline = $this->operationDeadline?->earliest($deadline) ?? $deadline;
-        if ($this->streamWaiter === null) {
-            $this->applyBlockingTimeout($connection, $effectiveDeadline);
-
-            return $effectiveDeadline;
-        }
-
-        if (!$this->streamWaiter->waitWritable($connection, $effectiveDeadline)) {
-            $this->assertExecutionAllowed($deadline);
-
-            throw new RuntimeException('SMTP cooperative write wait was interrupted.');
-        }
-
-        return $effectiveDeadline;
-    }
-
-    /**
-     * @param resource $connection
-     */
     private function applyBlockingTimeout(mixed $connection, OperationDeadline $deadline): void
     {
         $remainingMicros = $deadline->remainingMicroseconds();
@@ -120,6 +99,27 @@ final readonly class SmtpIoRuntime
         )) {
             throw new RuntimeException('Unable to bound SMTP socket write by the operation deadline.');
         }
+    }
+
+    /**
+     * @param resource $connection
+     */
+    private function prepareWrite(mixed $connection, OperationDeadline $deadline): OperationDeadline
+    {
+        $effectiveDeadline = $this->operationDeadline?->earliest($deadline) ?? $deadline;
+        if ($this->streamWaiter === null) {
+            $this->applyBlockingTimeout($connection, $effectiveDeadline);
+
+            return $effectiveDeadline;
+        }
+
+        if (!$this->streamWaiter->waitWritable($connection, $effectiveDeadline)) {
+            $this->assertExecutionAllowed($deadline);
+
+            throw new RuntimeException('SMTP cooperative write wait was interrupted.');
+        }
+
+        return $effectiveDeadline;
     }
 
     /**

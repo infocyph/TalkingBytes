@@ -223,6 +223,22 @@ final readonly class WebhookSender
         return new self($this->httpClient, $this->signingSecret, $signer, $this->retryProfile, $this->maxPayloadBytes, $this->events, $this->clock, $this->sleeper, $this->cancellation);
     }
 
+    private function cancelledResult(?CommunicationResult $previous, int $attempts): CommunicationResult
+    {
+        $metadata = $previous->metadata ?? [];
+
+        return CommunicationResult::failure(
+            'Webhook delivery cancelled.',
+            $previous?->statusCode,
+            $previous?->response,
+            [
+                ...$metadata,
+                'cancelled' => true,
+                'attempts' => $attempts,
+            ],
+        );
+    }
+
     private function deliveryRequest(WebhookMessage $webhook, string $url, string $payload, int $attempt): HttpRequest
     {
         $timestamp = (int) floor($this->clock->timestamp());
@@ -243,6 +259,15 @@ final readonly class WebhookSender
         return $request;
     }
 
+    private function signature(string $payload, int $timestamp): string
+    {
+        if ($this->signingSecret === null) {
+            throw new LogicException('Webhook signing secret is not configured.');
+        }
+
+        return $this->resolvedSigner->sign($payload, $timestamp, $this->signingSecret);
+    }
+
     private function waitBeforeRetry(int $delayMs): bool
     {
         if ($this->cancellation === null) {
@@ -252,30 +277,5 @@ final readonly class WebhookSender
         }
 
         return $this->sleeper->millisecondsInterruptibly($delayMs, $this->cancellation);
-    }
-
-    private function cancelledResult(?CommunicationResult $previous, int $attempts): CommunicationResult
-    {
-        $metadata = $previous->metadata ?? [];
-
-        return CommunicationResult::failure(
-            'Webhook delivery cancelled.',
-            $previous?->statusCode,
-            $previous?->response,
-            [
-                ...$metadata,
-                'cancelled' => true,
-                'attempts' => $attempts,
-            ],
-        );
-    }
-
-    private function signature(string $payload, int $timestamp): string
-    {
-        if ($this->signingSecret === null) {
-            throw new LogicException('Webhook signing secret is not configured.');
-        }
-
-        return $this->resolvedSigner->sign($payload, $timestamp, $this->signingSecret);
     }
 }

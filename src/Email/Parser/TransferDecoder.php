@@ -26,6 +26,13 @@ final class TransferDecoder
         return $decoded;
     }
 
+    private function assertDecodedLimit(string $decoded, ?int $maxDecodedBytes): void
+    {
+        if ($maxDecodedBytes !== null && strlen($decoded) > $maxDecodedBytes) {
+            throw new EmailParseException(sprintf('Decoded MIME body exceeds limit (%d bytes).', $maxDecodedBytes));
+        }
+    }
+
     private function decodeBase64(string $body, ?int $maxDecodedBytes): string
     {
         $decoded = '';
@@ -54,12 +61,6 @@ final class TransferDecoder
 
         return $decoded;
     }
-    private function assertDecodedLimit(string $decoded, ?int $maxDecodedBytes): void
-    {
-        if ($maxDecodedBytes !== null && strlen($decoded) > $maxDecodedBytes) {
-            throw new EmailParseException(sprintf('Decoded MIME body exceeds limit (%d bytes).', $maxDecodedBytes));
-        }
-    }
 
     private function decodeQuartet(string $quartet): string
     {
@@ -70,5 +71,4 @@ final class TransferDecoder
 
         return $chunk;
     }
-
 }

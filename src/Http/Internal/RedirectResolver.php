@@ -145,21 +145,6 @@ final class RedirectResolver
         return $output;
     }
 
-    private static function stripDotPrefix(string $input): ?string
-    {
-        if (str_starts_with($input, '../')) {
-            return substr($input, 3);
-        }
-        if (str_starts_with($input, './') || str_starts_with($input, '/./')) {
-            return substr($input, 2);
-        }
-        if ($input === '/.') {
-            return '/';
-        }
-
-        return null;
-    }
-
     private static function removeLastSegment(string $path): string
     {
         $slash = strrpos($path, '/');
@@ -260,6 +245,21 @@ final class RedirectResolver
         }
 
         return [substr($input, 0, $slash), substr($input, $slash)];
+    }
+
+    private static function stripDotPrefix(string $input): ?string
+    {
+        if (str_starts_with($input, '../')) {
+            return substr($input, 3);
+        }
+        if (str_starts_with($input, './') || str_starts_with($input, '/./')) {
+            return substr($input, 2);
+        }
+        if ($input === '/.') {
+            return '/';
+        }
+
+        return null;
     }
 
     /**

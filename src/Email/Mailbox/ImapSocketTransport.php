@@ -626,6 +626,7 @@ final class ImapSocketTransport implements BodyStructureMailboxTransport, Envelo
     private function readTaggedResponse(string $tag): ImapResponse
     {
         $deadline = $this->commandDeadline();
+
         try {
             return ImapResponseStreamReader::read(
                 $tag,

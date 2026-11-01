@@ -272,17 +272,6 @@ final readonly class CurlMultiTransport
         return ['count' => $count, 'failure_observed' => $failureObserved];
     }
 
-    private function dispatchRequestResultEvent(HttpRequest $request, CommunicationResult $result): void
-    {
-        $this->events->dispatch($result->successful ? 'http.request.finish' : 'http.request.failed', [
-            'method' => $request->method->value,
-            'url' => HttpRedactor::redactUrl($request->buildUrl(), $request->sensitiveQueryNames()),
-            'status' => $result->statusCode,
-            'failure_category' => $result->successful ? null : (ObservabilitySanitizer::resultContext($result)['failure_category'] ?? 'transport_error'),
-            'transport' => 'curl-multi',
-        ]);
-    }
-
     /**
      * @return array{error:?string, running:int}
      */
@@ -328,6 +317,17 @@ final readonly class CurlMultiTransport
         }
 
         return ['continue' => true, 'stopped' => $completed['failure_observed'], 'cancelled' => false];
+    }
+
+    private function dispatchRequestResultEvent(HttpRequest $request, CommunicationResult $result): void
+    {
+        $this->events->dispatch($result->successful ? 'http.request.finish' : 'http.request.failed', [
+            'method' => $request->method->value,
+            'url' => HttpRedactor::redactUrl($request->buildUrl(), $request->sensitiveQueryNames()),
+            'status' => $result->statusCode,
+            'failure_category' => $result->successful ? null : (ObservabilitySanitizer::resultContext($result)['failure_category'] ?? 'transport_error'),
+            'transport' => 'curl-multi',
+        ]);
     }
 
     /**
@@ -682,6 +682,4 @@ final readonly class CurlMultiTransport
 
         return ['next_index' => $nextIndex, 'stopped' => false, 'cancelled' => false];
     }
-
-
 }

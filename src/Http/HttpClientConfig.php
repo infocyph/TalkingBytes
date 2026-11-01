@@ -92,6 +92,28 @@ final readonly class HttpClientConfig
     }
 
     /**
+     * @return string|list<string>|null
+     */
+    private static function defaultHeaderValue(mixed $value): string|array|null
+    {
+        if (is_string($value)) {
+            return $value;
+        }
+        if (!is_array($value)) {
+            return null;
+        }
+
+        $items = [];
+        foreach ($value as $item) {
+            if (is_string($item)) {
+                $items[] = $item;
+            }
+        }
+
+        return $items === [] ? null : $items;
+    }
+
+    /**
      * @param array<string, mixed> $config
      */
     private static function intFrom(array $config, string $key, int $default): int
@@ -135,27 +157,4 @@ final readonly class HttpClientConfig
 
         return $defaultHeaders;
     }
-
-    /**
-     * @return string|list<string>|null
-     */
-    private static function defaultHeaderValue(mixed $value): string|array|null
-    {
-        if (is_string($value)) {
-            return $value;
-        }
-        if (!is_array($value)) {
-            return null;
-        }
-
-        $items = [];
-        foreach ($value as $item) {
-            if (is_string($item)) {
-                $items[] = $item;
-            }
-        }
-
-        return $items === [] ? null : $items;
-    }
-
 }

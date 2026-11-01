@@ -70,11 +70,6 @@ final readonly class HttpTransferStats
         return is_int($value) || is_float($value) ? (int) $value : null;
     }
 
-    private static function stringOrNull(mixed $value): ?string
-    {
-        return is_string($value) ? $value : null;
-    }
-
     private static function secondsToMs(mixed $seconds): ?int
     {
         if (!is_int($seconds) && !is_float($seconds)) {
@@ -82,5 +77,10 @@ final readonly class HttpTransferStats
         }
 
         return (int) round($seconds * 1000);
+    }
+
+    private static function stringOrNull(mixed $value): ?string
+    {
+        return is_string($value) ? $value : null;
     }
 }

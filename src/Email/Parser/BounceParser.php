@@ -67,41 +67,6 @@ final readonly class BounceParser
         return [];
     }
 
-    /**
-     * @return list<BounceReport>
-     */
-    private function deliveryStatusReports(ParsedEmail $email): array
-    {
-        $deliveryStatuses = $this->deliveryStatusFromParts($email);
-        $reports = [];
-        foreach ($deliveryStatuses as $deliveryStatus) {
-            $status = $deliveryStatus['status'] ?? null;
-            $diagnostic = $deliveryStatus['diagnostic_code'] ?? null;
-
-            $reports[] = new BounceReport(
-                $this->classify($status, $diagnostic),
-                $deliveryStatus['final_recipient'] ?? ($deliveryStatus['original_recipient'] ?? null),
-                $deliveryStatus['action'] ?? null,
-                $status,
-                $diagnostic,
-                $deliveryStatus['remote_mta'] ?? ($deliveryStatus['reporting_mta'] ?? null),
-                $email->messageId,
-                [
-                    'source' => 'delivery-status',
-                    'reporting_mta' => $deliveryStatus['reporting_mta'] ?? null,
-                    'last_attempt_date' => $deliveryStatus['last_attempt_date'] ?? null,
-                    'will_retry_until' => $deliveryStatus['will_retry_until'] ?? null,
-                ],
-            );
-        }
-
-        foreach ($reports as $report) {
-            $this->dispatchDetectedEvent($report);
-        }
-
-        return $reports;
-    }
-
     private function classify(?string $status, ?string $diagnostic): BounceType
     {
         $statusText = strtolower($status ?? '');
@@ -204,6 +169,41 @@ final readonly class BounceParser
         }
 
         return [];
+    }
+
+    /**
+     * @return list<BounceReport>
+     */
+    private function deliveryStatusReports(ParsedEmail $email): array
+    {
+        $deliveryStatuses = $this->deliveryStatusFromParts($email);
+        $reports = [];
+        foreach ($deliveryStatuses as $deliveryStatus) {
+            $status = $deliveryStatus['status'] ?? null;
+            $diagnostic = $deliveryStatus['diagnostic_code'] ?? null;
+
+            $reports[] = new BounceReport(
+                $this->classify($status, $diagnostic),
+                $deliveryStatus['final_recipient'] ?? ($deliveryStatus['original_recipient'] ?? null),
+                $deliveryStatus['action'] ?? null,
+                $status,
+                $diagnostic,
+                $deliveryStatus['remote_mta'] ?? ($deliveryStatus['reporting_mta'] ?? null),
+                $email->messageId,
+                [
+                    'source' => 'delivery-status',
+                    'reporting_mta' => $deliveryStatus['reporting_mta'] ?? null,
+                    'last_attempt_date' => $deliveryStatus['last_attempt_date'] ?? null,
+                    'will_retry_until' => $deliveryStatus['will_retry_until'] ?? null,
+                ],
+            );
+        }
+
+        foreach ($reports as $report) {
+            $this->dispatchDetectedEvent($report);
+        }
+
+        return $reports;
     }
 
     private function dispatchDetectedEvent(BounceReport $report): void

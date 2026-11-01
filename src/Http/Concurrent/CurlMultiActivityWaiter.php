@@ -76,5 +76,4 @@ final class CurlMultiActivityWaiter
 
         $sleeper->millisecondsInterruptibly($delayMs, $cancellation, $delayMs);
     }
-
 }
