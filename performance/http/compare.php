@@ -136,33 +136,33 @@ final class SustainedPerformanceComparison
         array &$summaryRows,
     ): void {
         foreach ($levels as $label => $level) {
-                $errors = $level['errors'] + $level['warmup_errors'];
-                $timeouts = $level['timeouts'] + $level['warmup_timeouts'];
-                if ($errors > 0 || $timeouts > 0) {
-                    $failures[] = sprintf(
-                        '%s c=%d had %d errors and %d timeouts including warm-up',
-                        $label,
-                        $concurrency,
-                        $errors,
-                        $timeouts,
-                    );
-                }
-
-                $summaryRows[] = sprintf(
-                    '| %d | %s | %.2f | %.2f | %.2f | %.2f | %d | %d | %.2f | %d | %d | %d |',
-                    $concurrency,
+            $errors = $level['errors'] + $level['warmup_errors'];
+            $timeouts = $level['timeouts'] + $level['warmup_timeouts'];
+            if ($errors > 0 || $timeouts > 0) {
+                $failures[] = sprintf(
+                    '%s c=%d had %d errors and %d timeouts including warm-up',
                     $label,
-                    $level['median_rpm'],
-                    $level['p50_batch_latency_ms'],
-                    $level['p95_batch_latency_ms'],
-                    $level['p99_batch_latency_ms'],
+                    $concurrency,
                     $errors,
                     $timeouts,
-                    $level['max_cpu_percent'],
-                    $level['max_memory_bytes'],
-                    $level['max_resource_count'],
-                    $level['max_resource_delta'],
                 );
+            }
+
+            $summaryRows[] = sprintf(
+                '| %d | %s | %.2f | %.2f | %.2f | %.2f | %d | %d | %.2f | %d | %d | %d |',
+                $concurrency,
+                $label,
+                $level['median_rpm'],
+                $level['p50_batch_latency_ms'],
+                $level['p95_batch_latency_ms'],
+                $level['p99_batch_latency_ms'],
+                $errors,
+                $timeouts,
+                $level['max_cpu_percent'],
+                $level['max_memory_bytes'],
+                $level['max_resource_count'],
+                $level['max_resource_delta'],
+            );
         }
     }
 
