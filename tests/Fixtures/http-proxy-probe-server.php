@@ -2,6 +2,16 @@
 
 declare(strict_types=1);
 
+/** @param array<string, int> $state */
+function publishProxyProbeState(string $path, array $state): void
+{
+    $payload = json_encode($state, JSON_THROW_ON_ERROR);
+    $temporary = $path . '.tmp';
+    if (file_put_contents($temporary, $payload) !== strlen($payload) || !rename($temporary, $path)) {
+        throw new RuntimeException('Unable to publish proxy probe state.');
+    }
+}
+
 $readyPath = $argv[1] ?? '';
 $reportPath = $argv[2] ?? '';
 
@@ -14,15 +24,18 @@ stream_set_blocking($server, false);
 $address = stream_socket_get_name($server, false);
 if (!is_string($address) || !str_contains($address, ':')) {
     fclose($server);
+
     throw new RuntimeException('Unable to resolve proxy probe address.');
 }
 $port = (int) substr(strrchr($address, ':'), 1);
-file_put_contents($readyPath, json_encode(['port' => $port], JSON_THROW_ON_ERROR));
+publishProxyProbeState($reportPath, ['requests' => 0]);
+publishProxyProbeState($readyPath, ['port' => $port]);
 
 $requests = 0;
 $deadline = microtime(true) + 8.0;
 while (microtime(true) < $deadline) {
     set_error_handler(static fn(): bool => true, E_WARNING);
+
     try {
         $client = stream_socket_accept($server, 0);
     } finally {
@@ -30,6 +43,7 @@ while (microtime(true) < $deadline) {
     }
     if ($client === false) {
         usleep(10_000);
+
         continue;
     }
 
@@ -50,7 +64,7 @@ while (microtime(true) < $deadline) {
         . "\r\nConnection: close\r\n\r\n" . $body,
     );
     fclose($client);
-    file_put_contents($reportPath, json_encode(['requests' => $requests], JSON_THROW_ON_ERROR));
+    publishProxyProbeState($reportPath, ['requests' => $requests]);
 }
 fclose($server);
-file_put_contents($reportPath, json_encode(['requests' => $requests], JSON_THROW_ON_ERROR));
+publishProxyProbeState($reportPath, ['requests' => $requests]);

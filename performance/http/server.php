@@ -102,7 +102,11 @@ if ($separator === false) {
 }
 
 $port = (int) substr($separator, 1);
-file_put_contents($readyPath, json_encode(['port' => $port], JSON_THROW_ON_ERROR));
+$readyPayload = json_encode(['port' => $port], JSON_THROW_ON_ERROR);
+$readyTemporary = $readyPath . '.tmp';
+if (file_put_contents($readyTemporary, $readyPayload) !== strlen($readyPayload) || !rename($readyTemporary, $readyPath)) {
+    throw new RuntimeException('Unable to publish sustained HTTP server readiness.');
+}
 
 /** @var array<int, array{stream:resource,buffer:string,due:?float}> $clients */
 $clients = [];
