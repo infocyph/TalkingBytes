@@ -104,6 +104,9 @@ final readonly class CurlTransport implements HttpTransport
         HttpResponse $response,
     ): HttpRequest|CommunicationResult {
         $status = $response->statusCode;
+        if (!is_int($status)) {
+            return CommunicationResult::failure('HTTP redirect status is unavailable.', response: $response);
+        }
         if ($redirects >= $request->options->maxRedirects) {
             return CommunicationResult::failure(
                 sprintf('HTTP redirect limit exceeded (%d).', $request->options->maxRedirects),
