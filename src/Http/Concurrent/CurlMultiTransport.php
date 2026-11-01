@@ -92,28 +92,21 @@ final readonly class CurlMultiTransport
 
                     break;
                 }
-                $scheduled = [
-                    'next_index' => $nextIndex,
-                    'stopped' => false,
-                    'cancelled' => false,
-                ];
-
-                if (!$stoppedScheduling) {
-                    $scheduled = $this->scheduleAvailable(
-                        $multiHandle,
-                        $configurator,
-                        $requests,
-                        $keys,
-                        $nextIndex,
-                        $limit->value,
-                        $results,
-                        $contexts,
-                        $stopOnFailure,
-                        $cancellation,
-                    );
-                    $nextIndex = $scheduled['next_index'];
-                    $stoppedScheduling = $scheduled['stopped'];
-                }
+                $scheduled = $this->scheduleAvailable(
+                    $multiHandle,
+                    $configurator,
+                    $requests,
+                    $keys,
+                    $nextIndex,
+                    $limit->value,
+                    $results,
+                    $contexts,
+                    $stopOnFailure,
+                    $cancellation,
+                    $stoppedScheduling,
+                );
+                $nextIndex = $scheduled['next_index'];
+                $stoppedScheduling = $stoppedScheduling || $scheduled['stopped'];
 
                 if ($scheduled['cancelled']) {
                     $cancelled = true;
@@ -650,7 +643,12 @@ final readonly class CurlMultiTransport
         array &$contexts,
         bool $stopOnFailure,
         ?CancellationSignal $cancellation,
+        bool $stoppedScheduling,
     ): array {
+        if ($stoppedScheduling) {
+            return ['next_index' => $nextIndex, 'stopped' => false, 'cancelled' => false];
+        }
+
         $total = count($keys);
 
         while ($nextIndex < $total && count($contexts) < $maxConcurrency) {
