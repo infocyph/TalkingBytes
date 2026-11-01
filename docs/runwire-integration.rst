@@ -1,7 +1,7 @@
 Runwire runtime integration
 ===========================
 
-TalkingBytes can optionally borrow a Runwire 2.1 runtime context without
+TalkingBytes can optionally borrow a Runwire 3.0 runtime context without
 making Runwire a production requirement for unbound applications.
 
 Binding model

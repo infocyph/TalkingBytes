@@ -243,7 +243,7 @@ final readonly class WebhookSender
 
     private function cancelledResult(?CommunicationResult $previous, int $attempts): CommunicationResult
     {
-        $metadata = $previous === null ? [] : $previous->metadata;
+        $metadata = $previous->metadata ?? [];
 
         return CommunicationResult::failure(
             'Webhook delivery cancelled.',
