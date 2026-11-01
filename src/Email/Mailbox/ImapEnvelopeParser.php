@@ -223,6 +223,21 @@ final class ImapEnvelopeParser
     /**
      * @return list<string>
      */
+    private function appendStructuralChar(string $char, bool &$inQuote, int &$depth, string &$buffer): bool
+    {
+        if ($char === '"') {
+            $inQuote = true;
+        } elseif ($char === '(' || $char === ')') {
+            $depth += $char === '(' ? 1 : -1;
+        } else {
+            return false;
+        }
+
+        $buffer .= $char;
+
+        return true;
+    }
+
     private function splitTopLevel(string $value): array
     {
         $parts = [];
@@ -239,17 +254,7 @@ final class ImapEnvelopeParser
                 continue;
             }
 
-            if ($char === '"') {
-                $inQuote = true;
-                $buffer .= '"';
-
-                continue;
-            }
-
-            if ($char === '(' || $char === ')') {
-                $depth += $char === '(' ? 1 : -1;
-                $buffer .= $char;
-
+            if ($this->appendStructuralChar($char, $inQuote, $depth, $buffer)) {
                 continue;
             }
 
