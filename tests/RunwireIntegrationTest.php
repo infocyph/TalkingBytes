@@ -104,15 +104,17 @@ it('does not silently resume cooperative waiting on a scope closed after binding
     });
 
     $attempts = 0;
-    expect(fn() => \Infocyph\TalkingBytes\Core\Support\RetryExecutor::run(
-        new \Infocyph\TalkingBytes\Retry\FixedDelayRetryPolicy(2, 5),
-        static function () use (&$attempts): CommunicationResult {
-            $attempts++;
+    expect(static function () use ($sleeper, &$attempts): void {
+        \Infocyph\TalkingBytes\Core\Support\RetryExecutor::run(
+            new \Infocyph\TalkingBytes\Retry\FixedDelayRetryPolicy(2, 5),
+            static function () use (&$attempts): CommunicationResult {
+                $attempts++;
 
-            return CommunicationResult::failure('retryable', 503);
-        },
-        $sleeper,
-    ))->toThrow(LogicException::class, 'Coroutine scope is already closed.');
+                return CommunicationResult::failure('retryable', 503);
+            },
+            $sleeper,
+        );
+    })->toThrow(LogicException::class, 'Coroutine scope is already closed.');
     expect($attempts)->toBe(1);
 
     $pair = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
