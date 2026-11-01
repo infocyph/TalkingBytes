@@ -159,7 +159,7 @@ final readonly class CurlMultiTransport
                 }
 
                 if (self::shouldWaitForActivity($contexts, $completed['count'], $execution['running'])) {
-                    $this->waitForActivity($multiHandle, $cancellation, $operationDeadline);
+                    CurlMultiActivityWaiter::wait($multiHandle, $this->sleeper, $this->cooperativeWait, $cancellation, $operationDeadline);
                 }
             }
         } finally {
@@ -656,50 +656,5 @@ final readonly class CurlMultiTransport
         return ['next_index' => $nextIndex, 'stopped' => false, 'cancelled' => false];
     }
 
-    private function waitForActivity(
-        \CurlMultiHandle $multiHandle,
-        ?CancellationSignal $cancellation,
-        ?OperationDeadline $operationDeadline,
-    ): void {
-        if ($this->cooperativeWait) {
-            if (curl_multi_select($multiHandle, 0.0) > 0) {
-                return;
-            }
 
-            $delayMs = 5;
-            if ($operationDeadline !== null) {
-                $remainingMs = (int) ceil($operationDeadline->remainingSeconds() * 1000);
-                $delayMs = min($delayMs, max(0, $remainingMs));
-            }
-            if ($delayMs === 0) {
-                return;
-            }
-
-            if ($cancellation === null) {
-                $this->sleeper->milliseconds($delayMs);
-
-                return;
-            }
-
-            $this->sleeper->millisecondsInterruptibly($delayMs, $cancellation, $delayMs);
-
-            return;
-        }
-
-        $timeoutSeconds = $cancellation === null ? 1.0 : 0.05;
-        if ($operationDeadline !== null) {
-            $timeoutSeconds = min($timeoutSeconds, max(0.0, $operationDeadline->remainingSeconds()));
-        }
-        if ($timeoutSeconds <= 0.0 || curl_multi_select($multiHandle, $timeoutSeconds) !== -1) {
-            return;
-        }
-
-        if ($cancellation === null) {
-            $this->sleeper->milliseconds(10);
-
-            return;
-        }
-
-        $this->sleeper->millisecondsInterruptibly(10, $cancellation, 10);
-    }
 }
