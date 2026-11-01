@@ -56,13 +56,11 @@ final readonly class RetryMiddleware implements GrpcMiddleware
             if (!$decision->retry) {
                 return $result;
             }
-            if (!$this->delayFitsDeadline($request, $startedAt, $decision->delayMs)) {
-                return $this->deadlineExceeded($attempt);
+            $failure = $this->retryWaitFailure($request, $startedAt, $decision->delayMs, $attempt);
+            if ($failure !== null) {
+                return $failure;
             }
 
-            if (!$this->waitBeforeRetry($decision->delayMs)) {
-                return $this->cancelled($attempt);
-            }
             $attempt++;
         }
     }
@@ -99,6 +97,22 @@ final readonly class RetryMiddleware implements GrpcMiddleware
         }
 
         return ($this->clock->monotonic() - $startedAt) + ($delayMs / 1000) < $request->deadlineSeconds;
+    }
+
+    private function retryWaitFailure(
+        GrpcRequest $request,
+        float $startedAt,
+        int $delayMs,
+        int $attempt,
+    ): ?CommunicationResult {
+        if (!$this->delayFitsDeadline($request, $startedAt, $delayMs)) {
+            return $this->deadlineExceeded($attempt);
+        }
+        if (!$this->waitBeforeRetry($delayMs)) {
+            return $this->cancelled($attempt);
+        }
+
+        return null;
     }
 
     private function waitBeforeRetry(int $delayMs): bool
