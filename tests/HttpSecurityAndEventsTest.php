@@ -38,6 +38,30 @@ it('redacts sensitive http headers and query parameters', function (): void {
     expect($url)->toContain('page=2');
 });
 
+
+it('rejects malformed explicit HTTP host and private-network policies rather than disabling protection', function (): void {
+    $invalid = [
+        ['security_allow_hosts' => 'api.example.test'],
+        ['security_allow_hosts' => ['api.example.test', null]],
+        ['security_allow_hosts' => ['']],
+        ['security_block_hosts' => false],
+        ['security_block_hosts' => ['example.test', 123]],
+        ['security_block_hosts' => ['example.test/path']],
+        ['security_block_private_networks' => 'false'],
+        ['security_block_private_networks' => 1],
+    ];
+
+    foreach ($invalid as $metadata) {
+        $request = HttpRequest::get('https://example.test')->metadata($metadata);
+        expect(fn() => RequestSecurityGuard::assertAllowed($request))
+            ->toThrow(InvalidArgumentException::class);
+    }
+
+    expect(fn() => RequestSecurityGuard::assertAllowed(
+        HttpRequest::get('https://example.test')->allowHosts([])->blockHosts([])->blockPrivateNetworks(false),
+    ))->not->toThrow(InvalidArgumentException::class);
+});
+
 it('enforces host allow and block lists before sending request', function (): void {
     $transport = new CurlTransport();
 
