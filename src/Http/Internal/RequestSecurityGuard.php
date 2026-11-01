@@ -18,16 +18,7 @@ final class RequestSecurityGuard
         }
         $host = self::normalizeHost($host);
 
-        $thisPolicy = $request->metadata;
-        foreach (['security_allow_hosts', 'security_block_hosts'] as $key) {
-            if (array_key_exists($key, $thisPolicy) && !is_array($thisPolicy[$key])) {
-                throw new InvalidArgumentException(sprintf('HTTP %s must be an array of host names.', $key));
-            }
-        }
-        if (array_key_exists('security_block_private_networks', $thisPolicy)
-            && !is_bool($thisPolicy['security_block_private_networks'])) {
-            throw new InvalidArgumentException('HTTP security_block_private_networks must be a boolean.');
-        }
+        $thisPolicy = self::validatedSecurityPolicy($request->metadata);
 
         $allowHosts = self::normalizeHosts($thisPolicy['security_allow_hosts'] ?? []);
         if ($allowHosts !== [] && !in_array(strtolower($host), $allowHosts, true)) {
@@ -96,6 +87,25 @@ final class RequestSecurityGuard
             $port,
             implode(',', array_map(self::formatResolveAddress(...), $addresses)),
         );
+    }
+
+    /**
+     * @param array<string, mixed> $policy
+     * @return array<string, mixed>
+     */
+    private static function validatedSecurityPolicy(array $policy): array
+    {
+        foreach (['security_allow_hosts', 'security_block_hosts'] as $key) {
+            if (array_key_exists($key, $policy) && !is_array($policy[$key])) {
+                throw new InvalidArgumentException(sprintf('HTTP %s must be an array of host names.', $key));
+            }
+        }
+        if (array_key_exists('security_block_private_networks', $policy)
+            && !is_bool($policy['security_block_private_networks'])) {
+            throw new InvalidArgumentException('HTTP security_block_private_networks must be a boolean.');
+        }
+
+        return $policy;
     }
 
     private static function formatResolveAddress(string $address): string
