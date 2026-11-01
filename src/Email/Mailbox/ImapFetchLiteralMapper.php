@@ -38,22 +38,17 @@ final readonly class ImapFetchLiteralMapper
     {
         $cursor = 0;
         foreach ($response->lines as $line) {
-            $literalCount = preg_match_all('/\{(\d+)\}/', $line);
-            $hasLiteral = is_int($literalCount) && $literalCount > 0;
-
-            if (preg_match('/^\*\s+\d+\s+FETCH\s+\(/i', $line) !== 1) {
-                if ($hasLiteral) {
-                    $cursor += $literalCount;
-                }
-
+            $literalCount = preg_match_all('/\\{(\\d+)\\}/', $line);
+            if (!is_int($literalCount) || $literalCount === 0) {
                 continue;
             }
 
-            if ($hasLiteral && array_key_exists($cursor, $response->literals)) {
+            if (preg_match('/^\\*\\s+\\d+\\s+FETCH\\s+\\(/i', $line) === 1
+                && array_key_exists($cursor, $response->literals)) {
                 return $response->literals[$cursor];
             }
 
-            $cursor += $hasLiteral ? $literalCount : 0;
+            $cursor += $literalCount;
         }
 
         return $response->literals !== [] ? $response->literals[0] : '';
