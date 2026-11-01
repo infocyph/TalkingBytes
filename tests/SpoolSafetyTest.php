@@ -94,6 +94,48 @@ it('does not read a swapped-in symlink between spool discovery and file admissio
     }
 });
 
+it('publishes spool messages across filesystems without clobbering an existing destination', function (): void {
+    $sourceRoot = sys_get_temp_dir().'/tb-cross-source-'.bin2hex(random_bytes(6));
+    $destinationRoot = '/dev/shm/tb-cross-destination-'.bin2hex(random_bytes(6));
+    if (!is_dir('/dev/shm') || !is_writable('/dev/shm')) {
+        return;
+    }
+
+    mkdir($sourceRoot, 0700);
+    mkdir($destinationRoot, 0700);
+    try {
+        $sourceState = stat($sourceRoot);
+        $destinationState = stat($destinationRoot);
+        if (!is_array($sourceState) || !is_array($destinationState)
+            || $sourceState['dev'] === $destinationState['dev']) {
+            return;
+        }
+
+        $first = spoolSafetyMessage('cross filesystem');
+        $existing = spoolSafetyMessage('already published');
+        file_put_contents($sourceRoot.'/queued.eml', $first);
+        file_put_contents($destinationRoot.'/queued.eml', $existing);
+
+        $received = (new SpoolEmailReceiver(
+            new SpoolConfig($sourceRoot),
+            moveAfterRead: $destinationRoot,
+        ))->receiveParsed();
+
+        $files = glob($destinationRoot.'/*.eml') ?: [];
+        expect($received?->subject)->toBe('cross filesystem')
+            ->and(file_get_contents($destinationRoot.'/queued.eml'))->toBe($existing)
+            ->and($files)->toHaveCount(2)
+            ->and(file_exists($sourceRoot.'/queued.eml'))->toBeFalse();
+
+        $published = array_values(array_filter($files, static fn(string $path): bool => basename($path) !== 'queued.eml'));
+        expect($published)->toHaveCount(1)
+            ->and(file_get_contents($published[0]))->toBe($first);
+    } finally {
+        spoolSafetyRemove($sourceRoot);
+        spoolSafetyRemove($destinationRoot);
+    }
+});
+
 it('claims a spool file for only one process and preserves a crashed worker claim', function (): void {
     $root = sys_get_temp_dir().'/tb-workers-'.bin2hex(random_bytes(6));
     $source = $root.'/inbox';
