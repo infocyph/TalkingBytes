@@ -1,0 +1,37 @@
+name: Temporary Pint normalization
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  normalize:
+    if: github.head_ref == 'patch/runwire-3' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 1
+          persist-credentials: true
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+          tools: composer:v2
+      - name: Apply repository Pint configuration once per source revision
+        run: |
+          set -euo pipefail
+          if [ "$(git log -1 --pretty=%s)" = "style: automated Pint normalization" ]; then
+            echo "Already normalized"
+            exit 0
+          fi
+          composer install --no-interaction --prefer-dist --no-progress
+          vendor/bin/pint --config=vendor/infocyph/phpforge/resources/pint.json
+          git add -- src performance
+          if ! git diff --cached --quiet; then
+            git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -m "style: automated Pint normalization"
+            git push origin HEAD:patch/runwire-3
+          fi
