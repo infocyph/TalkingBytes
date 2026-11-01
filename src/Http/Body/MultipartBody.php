@@ -122,30 +122,7 @@ final readonly class MultipartBody implements HttpBody
         try {
             foreach ($this->parts as $part) {
                 $key = self::nextPartKey($payload, $part['name']);
-                if ($part['type'] === 'field' || $part['type'] === 'data') {
-                    $value = $part['value'] ?? '';
-                    $contentBytes += strlen($value);
-                    $payload[$key] = $part['type'] === 'field'
-                        ? $value
-                        : new CURLStringFile($value, $part['filename'] ?? 'upload', $part['mimeType'] ?? 'application/octet-stream');
-
-                    continue;
-                }
-                if ($part['type'] === 'file') {
-                    $path = $part['path'] ?? '';
-                    $size = filesize($path);
-                    if (!is_int($size)) {
-                        throw new InvalidArgumentException(sprintf('Unable to determine multipart file size: %s', $path));
-                    }
-                    $contentBytes += $size;
-                    $payload[$key] = new CURLFile($path, $part['mimeType'] ?? '', $part['filename'] ?? 'upload');
-
-                    continue;
-                }
-
-                $path = $this->spoolStreamPart($part, $maxUploadBytes, $contentBytes);
-                $temporaryPaths[] = $path;
-                $payload[$key] = new CURLFile($path, $part['mimeType'] ?? '', $part['filename'] ?? 'upload');
+                $payload[$key] = $this->preparedPart($part, $maxUploadBytes, $contentBytes, $temporaryPaths);
             }
 
             if ($maxUploadBytes !== null && $contentBytes > $maxUploadBytes) {
@@ -158,6 +135,42 @@ final readonly class MultipartBody implements HttpBody
 
             throw $throwable;
         }
+    }
+
+    /**
+     * @param array{name: string, type: 'field'|'file'|'data'|'stream', value?: string, path?: string, stream?: resource, offset?: int, knownSize?: ?int, filename?: string, mimeType?: string} $part
+     * @param list<string> $temporaryPaths
+     */
+    private function preparedPart(
+        array $part,
+        ?int $maxUploadBytes,
+        int &$contentBytes,
+        array &$temporaryPaths,
+    ): string|CURLFile|CURLStringFile {
+        if ($part['type'] === 'field' || $part['type'] === 'data') {
+            $value = $part['value'] ?? '';
+            $contentBytes += strlen($value);
+
+            return $part['type'] === 'field'
+                ? $value
+                : new CURLStringFile($value, $part['filename'] ?? 'upload', $part['mimeType'] ?? 'application/octet-stream');
+        }
+
+        if ($part['type'] === 'file') {
+            $path = $part['path'] ?? '';
+            $size = filesize($path);
+            if (!is_int($size)) {
+                throw new InvalidArgumentException(sprintf('Unable to determine multipart file size: %s', $path));
+            }
+            $contentBytes += $size;
+
+            return new CURLFile($path, $part['mimeType'] ?? '', $part['filename'] ?? 'upload');
+        }
+
+        $path = $this->spoolStreamPart($part, $maxUploadBytes, $contentBytes);
+        $temporaryPaths[] = $path;
+
+        return new CURLFile($path, $part['mimeType'] ?? '', $part['filename'] ?? 'upload');
     }
 
     /** @return array<string, string|CURLFile|CURLStringFile> */
