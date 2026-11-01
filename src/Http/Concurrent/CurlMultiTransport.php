@@ -538,13 +538,14 @@ final readonly class CurlMultiTransport
         $prepared = $request->prepareForTransport();
 
         try {
-            RequestSecurityGuard::assertAllowed($prepared);
+            // pinnedResolution() validates the destination, including host policy,
+            // before returning any strict DNS pin. Do not repeat that admission.
+            $pinnedResolution = RequestSecurityGuard::pinnedResolution($prepared, $prepared->buildUrl());
             if ($prepared->options->followRedirects) {
                 throw new InvalidArgumentException(
                     'Concurrent HTTP requests do not follow redirects; use CurlTransport for manually validated redirect chains.',
                 );
             }
-            $pinnedResolution = RequestSecurityGuard::pinnedResolution($prepared, $prepared->buildUrl());
         } catch (InvalidArgumentException $exception) {
             UploadHandleManager::cleanup($prepared);
             $results[$index] = CommunicationResult::failure(
