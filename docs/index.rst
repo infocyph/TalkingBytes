@@ -43,3 +43,4 @@ It provides:
    release-checklist
    release-notes-2.2
    release-notes-2.3
+   release-notes-2.3.1

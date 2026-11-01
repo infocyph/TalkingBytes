@@ -1,6 +1,29 @@
 # TalkingBytes 2.3.1 audit and release plan
 
-Audit date: 2026-11-01 (Asia/Dhaka). Baseline: `1096b05c143db1167a69fb1ea78ab1ece99f4004` (local `2.3` tag). Status: Runwire upgrade, package repair, processor review and audit complete; release blocked by the existing PHPStan findings and outstanding final-candidate acceptance. Broader source remediation below is planned, not implemented by this audit.
+Audit date: 2026-11-01 (Asia/Dhaka). Baseline: `1096b05c143db1167a69fb1ea78ab1ece99f4004` (the `2.3` tag). Status: R1/R2/R6/R8 remediation has passed hosted certification on `7eb3f84c`; subsequent R5/R7 safety regression coverage and documentation updates require the final HEAD matrix to be green. The original audit measurements below are historical and are **not** current blockers.
+
+## Release-candidate verification and remaining sign-off
+
+The [PR #18](https://github.com/infocyph/TalkingBytes/pull/18) is maintained on `patch/runwire-3`, targeting `main`; merge, tag and publication are reserved for manual review. The first fully green PR workflow is [run 41289626142](https://github.com/infocyph/TalkingBytes/actions/runs/41289626142) on `7eb3f84c13669daeafc0e9aa303ffb0d2a695164`. It includes **471 passing tests / 2,501 assertions**, zero PHPStan findings, passing PHP 8.4/8.5 stable and lowest dependency lanes, Pint, reference/duplicate/architecture checks, release acceptance, optional Runwire present/absent, native gRPC, Mailpit, documentation, clean installation, and sustained performance.
+
+The same-runner benchmark at that SHA compared tag `2.2` (`ed7873c033498132a169b792e63f601aef98d1ca`) against unbound 2.3.1: c5 **-0.46%**, c20 **-1.41%**, c50 **-0.46%** relative RPM. All are within the unchanged **2%** budget; zero errors/timeouts. Bound Runwire throughput is characterized separately, not treated as a historical Runwire baseline. [Performance artifact from that run](https://github.com/infocyph/TalkingBytes/actions/runs/41289626142/artifacts/13076901215).
+
+Changes made **after** that successful revision: file-identity verification on spool reads; no-clobber restoration of claimed messages; deterministic same-filesystem collision, cross-filesystem publication (when a distinct mounted filesystem is available), symlink-substitution, two-worker and crash-retention tests; and a second closed-scope Runwire regression. A new complete hosted matrix must certify the **exact final committed SHA** before this PR is marked ready for manual review. Earlier successful jobs alone cannot certify subsequent commits.
+
+| Finding | Disposition |
+| --- | --- |
+| R1 — baseline 33 complexity failures | **Resolved** by cohesive refactoring; no rule/baseline changes; green PHPStan on `7eb3f84c` |
+| R2 — Composer archive leakage | **Resolved** by tracked export exclusions and isolated archive consumers; clean-install job green |
+| R3 — duplicate ownership | **Maintained at passing policy**; consolidated signed-upload ownership, native gRPC metadata, HTTP multi waits, IMAP response reading and spool publication; retain protocol-specific rules where merging would be misleading. Remaining structural similarity is non-blocking unless a functional defect is reproduced |
+| R4 — exact SHA CI | **Green on `7eb3f84c`; final revision pending** |
+| R5 — closed Runwire scope | **Documented host lifecycle contract** and explicit before-/after-binding failure regressions; no unsupported `isClosed()` API or silent blocking fallback |
+| R6 — malformed HTTP policy metadata | **Resolved** by type/host validation and adversarial tests |
+| R7 — spool collision/data integrity | **Remediated**, with exclusive publication, no-clobber restore, opened-file identity validation, and multi-process regression coverage; final matrix pending |
+| R8 — audit provenance/branch QA | **Resolved**; historical plan restored and PR CI available |
+
+Production-facing boundaries remain explicit: Runwire does not expose a public closed-scope admission predicate; a closed borrowed scope is detected at the next cooperative operation. Cross-filesystem durability and crash recovery depend on the deployment filesystem and operator policy: a crashed worker's claimed message remains for explicit recovery. Linux advisory locks assume all cooperating consumers use the library and the spool directory is trusted.
+
+## Original audit: findings, engineering boundaries, and provenance
 
 ## Decision and engineering constraints
 
@@ -25,7 +48,7 @@ This is the current release tracker. The [2.3 plan](talkingbytes-2.3-audit-and-r
 
 ## Findings and required work
 
-### R1 — Current static-analysis gate fails (release blocker)
+### R1 — Initial static-analysis gate failed (remediated in PR #18)
 
 The active PHPStan extension measures cognitive complexity with class maximum 80 and function maximum 12. These are existing baseline violations, not Runwire 3.0 API/type errors. Fix the underlying branching/cohesion while preserving behavior. Keep classes below the aggregate limit; moving branches between private methods alone does not reduce class complexity.
 
@@ -74,7 +97,7 @@ Add explicit export exclusions for `graphify-out`, PHPForge knowledge output, bu
 
 Triage all 18 reported clone groups. Prioritize repeated Runwire binding policy across six factories/pools, pool execution/cleanup paths, multipart/attachment/upload stream checks, repeated configuration decoding, and mailbox read/deadline paths. Centralize equivalent logic in an existing cohesive owner and update affected callers together. Preserve independently meaningful protocol rules, public exceptions, stream offsets and cancellation/resource semantics; do not merge unrelated validators just because token structure matches. Import/declaration-only matches should be recorded as structural similarity, not used to justify artificial abstractions. Do not suppress groups or add a generic helper layer solely to improve a duplication ratio.
 
-### R4 — Final revision needs independent release certification
+### R4 — Final revision needs independent release certification (initial audit finding)
 
 Any earlier 2.3 green run validates only its own commit. The changed working tree has no exact-final-SHA CI evidence yet. Complete PHP 8.4/8.5, normal/lowest dependency resolution, clean production installation, Runwire present/absent, optional-extension coldness, Mailpit, native gRPC, documentation and sustained-performance jobs on the final committed candidate. Keep merge/tag/publication user-owned.
 
@@ -120,16 +143,16 @@ The new source findings above are **review observations requiring tests**, not c
 - [x] Verify published Runwire 3.0, install `^3.0`, update supported integration documentation/suggestion, and rerun the full host suite.
 - [x] Run required `composer ic:process`; review its complete diff, including the existing Rector finding. Host execution passes; only `WebhookSender::cancelledResult()` changes from a null-check ternary to null coalescing. Restricted Rector initially could not bind its worker TCP server.
 - [x] Verify archive exclusions, complete runtime source parity, isolated `--no-dev` consumers, and optional Runwire 3.0 composition.
-- [ ] Resolve R7 spool destination collision safety and file-admission races; retain real multi-process evidence.
-- [ ] Reproduce and resolve R6 fail-open policy metadata and R5 closed-scope behavior with real Runwire 3.0.
-- [ ] Preserve the historical 2.3 audit reference, then confirm R8 branch-head PR/check coverage.
-- [ ] Resolve R1 and semantically applicable R3 findings in the batches above.
-- [ ] After remediation, obtain passing `composer ic:tests:details`, `composer ic:release:guard` and `composer ic:ci` results; every required detector must pass at its original level/scope/limits. Current final-check outcomes are recorded below.
+- [x] Implement R7 no-clobber spool publication and restoration; add deterministic file-replacement, symlink, concurrent-worker and crash-retention regressions (final CI pending).
+- [x] Resolve R6 fail-open HTTP policy metadata and cover R5 closed borrowed Runwire scopes without unsupported lifecycle introspection (final CI pending).
+- [x] Restore historical 2.3 audit, open PR #18, and verify a complete hosted run on the committed branch.
+- [x] Resolve R1 at the original PHPForge limits; reduce shared ownership hotspots without merging semantically distinct protocol validators. Duplicate detector remains green.
+- [x] Obtain passing hosted release-acceptance/QA and static analysis on `7eb3f84c`; rerun all checks after the final safety/documentation commit.
 - [x] Build docs using the pinned requirements and warnings as errors. `UV_CACHE_DIR=/tmp/tb-uv-cache uv run --with-requirements docs/requirements.txt sphinx-build -W --keep-going -b html docs /tmp/tb-docs` passes.
 - [x] Run component benchmark smoke: `composer ic:bench:quick` passes **38 subjects, zero failures/errors**. This is not proof of sustained application RPM.
-- [ ] Run matched same-runner sustained HTTP baseline/unbound/bound measurements at c5/c20/c50 using the existing harness and unchanged 2% budget. Current harness uses three trials, one-second warmup and five-second measured windows. Retain JSON, exact revisions and any reversed-order confirmation. Characterize Runwire-bound throughput separately; no comparable Runwire baseline exists in 2.2.
-- [ ] Confirm repeated graph/request cleanup and a representative sustained worker soak; the existing 250-iteration/100-bound-request lifetime tests are bounded regression evidence, not long-duration deployment certification.
-- [ ] Commit the candidate, run its complete hosted matrix and retain artifacts; update release notes with verified final behavior and evidence, then leave tagging/publication to the maintainer.
+- [x] Pass same-runner c5/c20/c50 against tag `2.2` on `7eb3f84c` with the unchanged 2% budget and retained CI artifact; repeat for the exact final commit.
+- [x] Verify repeated graph/request cleanup and worker-oriented regressions in the hosted suite; longer deployment soaks remain the integrator's responsibility, not a claim of CI certification.
+- [ ] Finalize release notes, run the complete hosted matrix on the **last** SHA, attach checks/artifacts to PR #18, mark ready for manual review; do not merge/tag/publish.
 
 ## Optional improvements, separate from required fixes
 
@@ -142,7 +165,7 @@ The new source findings above are **review observations requiring tests**, not c
 
 Local logs are temporary: `/tmp/tb-baseline-details.log`, `/tmp/tb-baseline-host-code.log`, `/tmp/tb-runwire-update.log`, `/tmp/tb-runwire3-host-code.log`, `/tmp/tb-baseline-phpstan.log`, `/tmp/tb-archive-before-files.log`, `/tmp/tb-final-details.log`, `/tmp/tb-final-guard.log`, `/tmp/tb-process-host.log`, `/tmp/tb-bench-quick.log`, `/tmp/tb-docs.log`, and `/tmp/tb-consumer-bound-install.log`. Retain equivalent CI artifacts for release review; do not depend on `/tmp` as durable release evidence.
 
-### Final local verification
+### Historical local verification at the start of the audit
 
 | Check | Outcome |
 | --- | --- |
@@ -156,4 +179,4 @@ Local logs are temporary: `/tmp/tb-baseline-details.log`, `/tmp/tb-baseline-host
 | Git whitespace validation | `git diff --check` passes. |
 | Final-candidate hosted matrix / sustained throughput / long soak | Open. No final candidate was committed, pushed, tagged or published by this audit. Host PHP 8.4 is unavailable; native-gRPC/Mailpit/minimal-extension evidence described above belongs to the baseline hosted run. |
 
-The audit deliverable and requested dependency bump are complete. R1, applicable R3, and new R5–R8 verification/remediation remain planned work; **2.3.1 is recommended, not release-ready**. Production changes in this audit are limited to the Rector metadata expression; dependency metadata, integration documentation and archive exclusions are separate changes.
+The preceding evidence describes the **initial audit before PR #18 implementation**. Refer to the release-candidate verification section at the top for the current remediation and final-SHA acceptance state; no release has been tagged, merged or published.

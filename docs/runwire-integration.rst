@@ -96,7 +96,7 @@ asynchronous.
 Operations that remain blocking
 -------------------------------
 
-The following work remains blocking in 2.3 even when Runwire is bound:
+The following work remains blocking in this implementation even when Runwire is bound:
 
 - DNS resolution and TCP connection establishment
 - TLS handshakes for SMTP, IMAP, and POP3
