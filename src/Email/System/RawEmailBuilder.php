@@ -39,35 +39,8 @@ final readonly class RawEmailBuilder
             throw new \RuntimeException('Unable to open temporary stream for raw email body.');
         }
 
-        $bodySizeBytes = 0;
-        $normalizer = new LineEndingNormalizer();
-
         try {
-            $mimeMessage = $this->mimeMessageBuilder->buildToStream(
-                $message,
-                function (string $chunk) use (&$bodySizeBytes, $bodyStream, $normalizer): void {
-                    $normalizedChunk = $normalizer->push($chunk);
-                    if ($normalizedChunk === '') {
-                        return;
-                    }
-
-                    $written = fwrite($bodyStream, $normalizedChunk);
-                    if ($written === false || $written !== strlen($normalizedChunk)) {
-                        throw new \RuntimeException('Unable to write temporary raw email body chunk.');
-                    }
-
-                    $bodySizeBytes += $written;
-                },
-            );
-            $finalChunk = $normalizer->finish();
-            if ($finalChunk !== '') {
-                $written = fwrite($bodyStream, $finalChunk);
-                if ($written === false || $written !== strlen($finalChunk)) {
-                    throw new \RuntimeException('Unable to finish raw email line normalization.');
-                }
-                $bodySizeBytes += $written;
-            }
-            $headers = $this->normalizeLineEndings($this->headerBuilder->build($message, $mimeMessage, $includeSubject));
+            $headers = $this->writeNormalizedMimeBody($message, $bodyStream, $includeSubject);
         } catch (\Throwable $exception) {
             fclose($bodyStream);
 
@@ -121,6 +94,38 @@ final readonly class RawEmailBuilder
             'containsNonAscii' => $containsNonAscii,
             'messageId' => $this->headerBuilder->resolveMessageId($message),
         ];
+    }
+
+    /**
+     * @param resource $bodyStream
+     */
+    private function writeNormalizedMimeBody(EmailMessage $message, mixed $bodyStream, bool $includeSubject): string
+    {
+        $normalizer = new LineEndingNormalizer();
+        $mimeMessage = $this->mimeMessageBuilder->buildToStream(
+            $message,
+            static function (string $chunk) use ($bodyStream, $normalizer): void {
+                $normalized = $normalizer->push($chunk);
+                if ($normalized === '') {
+                    return;
+                }
+
+                $written = fwrite($bodyStream, $normalized);
+                if ($written === false || $written !== strlen($normalized)) {
+                    throw new \RuntimeException('Unable to write temporary raw email body chunk.');
+                }
+            },
+        );
+
+        $finalChunk = $normalizer->finish();
+        if ($finalChunk !== '') {
+            $written = fwrite($bodyStream, $finalChunk);
+            if ($written === false || $written !== strlen($finalChunk)) {
+                throw new \RuntimeException('Unable to finish raw email line normalization.');
+            }
+        }
+
+        return $this->normalizeLineEndings($this->headerBuilder->build($message, $mimeMessage, $includeSubject));
     }
 
     private function normalizeLineEndings(string $value): string
