@@ -33,14 +33,10 @@ final class RetryExecutor
             try {
                 $result = $attempt();
             } catch (Throwable $throwable) {
-                $decision = $policy->decide(new RetryContext($count, error: $throwable));
-                if (!$decision->retry) {
-                    throw $throwable;
-                }
-
-                $failure = self::retryWaitFailure(
+                $failure = self::handleRetryException(
+                    $policy,
+                    $throwable,
                     $sleeper,
-                    $decision->delayMs,
                     $cancellation,
                     $deadline,
                     $count,
@@ -72,6 +68,22 @@ final class RetryExecutor
 
             $count++;
         }
+    }
+
+    private static function handleRetryException(
+        RetryPolicy $policy,
+        Throwable $throwable,
+        Sleeper $sleeper,
+        ?CancellationSignal $cancellation,
+        ?OperationDeadline $deadline,
+        int $attempt,
+    ): ?CommunicationResult {
+        $decision = $policy->decide(new RetryContext($attempt, error: $throwable));
+        if (!$decision->retry) {
+            throw $throwable;
+        }
+
+        return self::retryWaitFailure($sleeper, $decision->delayMs, $cancellation, $deadline, $attempt);
     }
 
     /**
