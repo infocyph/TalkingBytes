@@ -38,6 +38,10 @@ Correctness and security
   IMAP response reading, gRPC native metadata, retry, parsing and
   stream-boundary checks have been consolidated without broadening public
   protocol APIs or weakening validation.
+- Base64 MIME decoding keeps per-quartet validation in the hot loop to avoid
+  helper-call overhead. Whitespace, padding, partial-quartet behavior and
+  decoded-byte limits are preserved, with focused boundary tests and an
+  inbound attachment parsing benchmark.
 
 Compatibility and limitations
 -----------------------------
@@ -73,7 +77,8 @@ the pre-optimization revision exceeded the 2% limit; redundant HTTP
 destination admission was removed while retaining the guard in DNS pinning.
 The successful c50 result is near the limit and should not be represented
 as a universal throughput gain. A final HEAD check is required after
-the release-evidence documentation update. See the maintained
-`2.3.1 audit and release plan <https://github.com/infocyph/TalkingBytes/blob/patch/runwire-3/plans/talkingbytes-2.3.1-audit.md>`_
-for tracked evidence and limitations. Do not tag or merge before the final
-candidate has been certified and manually reviewed.
+the MIME decoder correction and release cleanup. See :doc:`performance` for
+the matched inbound parsing results and
+`PR #18 checks <https://github.com/infocyph/TalkingBytes/pull/18/checks>`_
+for final-candidate acceptance. Do not tag or merge before the final candidate
+has been certified and manually reviewed.

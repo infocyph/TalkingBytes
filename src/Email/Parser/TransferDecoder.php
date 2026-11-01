@@ -48,9 +48,16 @@ final class TransferDecoder
                 continue;
             }
 
-            $decoded .= $this->decodeQuartet($quartet);
+            // Keep per-quartet validation local; helper dispatch lowers MIME parsing throughput.
+            $chunk = base64_decode($quartet, true);
+            if ($chunk === false) {
+                throw new EmailParseException('MIME body contains invalid base64 data.');
+            }
+            $decoded .= $chunk;
             $quartet = '';
-            $this->assertDecodedLimit($decoded, $maxDecodedBytes);
+            if ($maxDecodedBytes !== null && strlen($decoded) > $maxDecodedBytes) {
+                throw new EmailParseException(sprintf('Decoded MIME body exceeds limit (%d bytes).', $maxDecodedBytes));
+            }
         }
 
         if ($quartet !== '') {
